@@ -35,6 +35,7 @@ import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import java.util.concurrent.atomic.AtomicBoolean
 import java.util.concurrent.atomic.AtomicLong
 import kotlin.random.Random
 
@@ -133,6 +134,8 @@ class BluetoothKeyboardManager(private val context: Context) {
 
     private val _numLockState = MutableStateFlow(true)
     val numLockState: StateFlow<Boolean> = _numLockState
+    // Set while a Num Lock press we sent waits for the host's LED report, so taps don't toggle it twice.
+    private val numLockTogglePending = AtomicBoolean(false)
 
     private val _scrollLockState = MutableStateFlow(false)
     val scrollLockState: StateFlow<Boolean> = _scrollLockState
@@ -1309,6 +1312,7 @@ class BluetoothKeyboardManager(private val context: Context) {
                 data[0].toInt()
             }
             _numLockState.value = (ledByte and 0x01) != 0
+            numLockTogglePending.set(false)
             _capsLockState.value = (ledByte and 0x02) != 0
             _scrollLockState.value = (ledByte and 0x04) != 0
             Log.d("BluetoothKeyboard", "Received LED report: byte=$ledByte, caps=${_capsLockState.value}, num=${_numLockState.value}, scroll=${_scrollLockState.value}")
@@ -1700,6 +1704,21 @@ class BluetoothKeyboardManager(private val context: Context) {
             activeModifiers = 0
             activeKeys.fill(0)
         }
+        numLockTogglePending.set(false)
+    }
+
+    /** Press or release a numpad key. A keypad digit first turns on the host's Num Lock if it is off. */
+    fun sendNumpadKey(legend: String, isPress: Boolean) {
+        val stroke = numpadStroke(legend) ?: return
+        if (isPress && stroke.needsNumLock && !_numLockState.value &&
+            numLockTogglePending.compareAndSet(false, true)
+        ) {
+            sendKey(KEY_NUM_LOCK, true)
+            sendKey(KEY_NUM_LOCK, false)
+        }
+        if (isPress && stroke.shift) sendKey(KEY_LEFT_SHIFT, true)
+        sendKey(stroke.keyCode, isPress)
+        if (!isPress && stroke.shift) sendKey(KEY_LEFT_SHIFT, false)
     }
 
     /** Release input without tearing down the Bluetooth session when its UI leaves foreground. */

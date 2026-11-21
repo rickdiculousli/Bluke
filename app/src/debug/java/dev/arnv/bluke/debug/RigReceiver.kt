@@ -12,6 +12,7 @@ import dev.arnv.bluke.bluetooth.CURRENT_HID_DESCRIPTOR_REVISION
 import dev.arnv.bluke.bluetooth.ConsumerControl
 import dev.arnv.bluke.bluetooth.HID_DESCRIPTOR_REVISION_PREFERENCE
 import dev.arnv.bluke.bluetooth.GamepadDpadOutputMode
+import dev.arnv.bluke.bluetooth.numpadStroke
 import org.json.JSONObject
 
 /**
@@ -63,6 +64,15 @@ class RigReceiver : BroadcastReceiver() {
             "key" -> {
                 manager.sendKey(intent.getIntExtra("code", 0), intent.getBooleanExtra("press", true))
                 result.put("ok", true)
+            }
+            "numpad" -> {
+                val legend = intent.getStringExtra("legend") ?: ""
+                if (numpadStroke(legend) != null) {
+                    manager.sendNumpadKey(legend, intent.getBooleanExtra("press", true))
+                    result.put("ok", true)
+                } else {
+                    result.put("ok", false).put("error", "no numpad key $legend")
+                }
             }
             "mouse" -> {
                 manager.sendMouseReport(

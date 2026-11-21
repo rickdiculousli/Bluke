@@ -104,15 +104,10 @@ fun TouchpadView(
         }
     }
 
-    // Capture standard top-row numeric inputs for keyboard emulation
-    val simulateKeyPress = { keyCode: Int, isPress: Boolean ->
+    val sendNumpadKey = { legend: String, isPress: Boolean ->
         scope.launch {
-            if (isPress) {
-                triggerVibration(15)
-                btManager.sendKey(keyCode, true)
-            } else {
-                btManager.sendKey(keyCode, false)
-            }
+            if (isPress) triggerVibration(15)
+            btManager.sendNumpadKey(legend, isPress)
         }
         Unit
     }
@@ -488,7 +483,7 @@ fun TouchpadView(
                                     .fillMaxHeight(if (buttonMode != TrackpadButtonMode.CLICKPAD) 0.82f else 1f)
                                     .padding(12.dp)
                             ) {
-                                NumpadLedGrid(onKeyPress = simulateKeyPress)
+                                NumpadLedGrid(onKeyPress = sendNumpadKey)
                             }
                     }
                 }
@@ -580,32 +575,7 @@ private fun MechanicalModifierKey(
 }
 
 @Composable
-fun NumpadLedGrid(onKeyPress: (Int, Boolean) -> Unit) {
-    val getKeyCode: (String) -> Int = { char ->
-        when (char) {
-            "1" -> 0x1E
-            "2" -> 0x1F
-            "3" -> 0x20
-            "4" -> 0x21
-            "5" -> 0x22
-            "6" -> 0x23
-            "7" -> 0x24
-            "8" -> 0x25
-            "9" -> 0x26
-            "0" -> 0x27
-            "." -> 0x37
-            "/" -> 0x38
-            "*" -> 0x25
-            "-" -> 0x2D
-            "+" -> 0x2E
-            "⌫" -> 0x2A
-            "Enter" -> 0x28
-            "%" -> 0x22
-            "=" -> 0x2E
-            else -> 0x2C
-        }
-    }
-
+fun NumpadLedGrid(onKeyPress: (String, Boolean) -> Unit) {
     Box(modifier = Modifier.fillMaxSize()) {
         Row(
             modifier = Modifier
@@ -637,10 +607,10 @@ fun NumpadLedGrid(onKeyPress: (Int, Boolean) -> Unit) {
                                     detectTapGestures(
                                         onPress = {
                                             isPressed = true
-                                            onKeyPress(getKeyCode(char), true)
+                                            onKeyPress(char, true)
                                             tryAwaitRelease()
                                             isPressed = false
-                                            onKeyPress(getKeyCode(char), false)
+                                            onKeyPress(char, false)
                                         }
                                     )
                                 },
@@ -681,10 +651,10 @@ fun NumpadLedGrid(onKeyPress: (Int, Boolean) -> Unit) {
                                 detectTapGestures(
                                     onPress = {
                                         isPressed = true
-                                        onKeyPress(getKeyCode(char), true)
+                                        onKeyPress(char, true)
                                         tryAwaitRelease()
                                         isPressed = false
-                                        onKeyPress(getKeyCode(char), false)
+                                        onKeyPress(char, false)
                                     }
                                 )
                             },

@@ -15,6 +15,7 @@ import asyncio
 import json
 import os
 import re
+import shlex
 import subprocess
 import sys
 
@@ -50,7 +51,8 @@ class App:
                 "-p", PACKAGE, "--es", "cmd", name]
         for key, value in extras.items():
             flag = {bool: "--ez", int: "--ei", float: "--ef"}.get(type(value), "--es")
-            args += [flag, key, str(value).lower() if isinstance(value, bool) else str(value)]
+            # adb shell runs this through the device's shell, so quote values like "*".
+            args += [flag, key, str(value).lower() if isinstance(value, bool) else shlex.quote(str(value))]
         out = self._run(*args)
         match = re.search(r'data="(.*)"\s*$', out.strip(), re.S)
         if not match:
@@ -232,6 +234,34 @@ async def check_leds(app: App, host: Host) -> None:
     await wait_state(app, lambda s: s["numLock"] and not s["capsLock"], "Num Lock from the host")
 
 
+async def check_numpad(app: App, host: Host) -> None:
+    host.hid.send_data(bytes([0x01, 0x00]))  # host's Num Lock off
+    await wait_state(app, lambda s: not s["numLock"], "Num Lock off from the host")
+    await call(app, "numpad", legend="1", press=True)
+    expect("num lock down", await host.next_report(1), "00 00 53 00 00 00 00 00")
+    expect("num lock up", await host.next_report(1), "00 00 00 00 00 00 00 00")
+    expect("keypad 1 down", await host.next_report(1), "00 00 59 00 00 00 00 00")
+    await call(app, "numpad", legend="1", press=False)
+    expect("keypad 1 up", await host.next_report(1), "00 00 00 00 00 00 00 00")
+    # The host hasn't confirmed Num Lock yet: a second digit must not toggle it back off.
+    await call(app, "numpad", legend="2", press=True)
+    expect("keypad 2 down", await host.next_report(1), "00 00 5a 00 00 00 00 00")
+    await call(app, "numpad", legend="2", press=False)
+    expect("keypad 2 up", await host.next_report(1), "00 00 00 00 00 00 00 00")
+    host.hid.send_data(bytes([0x01, 0x01]))  # host confirms Num Lock on
+    await wait_state(app, lambda s: s["numLock"], "Num Lock on from the host")
+    await call(app, "numpad", legend="*", press=True)
+    expect("keypad * down", await host.next_report(1), "00 00 55 00 00 00 00 00")
+    await call(app, "numpad", legend="*", press=False)
+    expect("keypad * up", await host.next_report(1), "00 00 00 00 00 00 00 00")
+    await call(app, "numpad", legend="%", press=True)
+    expect("% shift down", await host.next_report(1), "02 00 00 00 00 00 00 00")
+    expect("% down", await host.next_report(1), "02 00 22 00 00 00 00 00")
+    await call(app, "numpad", legend="%", press=False)
+    expect("% up", await host.next_report(1), "02 00 00 00 00 00 00 00")
+    expect("% shift up", await host.next_report(1), "00 00 00 00 00 00 00 00")
+
+
 async def switch_mode(app: App, host: Host, mode: str) -> None:
     await call(app, "mode", value=mode)
     await wait_state(app, lambda s: s["gamepadModeSwitch"] == "IDLE" and s["host"], f"mode {mode} to settle")
@@ -306,6 +336,7 @@ async def run(args: argparse.Namespace) -> int:
         await step("mouse reports", check_mouse(app, host))
         await step("consumer reports", check_consumer(app, host))
         await step("LED output reports", check_leds(app, host))
+        await step("numpad keys", check_numpad(app, host))
         for mode in ("native_hat", "android", "web_buttons"):
             await step(f"switch to {mode}", switch_mode(app, host, mode))
             await step(f"descriptor in {mode}", read_descriptor(mode))
