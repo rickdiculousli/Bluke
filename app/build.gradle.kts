@@ -125,3 +125,25 @@ kotlin {
   }
 }
 
+// Fast inner loop: the debug unit tests minus every class that boots Robolectric,
+// which is nearly all of the suite's time. Run testDebugUnitTest before pushing.
+val robolectricTestClasses =
+    fileTree("src/test").matching { include("**/*.kt") }.flatMap { file ->
+      val source = file.readText()
+      val pkg = Regex("""^package\s+([\w.]+)""", RegexOption.MULTILINE).find(source)
+          ?.groupValues?.get(1)?.replace('.', '/')?.plus("/") ?: ""
+      Regex("""@RunWith\(\s*RobolectricTestRunner::class\s*\)[^{]*?\bclass\s+(\w+)""")
+          .findAll(source)
+          .flatMap { sequenceOf("$pkg${it.groupValues[1]}.class", "$pkg${it.groupValues[1]}$*.class") }
+          .toList()
+    }
+
+tasks.register<Test>("fastTest") {
+  description = "Runs the debug unit tests that don't need Robolectric."
+  group = "verification"
+  val unitTest = tasks.named<Test>("testDebugUnitTest")
+  testClassesDirs = files({ unitTest.get().testClassesDirs })
+  classpath = files({ unitTest.get().classpath })
+  exclude(robolectricTestClasses)
+}
+
