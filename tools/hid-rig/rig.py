@@ -332,12 +332,29 @@ async def run(args: argparse.Namespace) -> int:
     return 1 if failed else 0
 
 
+def netsim_transport() -> str:
+    """netsimd writes netsim.ini to $TMPDIR, but Bumble on Linux looks in $XDG_RUNTIME_DIR
+    first and never falls back, so find the file and pass its gRPC port explicitly."""
+    candidates = [os.environ.get("TMPDIR"), os.environ.get("XDG_RUNTIME_DIR"), "/tmp",
+                  os.path.expanduser("~/Library/Caches/TemporaryItems")]
+    for directory in filter(None, candidates):
+        ini = os.path.join(directory, "netsim.ini")
+        if os.path.exists(ini):
+            with open(ini) as f:
+                port = re.search(r"^grpc\.port=(\d+)", f.read(), re.M)
+            if port:
+                return f"android-netsim:localhost:{port.group(1)}"
+    return "android-netsim"
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("--transport", default="android-netsim")
+    parser.add_argument("--transport", default=None, help="Bumble transport (default: the running netsim)")
     parser.add_argument("--adb", default=os.path.join(os.environ.get("ANDROID_HOME", ""), "platform-tools", "adb"))
     parser.add_argument("--serial", default=os.environ.get("ANDROID_SERIAL"))
-    sys.exit(asyncio.run(run(parser.parse_args())))
+    args = parser.parse_args()
+    args.transport = args.transport or netsim_transport()
+    sys.exit(asyncio.run(run(args)))
 
 
 if __name__ == "__main__":

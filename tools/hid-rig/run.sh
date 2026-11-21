@@ -11,6 +11,12 @@
 set -euo pipefail
 
 repo=$(cd "$(dirname "$0")/../.." && pwd)
+
+# One rig per box: concurrent runs (say, two worktrees verifying) would share the emulator.
+if command -v flock >/dev/null; then
+  exec 9>"${TMPDIR:-/tmp}/bluke-hid-rig.lock"
+  flock 9
+fi
 case "$(uname -s)" in
   Darwin) sdk_default="$HOME/Library/Android/sdk" ;;
   *) sdk_default="$HOME/Android/Sdk" ;;
