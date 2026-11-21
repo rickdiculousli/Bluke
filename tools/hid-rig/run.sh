@@ -55,6 +55,7 @@ fi
 cleanup() {
   if [[ -n "$started" && -z "${KEEP_EMULATOR:-}" ]]; then
     "$adb" emu kill >/dev/null 2>&1 || kill "$started" 2>/dev/null || true
+    wait "$started" 2>/dev/null || true  # emu kill returns early; the next run must not find it half-dead
   fi
 }
 trap cleanup EXIT
@@ -71,4 +72,9 @@ export ANDROID_SERIAL=$serial
 "$adb" install -r -g "$repo/app/build/outputs/apk/debug/app-debug.apk" >/dev/null
 
 cd "$repo/tools/hid-rig"
-GRPC_VERBOSITY=ERROR uv run --quiet python rig.py "$@" 2> >(grep -v fork_posix >&2)
+if ! GRPC_VERBOSITY=ERROR uv run --quiet python rig.py "$@" 2> >(grep -v fork_posix >&2); then
+  logcat="${TMPDIR:-/tmp}/bluke-rig-logcat.txt"
+  "$adb" logcat -d >"$logcat" 2>&1 || true
+  echo "rig failed; the emulator's log is in $logcat" >&2
+  exit 1
+fi
