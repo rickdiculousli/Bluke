@@ -43,3 +43,7 @@ Thumbs.db
 
 # ref
 ref
+
+# Python (tools/hid-rig)
+.venv/
+__pycache__/
