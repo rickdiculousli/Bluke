@@ -16,6 +16,9 @@ case "$(uname -s)" in
   *) sdk_default="$HOME/Android/Sdk" ;;
 esac
 export ANDROID_HOME=${ANDROID_HOME:-$sdk_default}
+if [[ -z "${JAVA_HOME:-}" ]] && ! java -version >/dev/null 2>&1 && command -v mise >/dev/null; then
+  export JAVA_HOME=$(mise where java@temurin-21)  # k16 keeps its JDK in mise with no global default
+fi
 case "$(uname -m)" in
   arm64|aarch64) abi=arm64-v8a ;;
   *) abi=x86_64 ;;
