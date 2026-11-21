@@ -189,19 +189,11 @@ class LicensesActivity : ComponentActivity() {
                                     
                                     Row(horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                                         Text(
-                                            text = "View on GitHub", 
-                                            color = MaterialTheme.colorScheme.primary, 
-                                            fontWeight = FontWeight.SemiBold,
-                                            modifier = Modifier.clickable {
-                                                context.startActivity(Intent(Intent.ACTION_VIEW, "https://github.com/arnav-kr/Bluke".toUri()))
-                                            }
-                                        )
-                                        Text(
                                             text = "Full license text", 
                                             color = MaterialTheme.colorScheme.primary, 
                                             fontWeight = FontWeight.SemiBold,
                                             modifier = Modifier.clickable {
-                                                context.startActivity(Intent(Intent.ACTION_VIEW, "https://raw.githubusercontent.com/arnav-kr/Bluke/main/LICENSE".toUri()))
+                                                context.startActivity(Intent(Intent.ACTION_VIEW, "https://www.gnu.org/licenses/agpl-3.0.txt".toUri()))
                                             }
                                         )
                                     }
@@ -330,7 +322,7 @@ class LicensesActivity : ComponentActivity() {
                                                             "https://raw.githubusercontent.com/tplai/kbsim/master/LICENSE.md"
                                                         } else {
                                                             when (lib.license) {
-                                                                "AGPL-3.0" -> "https://raw.githubusercontent.com/arnav-kr/Bluke/main/LICENSE"
+                                                                "AGPL-3.0" -> "https://www.gnu.org/licenses/agpl-3.0.txt"
                                                                 else -> "https://www.apache.org/licenses/LICENSE-2.0.txt"
                                                             }
                                                         }

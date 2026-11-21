@@ -1,91 +1,40 @@
-<div align="center">
-
-<img src="Logo.svg" width="128" height="128" alt="Bluke Logo" />
-
 # Bluke
 
-Bluke turns your Android phone into a Bluetooth keyboard, touchpad, gamepad, and multimedia remote without needing any host companion software.
-
-[![Android](https://img.shields.io/badge/Android-3DDC84?style=for-the-badge&logo=android&logoColor=white)](https://developer.android.com)
-[![Kotlin](https://img.shields.io/badge/kotlin-%237F52FF.svg?style=for-the-badge&logo=kotlin&logoColor=white)](https://kotlinlang.org)
-[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg?style=for-the-badge)](LICENSE)
-[![Latest Release](https://img.shields.io/github/v/release/arnav-kr/Bluke?style=for-the-badge&color=orange)](https://github.com/arnav-kr/Bluke/releases)
-
-</div>
-
----
-
-## Features
-
-- Direct Bluetooth HID connection with no companion apps or server software running on the host
-- Four input modes: Keyboard, Touchpad, Gamepad, and Multimedia remote
-- 12 mechanical switch sound profiles, plus support for importing custom Mechvibes sound packs
-- Multiple typing layouts (QWERTY, AZERTY, QWERTZ, Dvorak, Colemak, Russian ЙЦУКЕН) with `Shift + Space` cycling
-- Multiple keyboard geometries (60%, 65%, 75%) and custom themes with case, plate, and keycap styling
-- Gamepad controller with live switching between Native, Android, and Web mappings
-- Multimedia remote with presentation controls, touchpad, and phone volume button forwarding
-- Built for peak UX with haptic feedback, OLED black mode, and Material You dynamic theming
-
-
-[Usage & troubleshooting guide](docs/USAGE.md) · [Changelog](CHANGELOG.md)
+Android app that registers the phone as a Bluetooth HID device (keyboard, touchpad, gamepad, multimedia remote) so a host uses it with no companion software. Personal fork of `arnav-kr/Bluke`; nothing goes upstream.
 
 ## Requirements
 
-- **Android 9 (API level 28) or higher** with firmware supporting the Bluetooth HID Device profile. Profile availability depends on device chipset and OEM ROM.
-- A compatible Bluetooth host (Windows, Linux, Android, ChromeOS). Apple and macOS devices are currently unsupported / future scope.
+- Android 9 (API 28)+ with firmware that exposes the Bluetooth HID Device profile; some chipsets and OEM ROMs don't.
+- Hosts: Windows, Linux, Android, ChromeOS. Apple hosts are unsupported.
+- JDK compatible with the project's Android Gradle Plugin, Android SDK as set in `app/build.gradle.kts`, and the bundled Gradle wrapper.
 
-## Build and Installation
+## Build and test
 
-### Prerequisites
+```bash
+./gradlew assembleDebug    # APK at app/build/outputs/apk/debug/app-debug.apk
+./gradlew installDebug     # install on a USB-debugging device
+./gradlew fastTest         # debug unit tests minus Robolectric classes
+./gradlew testDebugUnitTest  # all unit tests, Robolectric and Roborazzi screenshots included
+```
 
-- Android Studio / JDK compatible with the project's Android Gradle Plugin.
-- Android SDK 36.1, as configured in `app/build.gradle.kts`.
-- The included Gradle Wrapper.
+Release builds sign from the `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_ALIAS` and `KEY_PASSWORD` environment variables.
 
-### Setup and Compilation
+## Debugging on a device
 
-1. **Clone the repository**:
-   ```bash
-   git clone https://github.com/arnav-kr/Bluke.git
-   cd Bluke
-   ```
+- Developer options: tap the logo in Settings > About five times. Developer Logs there shows the in-app log, with Clear and Export.
+- Live logs over ADB: `adb logcat -s BlukeHID BlukeLifecycle`.
+- Logs carry the Bluetooth MAC address and raw keycodes.
 
-2. **Build with Gradle**:
-   ```bash
-   ./gradlew assembleDebug      # Linux / macOS
-   .\gradlew.bat assembleDebug  # Windows PowerShell
-   ```
+## Host behavior that shapes the code
 
-3. **Install on device**:
-   Enable USB Debugging on your Android phone and run:
-   ```bash
-   ./gradlew installDebug
-   ```
+- Hosts cache the HID descriptor per pairing. After any descriptor change, unpair on both phone and host and pair again from the app's Scan, or input behaves erratically.
+- "Paired" in system settings doesn't mean an input session; the app must open the connection itself.
+- Many Linux desktops show no pairing prompt when the phone initiates. Scan once from the app, then pair from the Linux side.
+- Gamepad profiles switch live without re-pairing: Native (Windows/Linux), Android (remaps the right stick), Web (D-pad sent as buttons, since browsers ignore hat switches). Windows sees a generic controller, so most PC games need Steam Input.
+- Keyboard layouts send key positions, not characters; the host's input language decides what gets typed.
+- Some hosts route audio to the phone as a Bluetooth speaker; the "Keep audio on this phone" setting counters it.
+- Battery savers can kill the background session when the screen locks.
 
-The debug APK is output to `app/build/outputs/apk/debug/app-debug.apk`.
+## License and credits
 
-## Star History
-
-<a href="https://www.star-history.com/?repos=arnav-kr%2FBluke&type=date&legend=top-left">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=arnav-kr/Bluke&type=date&theme=dark&legend=top-left" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=arnav-kr/Bluke&type=date&legend=top-left" />
-   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=arnav-kr/Bluke&type=date&legend=top-left" />
- </picture>
-</a>
-
-## License
-
-This project is licensed under the [AGPL-3.0](LICENSE).
-
-## Credits
-
-* **[kbsim](https://github.com/tplai/kbsim)**: Part of mechanical switch audio assets are sourced from [kbs.im](https://kbs.im).
-
-## Contributors
-
-<a href="https://github.com/arnav-kr/Bluke/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=arnav-kr/Bluke" alt="Bluke Contributors" />
-</a>
-
- See the [full contributor graph](https://github.com/arnav-kr/Bluke/graphs/contributors).
+AGPL-3.0, see [LICENSE](LICENSE). Part of the switch audio comes from [kbsim](https://github.com/tplai/kbsim) ([kbs.im](https://kbs.im)).

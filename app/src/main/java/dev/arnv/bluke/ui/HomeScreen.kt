@@ -257,7 +257,6 @@ fun HomeScreen(
         showUpdateDialog = true
     }
 
-    val uriHandler = androidx.compose.ui.platform.LocalUriHandler.current
     if (showUpdateDialog) {
         val versionName = dev.arnv.bluke.BuildConfig.VERSION_NAME
         androidx.compose.material3.AlertDialog(
@@ -279,8 +278,7 @@ fun HomeScreen(
                             "remove Bluke on the host, then pair again once. Reinstalling the app alone is not enough. " +
                             "After this one-time refresh, all controller modes switch live without reconnecting or re-pairing."
                     } else {
-                        "We've added new features and made significant underlying changes to the controller!\n" +
-                            "For detailed information, see the changelog."
+                        "We've added new features and made significant underlying changes to the controller!"
                     }
                 )
             },
@@ -296,13 +294,6 @@ fun HomeScreen(
                     descriptorRefreshRequired = false
                 }) {
                     Text("Got it")
-                }
-            },
-            dismissButton = {
-                androidx.compose.material3.TextButton(onClick = { 
-                    uriHandler.openUri("https://github.com/arnav-kr/Bluke/releases")
-                }) {
-                    Text("Changelog")
                 }
             }
         )
