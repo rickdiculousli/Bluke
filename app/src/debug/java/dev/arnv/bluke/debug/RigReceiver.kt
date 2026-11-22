@@ -102,7 +102,7 @@ class RigReceiver : BroadcastReceiver() {
             }
             "flick" -> {
                 // A scripted two-finger flick through the real scroll engine and the saved scroll settings:
-                // fingers travel dy px over ms, lift, and the engine plays out at its frame rate.
+                // fingers travel dy dp over ms, lift, and the engine plays out at its frame rate.
                 val dy = intent.getFloatExtra("dy", 300f)
                 val millis = intent.getIntExtra("ms", 100).toLong()
                 val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)

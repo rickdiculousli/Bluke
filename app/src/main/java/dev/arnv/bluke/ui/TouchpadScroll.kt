@@ -38,8 +38,9 @@ data class TouchpadScrollSettings(
 data class ScrollReport(val wheel: Int, val pan: Int)
 
 /**
- * Turns two-finger movement into wheel and pan steps. The view feeds it finger positions as
- * they arrive and calls [tick] on a steady frame clock while [isActive]; ticks produce the reports.
+ * Turns two-finger movement into wheel and pan steps. The view feeds it finger positions in dp
+ * (physical distance, so every screen density scrolls alike) as they arrive and calls [tick] on a
+ * steady frame clock while [isActive]; ticks produce the reports.
  *
  * - Direction: content follows the fingers (fingers down scroll up: wheel +; fingers right
  *   scroll left: pan -); [TouchpadScrollSettings.inverted] flips both.
@@ -70,6 +71,7 @@ class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSett
     private var endedAt = Long.MIN_VALUE / 2
     private var releaseWheel = 0f
     private var releasePan = 0f
+    private var releaseSpeedDp = 0f // finger speed at release, dp per millisecond
     private val samples = ArrayDeque<Sample>()
 
     private class Sample(val time: Long, val x: Float, val y: Float)
@@ -101,7 +103,9 @@ class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSett
         scrolling = false
         settling = settings.smoothing > 0f
         endedAt = time
-        val (wheel, pan) = releaseVelocity(time)
+        val (dxPerMs, dyPerMs) = releaseVelocity(time)
+        releaseSpeedDp = hypot(dxPerMs, dyPerMs)
+        val (wheel, pan) = units(dxPerMs, dyPerMs)
         releaseWheel = wheel
         releasePan = pan
     }
@@ -110,11 +114,12 @@ class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSett
     fun liftAll(time: Long) {
         if (scrolling) end(time)
         if (!settings.momentum || time - endedAt > MOMENTUM_LIFT_GRACE_MILLIS) return
-        if (hypot(releaseWheel, releasePan) < MIN_GLIDE_START_UNITS_PER_MS) return
+        if (releaseSpeedDp < MIN_GLIDE_START_DP_PER_MS) return
         glideWheel = releaseWheel
         glidePan = releasePan
         releaseWheel = 0f
         releasePan = 0f
+        releaseSpeedDp = 0f
         glideStartedAt = time
         gliding = true
     }
@@ -131,6 +136,7 @@ class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSett
         accPan = 0f
         releaseWheel = 0f
         releasePan = 0f
+        releaseSpeedDp = 0f
         samples.clear()
     }
 
@@ -173,11 +179,11 @@ class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSett
         return if (wheel != 0 || pan != 0) ScrollReport(wheel, pan) else null
     }
 
-    /** Finger movement in px to scroll units, with direction and axis lock applied. */
+    /** Finger movement in dp to scroll units, with direction and axis lock applied. */
     private fun units(dx: Float, dy: Float): Pair<Float, Float> {
         val travelX = abs(targetX - originX)
         val travelY = abs(targetY - originY)
-        val scale = UNITS_PER_PX * settings.speed * if (settings.inverted) -1f else 1f
+        val scale = UNITS_PER_DP * settings.speed * if (settings.inverted) -1f else 1f
         val wheel = if (travelX >= travelY * AXIS_LOCK_RATIO && travelX > 0f) 0f else dy * scale
         val pan = if (travelY >= travelX * AXIS_LOCK_RATIO && travelY > 0f) 0f else -dx * scale
         return wheel to pan
@@ -189,19 +195,22 @@ class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSett
         accPan += pan
     }
 
-    /** Scroll units per millisecond over the last moments of movement; zero if the fingers had stopped. */
+    /** Finger velocity in dp per millisecond over the last moments of movement; zero if the fingers had stopped. */
     private fun releaseVelocity(time: Long): Pair<Float, Float> {
         val last = samples.lastOrNull() ?: return 0f to 0f
         val first = samples.firstOrNull { last.time - it.time <= VELOCITY_WINDOW_MILLIS } ?: return 0f to 0f
         val span = (last.time - first.time).toFloat()
         if (span < MIN_VELOCITY_SPAN_MILLIS || time - last.time > STOPPED_BEFORE_LIFT_MILLIS) return 0f to 0f
-        return units((last.x - first.x) / span, (last.y - first.y) / span)
+        return (last.x - first.x) / span to (last.y - first.y) / span
     }
 
     private fun glideTimeConstant(): Float = MIN_GLIDE_MILLIS + settings.glide * (MAX_GLIDE_MILLIS - MIN_GLIDE_MILLIS)
 
     companion object {
-        const val UNITS_PER_PX = 0.06f
+        /** One wheel step per ~6 mm of finger travel: with macOS's wheel boost that is ~3-7 px of
+         *  page per mm when slow and ~14 when fast, close to a Mac trackpad. */
+        const val UNITS_PER_MM = 0.17f
+        const val UNITS_PER_DP = UNITS_PER_MM * 25.4f / 160f
         const val AXIS_LOCK_RATIO = 2f
         const val MAX_SMOOTHING_MILLIS = 60f
         const val MIN_GLIDE_MILLIS = 80f
@@ -214,7 +223,7 @@ class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSett
         private const val VELOCITY_WINDOW_MILLIS = 80L
         private const val MIN_VELOCITY_SPAN_MILLIS = 10L
         private const val STOPPED_BEFORE_LIFT_MILLIS = 50L
-        private const val MIN_GLIDE_START_UNITS_PER_MS = 0.03f
+        private const val MIN_GLIDE_START_DP_PER_MS = 0.3f // ~5 cm/s: slower releases are drags, not flicks
         private const val MIN_GLIDE_UNITS_PER_MS = 0.04f // one step per 25 ms
     }
 }

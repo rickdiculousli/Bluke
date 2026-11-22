@@ -4,6 +4,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
+import kotlin.math.roundToInt
 
 class TouchpadScrollerTest {
     private class Run(val scroller: TouchpadScroller) {
@@ -16,7 +17,7 @@ class TouchpadScrollerTest {
             scroller.tick(time)?.let { wheel += it.wheel; pan += it.pan; reports++ }
         }
 
-        /** Two fingers travel by (dx, dy) px over [millis], moving and ticking every 8 ms. */
+        /** Two fingers travel by (dx, dy) dp over [millis], moving and ticking every 8 ms. */
         fun swipe(dx: Float, dy: Float, millis: Long, startX: Float = 500f, startY: Float = 500f) {
             scroller.begin(startX, startY, time)
             val steps = (millis / 8).toInt()
@@ -37,41 +38,47 @@ class TouchpadScrollerTest {
 
     private fun run(settings: TouchpadScrollSettings) = Run(TouchpadScroller(settings))
     private val crisp = TouchpadScrollSettings(smoothing = 0f, momentum = false)
+    private fun steps(dp: Float, speed: Float = 1f) = (dp * TouchpadScroller.UNITS_PER_DP * speed).roundToInt()
 
     @Test fun contentFollowsTheFingersUnlessInverted() {
-        val down = run(crisp).apply { swipe(0f, 100f, 200); liftAll(); tickUntilIdle() }
-        assertEquals(6, down.wheel) // 100 px * 0.06 units/px
+        val down = run(crisp).apply { swipe(0f, 1000f, 200); liftAll(); tickUntilIdle() }
+        assertEquals(steps(1000f), down.wheel)
         assertEquals(0, down.pan)
-        val right = run(crisp).apply { swipe(100f, 0f, 200); liftAll(); tickUntilIdle() }
-        assertEquals(-6, right.pan)
-        val inverted = run(crisp.copy(inverted = true)).apply { swipe(0f, 100f, 200); liftAll(); tickUntilIdle() }
-        assertEquals(-6, inverted.wheel)
+        val right = run(crisp).apply { swipe(1000f, 0f, 200); liftAll(); tickUntilIdle() }
+        assertEquals(-steps(1000f), right.pan)
+        val inverted = run(crisp.copy(inverted = true)).apply { swipe(0f, 1000f, 200); liftAll(); tickUntilIdle() }
+        assertEquals(-steps(1000f), inverted.wheel)
     }
 
     @Test fun speedScalesTheDistance() {
-        val fast = run(crisp.copy(speed = 2f)).apply { swipe(0f, 100f, 200); liftAll(); tickUntilIdle() }
-        assertEquals(12, fast.wheel)
+        val fast = run(crisp.copy(speed = 2f)).apply { swipe(0f, 1000f, 200); liftAll(); tickUntilIdle() }
+        assertEquals(steps(1000f, speed = 2f), fast.wheel)
+    }
+
+    @Test fun oneScrollStepIsAboutSixMillimetresOfFingerTravel() {
+        // Distance is physical: 6 mm is ~37.8 dp on any screen density.
+        assertEquals(1, steps(6f * 160f / 25.4f))
     }
 
     @Test fun aMostlyVerticalSwipeNeverScrollsSideways() {
-        val drift = run(crisp).apply { swipe(40f, 300f, 400); liftAll(); tickUntilIdle() }
+        val drift = run(crisp).apply { swipe(400f, 3000f, 400); liftAll(); tickUntilIdle() }
         assertEquals(0, drift.pan)
-        assertEquals(18, drift.wheel)
-        val diagonal = run(crisp).apply { swipe(100f, 100f, 200); liftAll(); tickUntilIdle() }
+        assertEquals(steps(3000f), drift.wheel)
+        val diagonal = run(crisp).apply { swipe(1000f, 1000f, 200); liftAll(); tickUntilIdle() }
         assertTrue(diagonal.wheel > 0 && diagonal.pan < 0)
     }
 
     @Test fun smoothingTrailsTheFingersButKeepsEveryStep() {
-        val smooth = run(crisp.copy(smoothing = 1f)).apply { swipe(0f, 100f, 200) }
-        assertTrue("smoothed scroll lags behind the fingers", smooth.wheel < 6)
+        val smooth = run(crisp.copy(smoothing = 1f)).apply { swipe(0f, 1000f, 200) }
+        assertTrue("smoothed scroll lags behind the fingers", smooth.wheel < steps(1000f))
         smooth.scroller.end(smooth.time)
         smooth.liftAll()
         smooth.tickUntilIdle()
-        assertEquals(6, smooth.wheel)
+        assertEquals(steps(1000f), smooth.wheel)
     }
 
     @Test fun aFlickGlidesOnThenStops() {
-        val flick = run(TouchpadScrollSettings(smoothing = 0f, momentum = true)).apply { swipe(0f, 200f, 100) }
+        val flick = run(TouchpadScrollSettings(smoothing = 0f, momentum = true)).apply { swipe(0f, 1000f, 100) }
         val atLift = flick.wheel
         flick.liftAll()
         assertTrue(flick.scroller.isActive)
@@ -81,7 +88,7 @@ class TouchpadScrollerTest {
     }
 
     @Test fun aGlideIsOverWithinASecondLikeAMacTrackpad() {
-        val hard = run(TouchpadScrollSettings(smoothing = 0f, glide = 1f)).apply { swipe(0f, 600f, 40) }
+        val hard = run(TouchpadScrollSettings(smoothing = 0f, glide = 1f)).apply { swipe(0f, 3000f, 40) }
         val lift = hard.time
         hard.liftAll()
         hard.tickUntilIdle()
@@ -90,19 +97,25 @@ class TouchpadScrollerTest {
 
     @Test fun aLongerGlideCarriesFurther() {
         fun distance(glide: Float) = run(TouchpadScrollSettings(smoothing = 0f, glide = glide))
-            .apply { swipe(0f, 200f, 100); liftAll(); tickUntilIdle() }.wheel
+            .apply { swipe(0f, 1000f, 100); liftAll(); tickUntilIdle() }.wheel
         assertTrue(distance(1f) > distance(0f))
     }
 
+    @Test fun aSlowDragDoesNotGlide() {
+        val drag = run(TouchpadScrollSettings(smoothing = 0f)).apply { swipe(0f, 200f, 1000) } // 0.2 dp/ms, ~3 cm/s
+        drag.liftAll()
+        assertFalse(drag.scroller.isActive)
+    }
+
     @Test fun fingersThatStoppedBeforeLiftingDoNotGlide() {
-        val rest = run(TouchpadScrollSettings(smoothing = 0f)).apply { swipe(0f, 200f, 100) }
+        val rest = run(TouchpadScrollSettings(smoothing = 0f)).apply { swipe(0f, 1000f, 100) }
         rest.time += 200 // fingers held still, then lifted
         rest.liftAll()
         assertFalse(rest.scroller.isActive)
     }
 
     @Test fun liftingOneFingerThenTheOtherStillGlides() {
-        val flick = run(TouchpadScrollSettings(smoothing = 0f)).apply { swipe(0f, 200f, 100) }
+        val flick = run(TouchpadScrollSettings(smoothing = 0f)).apply { swipe(0f, 1000f, 100) }
         flick.scroller.end(flick.time) // first finger up
         flick.time += 30
         flick.liftAll() // second finger up a moment later
@@ -110,14 +123,14 @@ class TouchpadScrollerTest {
     }
 
     @Test fun aNewTouchStopsTheGlide() {
-        val flick = run(TouchpadScrollSettings(smoothing = 0f)).apply { swipe(0f, 200f, 100); liftAll() }
+        val flick = run(TouchpadScrollSettings(smoothing = 0f)).apply { swipe(0f, 1000f, 100); liftAll() }
         flick.scroller.stop()
         assertFalse(flick.scroller.isActive)
         assertEquals(null, flick.scroller.tick(flick.time + 8))
     }
 
     @Test fun theRemainingFingerPointsOnlyAfterTheScrollSettles() {
-        val handover = run(crisp).apply { swipe(0f, 100f, 200) }
+        val handover = run(crisp).apply { swipe(0f, 1000f, 200) }
         assertFalse(handover.scroller.allowsPointing(handover.time))
         handover.scroller.end(handover.time)
         assertFalse(handover.scroller.allowsPointing(handover.time + 50))

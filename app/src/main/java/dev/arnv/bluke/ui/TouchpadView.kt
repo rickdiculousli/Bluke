@@ -719,6 +719,9 @@ fun NumpadLedGrid(onKeyPress: (String, Boolean) -> Unit) {
 
 private const val SCROLL_FRAME_MILLIS = 8L
 
+/** Pointer counts per dp of finger travel at 1x: the feel Bluke had on a 420 dpi phone, now the same on every screen. */
+private const val POINTER_COUNTS_PER_DP = 2.625f
+
 @Composable
 fun TouchGestureLayer(
     btManager: BluetoothKeyboardManager,
@@ -798,6 +801,7 @@ fun TouchGestureLayer(
     }
 
     val density = androidx.compose.ui.platform.LocalDensity.current
+    val pxPerDp = density.density
     val thumbActiveAlpha by animateFloatAsState(
         targetValue = if (isTouchActive && !showNumpadLed) 0.85f else 0f,
         animationSpec = spring(stiffness = Spring.StiffnessMedium),
@@ -867,8 +871,8 @@ fun TouchGestureLayer(
                                 lastPointX = pointer.position.x
                                 lastPointY = pointer.position.y
                             } else {
-                                accumulatedX += (pointer.position.x - lastPointX) * sensitivity
-                                accumulatedY += (pointer.position.y - lastPointY) * sensitivity
+                                accumulatedX += (pointer.position.x - lastPointX) / pxPerDp * POINTER_COUNTS_PER_DP * sensitivity
+                                accumulatedY += (pointer.position.y - lastPointY) / pxPerDp * POINTER_COUNTS_PER_DP * sensitivity
 
                                 val now = System.currentTimeMillis()
                                 if (now - lastReportTime >= 10L) {
@@ -928,10 +932,10 @@ fun TouchGestureLayer(
                                     lastActivePointerId = null
                                     accumulatedX = 0f
                                     accumulatedY = 0f
-                                    scroller.begin(currentXAverage, currentYAverage, time)
+                                    scroller.begin(currentXAverage / pxPerDp, currentYAverage / pxPerDp, time)
                                     runScroll()
                                 } else {
-                                    scroller.move(currentXAverage, currentYAverage, time)
+                                    scroller.move(currentXAverage / pxPerDp, currentYAverage / pxPerDp, time)
                                 }
                             }
                         } else {
