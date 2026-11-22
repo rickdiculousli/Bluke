@@ -790,21 +790,17 @@ private fun MultimediaUprightBar(
         ReconnectHostButton(btManager, iconOnly = true)
         Spacer(Modifier.weight(1f))
         UprightToolbarButton("Pointer sensitivity ${sensitivity}x", onSensitivityChange) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Default.Speed, null, tint = Color.White, modifier = Modifier.size(10.dp))
-                Text("${sensitivity}x", color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+            // Too small for an icon as well: the word says which speed this is.
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Pointer", color = Color.White, fontSize = 7.sp, lineHeight = 8.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                Text("${sensitivity}x", color = Color.White, fontSize = 7.sp, lineHeight = 8.sp, fontWeight = FontWeight.Bold)
             }
         }
         UprightToolbarButton("Scroll sensitivity ${scrollSensitivity}x", onScrollSensitivityChange) {
-            Row(
-                horizontalArrangement = Arrangement.spacedBy(2.dp),
-                verticalAlignment = Alignment.CenterVertically,
-            ) {
-                Icon(Icons.Default.KeyboardArrowUp, null, tint = Color.White, modifier = Modifier.size(10.dp))
-                Text("${scrollSensitivity}x", color = Color.White, fontSize = 7.sp, fontWeight = FontWeight.Bold)
+            // Too small for an icon as well: the word says which speed this is.
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text("Scroll", color = Color.White, fontSize = 7.sp, lineHeight = 8.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
+                Text("${scrollSensitivity}x", color = Color.White, fontSize = 7.sp, lineHeight = 8.sp, fontWeight = FontWeight.Bold)
             }
         }
         UprightToolbarButton(
@@ -836,7 +832,7 @@ private fun UprightToolbarButton(
         shape = RoundedCornerShape(7.dp),
     ) {
         Box(
-            modifier = Modifier.graphicsLayer { rotationZ = -90f },
+            modifier = Modifier.fillMaxSize().graphicsLayer { rotationZ = -90f },
             contentAlignment = Alignment.Center,
         ) {
             content()
@@ -920,14 +916,14 @@ private fun MultimediaTopBar(
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
             ToolbarPill(onClick = onSensitivityChange) {
-                Icon(Icons.Default.Speed, "Sensitivity", tint = Color.White, modifier = Modifier.size(12.dp))
+                Icon(Icons.Default.Speed, null, tint = Color.White, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("${sensitivity}x", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Text("Pointer ${sensitivity}x", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
             }
             ToolbarPill(onClick = onScrollSensitivityChange) {
-                Icon(Icons.Default.KeyboardArrowUp, "Scroll speed", tint = Color.White, modifier = Modifier.size(12.dp))
+                Icon(Icons.Default.KeyboardArrowUp, null, tint = Color.White, modifier = Modifier.size(12.dp))
                 Spacer(Modifier.width(4.dp))
-                Text("${scrollSensitivity}x", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                Text("Scroll ${scrollSensitivity}x", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
             }
             Surface(
                 onClick = onToggleVibration,

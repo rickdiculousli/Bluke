@@ -354,12 +354,12 @@ fun TouchpadView(
                     ) {
                         Icon(
                             imageVector = Icons.Default.Speed,
-                            contentDescription = "Sensitivity",
+                            contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(12.dp)
                         )
                         Text(
-                            text = "${sensitivity}x",
+                            text = "Pointer ${sensitivity}x",
                             color = Color.White,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold
@@ -384,12 +384,12 @@ fun TouchpadView(
                     ) {
                         Icon(
                             imageVector = Icons.Default.KeyboardDoubleArrowUp,
-                            contentDescription = "Scroll Speed",
+                            contentDescription = null,
                             tint = Color.White,
                             modifier = Modifier.size(12.dp)
                         )
                         Text(
-                            text = "${scrollSensitivity}x",
+                            text = "Scroll ${scrollSensitivity}x",
                             color = Color.White,
                             fontSize = 9.sp,
                             fontWeight = FontWeight.Bold
