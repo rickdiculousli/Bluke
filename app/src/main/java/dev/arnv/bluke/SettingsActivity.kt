@@ -92,6 +92,14 @@ class SettingsActivity : ComponentActivity() {
                                     }
                                 ),
                                 SettingsItemData(
+                                    title = "Touchpad",
+                                    subtitle = "Scroll direction, smoothing, and momentum",
+                                    icon = { Icon(Icons.Default.TouchApp, null, tint = MaterialTheme.colorScheme.primary) },
+                                    onClick = {
+                                        startActivity(Intent(this@SettingsActivity, TouchpadSettingsActivity::class.java))
+                                    }
+                                ),
+                                SettingsItemData(
                                     title = "Controller",
                                     subtitle = "Gamepad behavior and compatibility",
                                     icon = { Icon(Icons.Default.Gamepad, null, tint = MaterialTheme.colorScheme.primary) },
