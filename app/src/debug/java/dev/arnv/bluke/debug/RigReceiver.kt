@@ -109,19 +109,18 @@ class RigReceiver : BroadcastReceiver() {
                 val scroller = TouchpadScroller(TouchpadScrollSettings.from(prefs))
                 Thread {
                     var time = android.os.SystemClock.uptimeMillis()
-                    fun frame() {
-                        scroller.tick(time)?.let { manager.sendMouseReport(0, 0, 0, it.wheel.toByte(), it.pan.toByte()) }
-                        Thread.sleep(8)
-                        time += 8
+                    fun send(report: dev.arnv.bluke.ui.ScrollReport?) {
+                        report?.let { manager.sendMouseReport(0, 0, 0, it.wheel.toByte(), it.pan.toByte()) }
                     }
+                    fun wait() { Thread.sleep(8); time += 8 }
                     scroller.begin(500f, 500f, time)
                     val steps = (millis / 8).toInt().coerceAtLeast(1)
                     for (i in 1..steps) {
-                        scroller.move(500f, 500f + dy * i / steps, time)
-                        frame()
+                        wait()
+                        send(scroller.move(500f, 500f + dy * i / steps, time))
                     }
-                    scroller.liftAll(time)
-                    while (scroller.isActive) frame()
+                    send(scroller.liftAll(time))
+                    while (scroller.isActive) { wait(); send(scroller.tick(time)) }
                 }.start()
                 result.put("ok", true)
             }

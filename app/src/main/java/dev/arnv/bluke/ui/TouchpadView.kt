@@ -776,15 +776,17 @@ fun TouchGestureLayer(
     var touchCount by remember { mutableIntStateOf(0) }
     var activeMouseButton by remember { mutableStateOf<Byte>(0) }
 
-    // Scroll reports go out on a steady frame clock while the scroller has anything to send:
-    // fingers moving, the smoothed scroll catching up, or a momentum glide.
+    fun sendScroll(report: ScrollReport?) {
+        report ?: return
+        btManager.sendMouseReport(activeMouseButton, 0, 0, report.wheel.toByte(), report.pan.toByte())
+    }
+
+    // A momentum glide plays out on a steady frame clock after the fingers lift.
     fun runScroll() {
         if (scrollTicker?.isActive == true) return
         scrollTicker = gestureScope.launch {
             while (isActive && scroller.isActive) {
-                scroller.tick(android.os.SystemClock.uptimeMillis())?.let {
-                    btManager.sendMouseReport(activeMouseButton, 0, 0, it.wheel.toByte(), it.pan.toByte())
-                }
+                sendScroll(scroller.tick(android.os.SystemClock.uptimeMillis()))
                 delay(SCROLL_FRAME_MILLIS)
             }
         }
@@ -858,7 +860,7 @@ fun TouchGestureLayer(
                             val pointer = changes.first { it.pressed }
                             if (isTwoFingerActive) {
                                 isTwoFingerActive = false
-                                scroller.end(pointer.uptimeMillis)
+                                sendScroll(scroller.end(pointer.uptimeMillis))
                             }
 
                             if (!scroller.allowsPointing(pointer.uptimeMillis)) {
@@ -933,15 +935,14 @@ fun TouchGestureLayer(
                                     accumulatedX = 0f
                                     accumulatedY = 0f
                                     scroller.begin(currentXAverage / pxPerDp, currentYAverage / pxPerDp, time)
-                                    runScroll()
                                 } else {
-                                    scroller.move(currentXAverage / pxPerDp, currentYAverage / pxPerDp, time)
+                                    sendScroll(scroller.move(currentXAverage / pxPerDp, currentYAverage / pxPerDp, time))
                                 }
                             }
                         } else {
                             val time = changes.firstOrNull()?.uptimeMillis ?: android.os.SystemClock.uptimeMillis()
-                            if (isTwoFingerActive) scroller.end(time)
-                            if (downCount == 0) scroller.liftAll(time)
+                            if (isTwoFingerActive) sendScroll(scroller.end(time))
+                            if (downCount == 0) sendScroll(scroller.liftAll(time))
                             if (scroller.isActive) runScroll()
                             isTwoFingerActive = false
                             lastActivePointerId = null

@@ -8,15 +8,13 @@ import kotlin.math.roundToInt
 
 const val TOUCHPAD_SCROLL_SPEED_PREFERENCE = "touchpad_scroll_sensitivity"
 const val TOUCHPAD_INVERT_SCROLL_PREFERENCE = "touchpad_invert_scroll"
-const val TOUCHPAD_SCROLL_SMOOTHING_PREFERENCE = "touchpad_scroll_smoothing"
 const val TOUCHPAD_SCROLL_MOMENTUM_PREFERENCE = "touchpad_scroll_momentum"
 const val TOUCHPAD_SCROLL_GLIDE_PREFERENCE = "touchpad_scroll_glide"
 
-/** How two-finger scrolling feels. [smoothing] and [glide] run from 0 (off / shortest) to 1. */
+/** How two-finger scrolling feels. [glide] runs from 0 (shortest) to 1. */
 data class TouchpadScrollSettings(
     val speed: Float = 1f,
     val inverted: Boolean = false,
-    val smoothing: Float = 0.35f,
     val momentum: Boolean = true,
     val glide: Float = 0.5f,
 ) {
@@ -26,7 +24,6 @@ data class TouchpadScrollSettings(
             return TouchpadScrollSettings(
                 speed = prefs.getFloat(TOUCHPAD_SCROLL_SPEED_PREFERENCE, defaults.speed),
                 inverted = prefs.getBoolean(TOUCHPAD_INVERT_SCROLL_PREFERENCE, defaults.inverted),
-                smoothing = prefs.getFloat(TOUCHPAD_SCROLL_SMOOTHING_PREFERENCE, defaults.smoothing).coerceIn(0f, 1f),
                 momentum = prefs.getBoolean(TOUCHPAD_SCROLL_MOMENTUM_PREFERENCE, defaults.momentum),
                 glide = prefs.getFloat(TOUCHPAD_SCROLL_GLIDE_PREFERENCE, defaults.glide).coerceIn(0f, 1f),
             )
@@ -39,13 +36,13 @@ data class ScrollReport(val wheel: Int, val pan: Int)
 
 /**
  * Turns two-finger movement into wheel and pan steps. The view feeds it finger positions in dp
- * (physical distance, so every screen density scrolls alike) as they arrive and calls [tick] on a
- * steady frame clock while [isActive]; ticks produce the reports.
+ * (physical distance, so every screen density scrolls alike); [move] and [end] answer with the
+ * report to send at once, and after the fingers lift [tick] plays any glide on a steady frame
+ * clock while [isActive].
  *
  * - Direction: content follows the fingers (fingers down scroll up: wheel +; fingers right
  *   scroll left: pan -); [TouchpadScrollSettings.inverted] flips both.
  * - Axis lock: a gesture twice as long on one axis as the other scrolls only that axis.
- * - Smoothing: the scroll trails the fingers through a low-pass filter, then catches up after they lift.
  * - Momentum: lifting every finger while moving keeps scrolling and slows to a stop; a new touch stops it.
  *   It follows a Mac trackpad's glide as measured on macOS: speed fades with a ~200 ms time constant and
  *   the glide is over within a second. It ends before its steps thin out, because a Mac boosts every
@@ -54,14 +51,12 @@ data class ScrollReport(val wheel: Int, val pan: Int)
  */
 class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSettings()) {
     private var scrolling = false
-    private var settling = false
     private var gliding = false
     private var originX = 0f
     private var originY = 0f
-    private var targetX = 0f
-    private var targetY = 0f
-    private var smoothX = 0f
-    private var smoothY = 0f
+    private var lastX = 0f
+    private var lastY = 0f
+    private var lastReportAt = Long.MIN_VALUE / 2
     private var lastTick = 0L
     private var accWheel = 0f
     private var accPan = 0f
@@ -76,52 +71,59 @@ class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSett
 
     private class Sample(val time: Long, val x: Float, val y: Float)
 
-    /** Something is still to be sent: fingers are scrolling, the smoothed scroll is catching up, or it glides. */
-    val isActive: Boolean get() = scrolling || settling || gliding
+    /** A glide is playing; call [tick] on the frame clock until this turns false. */
+    val isActive: Boolean get() = gliding
 
     /** Two fingers landed with their midpoint at ([x], [y]). Stops any glide. */
     fun begin(x: Float, y: Float, time: Long) {
         stop()
         scrolling = true
         originX = x; originY = y
-        targetX = x; targetY = y
-        smoothX = x; smoothY = y
-        lastTick = time
+        lastX = x; lastY = y
         samples.addLast(Sample(time, x, y))
     }
 
-    fun move(x: Float, y: Float, time: Long) {
-        if (!scrolling) return
-        targetX = x; targetY = y
+    /** The fingers moved; the report to send now, if this move completed a step. */
+    fun move(x: Float, y: Float, time: Long): ScrollReport? {
+        if (!scrolling) return null
+        val dx = x - lastX
+        val dy = y - lastY
+        lastX = x; lastY = y
+        addUnits(dx, dy)
         samples.addLast(Sample(time, x, y))
         while (samples.size > 2 && time - samples.first().time > VELOCITY_WINDOW_MILLIS) samples.removeFirst()
+        // One report per frame at most: finer touch rates would only flood the link.
+        if (time - lastReportAt < MIN_REPORT_INTERVAL_MILLIS) return null
+        return takeReport()?.also { lastReportAt = time }
     }
 
-    /** The fingers stopped scrolling (one lifted or both did). The smoothed remainder still plays out. */
-    fun end(time: Long) {
-        if (!scrolling) return
+    /** The fingers stopped scrolling (one lifted or both did); the report with any steps still owed. */
+    fun end(time: Long): ScrollReport? {
+        if (!scrolling) return null
         scrolling = false
-        settling = settings.smoothing > 0f
         endedAt = time
         val (dxPerMs, dyPerMs) = releaseVelocity(time)
         releaseSpeedDp = hypot(dxPerMs, dyPerMs)
         val (wheel, pan) = units(dxPerMs, dyPerMs)
         releaseWheel = wheel
         releasePan = pan
+        return takeReport()
     }
 
     /** Every finger is up. Starts a glide when the scroll ended moments ago while still moving. */
-    fun liftAll(time: Long) {
-        if (scrolling) end(time)
-        if (!settings.momentum || time - endedAt > MOMENTUM_LIFT_GRACE_MILLIS) return
-        if (releaseSpeedDp < MIN_GLIDE_START_DP_PER_MS) return
+    fun liftAll(time: Long): ScrollReport? {
+        val owed = if (scrolling) end(time) else null
+        if (!settings.momentum || time - endedAt > MOMENTUM_LIFT_GRACE_MILLIS) return owed
+        if (releaseSpeedDp < MIN_GLIDE_START_DP_PER_MS) return owed
         glideWheel = releaseWheel
         glidePan = releasePan
         releaseWheel = 0f
         releasePan = 0f
         releaseSpeedDp = 0f
         glideStartedAt = time
+        lastTick = time
         gliding = true
+        return owed
     }
 
     /** A remaining finger may move the pointer: no scroll is running and the last one ended a moment ago. */
@@ -130,7 +132,6 @@ class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSett
     /** Stops scrolling at once, dropping anything not yet sent. */
     fun stop() {
         scrolling = false
-        settling = false
         gliding = false
         accWheel = 0f
         accPan = 0f
@@ -140,49 +141,39 @@ class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSett
         samples.clear()
     }
 
+    /** One glide frame: the report to send, if the glide completed a step. */
     fun tick(time: Long): ScrollReport? {
+        if (!gliding) return null
         val dt = (time - lastTick).coerceIn(0L, MAX_TICK_MILLIS).toFloat()
         lastTick = time
-        if (scrolling || settling) {
-            val tau = settings.smoothing * MAX_SMOOTHING_MILLIS
-            val follow = if (tau <= 0f) 1f else 1f - exp(-dt / tau)
-            val nextX = smoothX + (targetX - smoothX) * follow
-            val nextY = smoothY + (targetY - smoothY) * follow
-            addUnits(nextX - smoothX, nextY - smoothY)
-            smoothX = nextX
-            smoothY = nextY
-            if (settling && abs(targetX - smoothX) < SETTLED_PX && abs(targetY - smoothY) < SETTLED_PX) {
-                addUnits(targetX - smoothX, targetY - smoothY)
-                smoothX = targetX
-                smoothY = targetY
-                settling = false
-            }
+        accWheel += glideWheel * dt
+        accPan += glidePan * dt
+        val decay = exp(-dt / glideTimeConstant())
+        glideWheel *= decay
+        glidePan *= decay
+        if (hypot(glideWheel, glidePan) < MIN_GLIDE_UNITS_PER_MS || time - glideStartedAt >= MAX_GLIDE_DURATION_MILLIS) {
+            gliding = false
         }
-        if (gliding) {
-            accWheel += glideWheel * dt
-            accPan += glidePan * dt
-            val decay = exp(-dt / glideTimeConstant())
-            glideWheel *= decay
-            glidePan *= decay
-            if (hypot(glideWheel, glidePan) < MIN_GLIDE_UNITS_PER_MS || time - glideStartedAt >= MAX_GLIDE_DURATION_MILLIS) {
-                gliding = false
-            }
+        val report = takeReport()
+        if (!gliding) {
+            accWheel = 0f
+            accPan = 0f
         }
+        return report
+    }
+
+    private fun takeReport(): ScrollReport? {
         val wheel = accWheel.roundToInt().coerceIn(-127, 127)
         val pan = accPan.roundToInt().coerceIn(-127, 127)
         accWheel -= wheel
         accPan -= pan
-        if (!isActive) {
-            accWheel = 0f
-            accPan = 0f
-        }
         return if (wheel != 0 || pan != 0) ScrollReport(wheel, pan) else null
     }
 
     /** Finger movement in dp to scroll units, with direction and axis lock applied. */
     private fun units(dx: Float, dy: Float): Pair<Float, Float> {
-        val travelX = abs(targetX - originX)
-        val travelY = abs(targetY - originY)
+        val travelX = abs(lastX - originX)
+        val travelY = abs(lastY - originY)
         val scale = UNITS_PER_DP * settings.speed * if (settings.inverted) -1f else 1f
         val wheel = if (travelX >= travelY * AXIS_LOCK_RATIO && travelX > 0f) 0f else dy * scale
         val pan = if (travelY >= travelX * AXIS_LOCK_RATIO && travelY > 0f) 0f else -dx * scale
@@ -212,14 +203,13 @@ class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSett
         const val UNITS_PER_MM = 0.17f
         const val UNITS_PER_DP = UNITS_PER_MM * 25.4f / 160f
         const val AXIS_LOCK_RATIO = 2f
-        const val MAX_SMOOTHING_MILLIS = 60f
         const val MIN_GLIDE_MILLIS = 80f
         const val MAX_GLIDE_MILLIS = 300f
         const val MAX_GLIDE_DURATION_MILLIS = 1000L
         const val POINTER_RESUME_MILLIS = 120L
         const val MOMENTUM_LIFT_GRACE_MILLIS = 120L
+        const val MIN_REPORT_INTERVAL_MILLIS = 8L
         private const val MAX_TICK_MILLIS = 50L
-        private const val SETTLED_PX = 0.5f
         private const val VELOCITY_WINDOW_MILLIS = 80L
         private const val MIN_VELOCITY_SPAN_MILLIS = 10L
         private const val STOPPED_BEFORE_LIFT_MILLIS = 50L

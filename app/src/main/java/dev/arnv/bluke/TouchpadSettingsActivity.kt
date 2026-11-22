@@ -40,7 +40,6 @@ import dev.arnv.bluke.ui.SettingsItemData
 import dev.arnv.bluke.ui.TOUCHPAD_INVERT_SCROLL_PREFERENCE
 import dev.arnv.bluke.ui.TOUCHPAD_SCROLL_GLIDE_PREFERENCE
 import dev.arnv.bluke.ui.TOUCHPAD_SCROLL_MOMENTUM_PREFERENCE
-import dev.arnv.bluke.ui.TOUCHPAD_SCROLL_SMOOTHING_PREFERENCE
 import dev.arnv.bluke.ui.TouchpadScrollSettings
 import dev.arnv.bluke.ui.theme.MyApplicationTheme
 
@@ -100,22 +99,8 @@ class TouchpadSettingsActivity : ComponentActivity() {
                                 ),
                             ),
                         )
-                        SettingsGroup(title = "Feel") {
-                            ScrollSlider(
-                                title = "Smoothing",
-                                explanation = "Higher values glide over uneven finger movement but trail it slightly.",
-                                value = settings.smoothing,
-                                label = when {
-                                    settings.smoothing <= 0f -> "Off"
-                                    settings.smoothing < 0.5f -> "Light"
-                                    else -> "Strong"
-                                },
-                                onChange = { value ->
-                                    settings = settings.copy(smoothing = value)
-                                    preferences.edit { putFloat(TOUCHPAD_SCROLL_SMOOTHING_PREFERENCE, value) }
-                                },
-                            )
-                            if (settings.momentum) {
+                        if (settings.momentum) {
+                            SettingsGroup(title = "Momentum") {
                                 ScrollSlider(
                                     title = "Glide distance",
                                     explanation = "How far a flick carries on after your fingers lift.",
