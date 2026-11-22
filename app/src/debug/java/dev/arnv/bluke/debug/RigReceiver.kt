@@ -13,6 +13,8 @@ import dev.arnv.bluke.bluetooth.ConsumerControl
 import dev.arnv.bluke.bluetooth.HID_DESCRIPTOR_REVISION_PREFERENCE
 import dev.arnv.bluke.bluetooth.GamepadDpadOutputMode
 import dev.arnv.bluke.bluetooth.numpadStroke
+import dev.arnv.bluke.ui.TouchpadScroller
+import dev.arnv.bluke.ui.TouchpadScrollSettings
 import org.json.JSONObject
 
 /**
@@ -82,6 +84,45 @@ class RigReceiver : BroadcastReceiver() {
                     intent.getIntExtra("wheel", 0).toByte(),
                     intent.getIntExtra("pan", 0).toByte(),
                 )
+                result.put("ok", true)
+            }
+            "wheel-stream" -> {
+                // Timed scroll steps for measuring how a host turns them into scrolling.
+                val ticks = intent.getIntExtra("ticks", 10)
+                val interval = intent.getIntExtra("interval", 16).toLong()
+                val wheel = intent.getIntExtra("wheel", 0).toByte()
+                val pan = intent.getIntExtra("pan", 0).toByte()
+                Thread {
+                    repeat(ticks) {
+                        manager.sendMouseReport(0, 0, 0, wheel, pan)
+                        Thread.sleep(interval)
+                    }
+                }.start()
+                result.put("ok", true)
+            }
+            "flick" -> {
+                // A scripted two-finger flick through the real scroll engine and the saved scroll settings:
+                // fingers travel dy px over ms, lift, and the engine plays out at its frame rate.
+                val dy = intent.getFloatExtra("dy", 300f)
+                val millis = intent.getIntExtra("ms", 100).toLong()
+                val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+                val scroller = TouchpadScroller(TouchpadScrollSettings.from(prefs))
+                Thread {
+                    var time = android.os.SystemClock.uptimeMillis()
+                    fun frame() {
+                        scroller.tick(time)?.let { manager.sendMouseReport(0, 0, 0, it.wheel.toByte(), it.pan.toByte()) }
+                        Thread.sleep(8)
+                        time += 8
+                    }
+                    scroller.begin(500f, 500f, time)
+                    val steps = (millis / 8).toInt().coerceAtLeast(1)
+                    for (i in 1..steps) {
+                        scroller.move(500f, 500f + dy * i / steps, time)
+                        frame()
+                    }
+                    scroller.liftAll(time)
+                    while (scroller.isActive) frame()
+                }.start()
                 result.put("ok", true)
             }
             "gamepad" -> {

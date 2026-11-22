@@ -80,6 +80,14 @@ class TouchpadScrollerTest {
         assertTrue("momentum carries past the fingers' distance", flick.wheel > atLift)
     }
 
+    @Test fun aGlideIsOverWithinASecondLikeAMacTrackpad() {
+        val hard = run(TouchpadScrollSettings(smoothing = 0f, glide = 1f)).apply { swipe(0f, 600f, 40) }
+        val lift = hard.time
+        hard.liftAll()
+        hard.tickUntilIdle()
+        assertTrue(hard.time - lift <= TouchpadScroller.MAX_GLIDE_DURATION_MILLIS + 8)
+    }
+
     @Test fun aLongerGlideCarriesFurther() {
         fun distance(glide: Float) = run(TouchpadScrollSettings(smoothing = 0f, glide = glide))
             .apply { swipe(0f, 200f, 100); liftAll(); tickUntilIdle() }.wheel

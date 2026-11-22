@@ -46,6 +46,9 @@ data class ScrollReport(val wheel: Int, val pan: Int)
  * - Axis lock: a gesture twice as long on one axis as the other scrolls only that axis.
  * - Smoothing: the scroll trails the fingers through a low-pass filter, then catches up after they lift.
  * - Momentum: lifting every finger while moving keeps scrolling and slows to a stop; a new touch stops it.
+ *   It follows a Mac trackpad's glide as measured on macOS: speed fades with a ~200 ms time constant and
+ *   the glide is over within a second. It ends before its steps thin out, because a Mac boosts every
+ *   wheel step (a lone one still scrolls tens of pixels), so a thin tail would crawl on in visible jumps.
  * - Handover: after a scroll ends, a remaining finger moves the pointer only once [allowsPointing].
  */
 class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSettings()) {
@@ -63,6 +66,7 @@ class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSett
     private var accPan = 0f
     private var glideWheel = 0f // scroll units per millisecond
     private var glidePan = 0f
+    private var glideStartedAt = 0L
     private var endedAt = Long.MIN_VALUE / 2
     private var releaseWheel = 0f
     private var releasePan = 0f
@@ -111,6 +115,7 @@ class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSett
         glidePan = releasePan
         releaseWheel = 0f
         releasePan = 0f
+        glideStartedAt = time
         gliding = true
     }
 
@@ -153,7 +158,9 @@ class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSett
             val decay = exp(-dt / glideTimeConstant())
             glideWheel *= decay
             glidePan *= decay
-            if (hypot(glideWheel, glidePan) < MIN_GLIDE_UNITS_PER_MS) gliding = false
+            if (hypot(glideWheel, glidePan) < MIN_GLIDE_UNITS_PER_MS || time - glideStartedAt >= MAX_GLIDE_DURATION_MILLIS) {
+                gliding = false
+            }
         }
         val wheel = accWheel.roundToInt().coerceIn(-127, 127)
         val pan = accPan.roundToInt().coerceIn(-127, 127)
@@ -197,8 +204,9 @@ class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSett
         const val UNITS_PER_PX = 0.06f
         const val AXIS_LOCK_RATIO = 2f
         const val MAX_SMOOTHING_MILLIS = 60f
-        const val MIN_GLIDE_MILLIS = 120f
-        const val MAX_GLIDE_MILLIS = 900f
+        const val MIN_GLIDE_MILLIS = 80f
+        const val MAX_GLIDE_MILLIS = 300f
+        const val MAX_GLIDE_DURATION_MILLIS = 1000L
         const val POINTER_RESUME_MILLIS = 120L
         const val MOMENTUM_LIFT_GRACE_MILLIS = 120L
         private const val MAX_TICK_MILLIS = 50L
@@ -207,6 +215,6 @@ class TouchpadScroller(var settings: TouchpadScrollSettings = TouchpadScrollSett
         private const val MIN_VELOCITY_SPAN_MILLIS = 10L
         private const val STOPPED_BEFORE_LIFT_MILLIS = 50L
         private const val MIN_GLIDE_START_UNITS_PER_MS = 0.03f
-        private const val MIN_GLIDE_UNITS_PER_MS = 0.002f
+        private const val MIN_GLIDE_UNITS_PER_MS = 0.04f // one step per 25 ms
     }
 }
