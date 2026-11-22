@@ -740,6 +740,9 @@ fun TouchGestureLayer(
 
     // Multi-touch tracking
     var isTwoFingerActive by remember { mutableStateOf(false) }
+    // Where the scroll has travelled: it follows whichever finger moves more, as a Mac trackpad does.
+    var scrollTrackX by remember { mutableFloatStateOf(0f) }
+    var scrollTrackY by remember { mutableFloatStateOf(0f) }
     val scroller = remember { TouchpadScroller() }
     var scrollTicker by remember { mutableStateOf<Job?>(null) }
     val context = LocalContext.current
@@ -926,17 +929,23 @@ fun TouchGestureLayer(
                         } else if (downCount == 2) {
                             val pressedList = changes.filter { it.pressed }
                             if (pressedList.size == 2) {
-                                val currentXAverage = (pressedList[0].position.x + pressedList[1].position.x) / 2f
-                                val currentYAverage = (pressedList[0].position.y + pressedList[1].position.y) / 2f
                                 val time = pressedList[0].uptimeMillis
                                 if (!isTwoFingerActive) {
                                     isTwoFingerActive = true
                                     lastActivePointerId = null
                                     accumulatedX = 0f
                                     accumulatedY = 0f
-                                    scroller.begin(currentXAverage / pxPerDp, currentYAverage / pxPerDp, time)
+                                    scrollTrackX = 0f
+                                    scrollTrackY = 0f
+                                    scroller.begin(0f, 0f, time)
                                 } else {
-                                    sendScroll(scroller.move(currentXAverage / pxPerDp, currentYAverage / pxPerDp, time))
+                                    val lead = TouchpadGesturePolicy.leadingFingerMove(
+                                        pressedList[0].position - pressedList[0].previousPosition,
+                                        pressedList[1].position - pressedList[1].previousPosition,
+                                    )
+                                    scrollTrackX += lead.x / pxPerDp
+                                    scrollTrackY += lead.y / pxPerDp
+                                    sendScroll(scroller.move(scrollTrackX, scrollTrackY, time))
                                 }
                             }
                         } else {

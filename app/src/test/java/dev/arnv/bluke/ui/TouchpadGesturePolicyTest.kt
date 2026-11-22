@@ -1,5 +1,7 @@
 package dev.arnv.bluke.ui
 
+import androidx.compose.ui.geometry.Offset
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -19,7 +21,17 @@ class TouchpadGesturePolicyTest {
         assertFalse(TouchpadGesturePolicy.isSecondTap(-1))
     }
 
-@Test
+    @Test
+    fun scrollFollowsTheFingerThatMovedFurther() {
+        val resting = Offset(0f, 0f)
+        val moving = Offset(3f, 40f)
+        // One finger resting: the scroll moves the full distance, not half of it.
+        assertEquals(moving, TouchpadGesturePolicy.leadingFingerMove(resting, moving))
+        assertEquals(moving, TouchpadGesturePolicy.leadingFingerMove(moving, resting))
+        assertEquals(moving, TouchpadGesturePolicy.leadingFingerMove(Offset(0f, 30f), moving))
+    }
+
+    @Test
     fun timingHelperAcceptsAQuickSecondTap() {
         assertTrue(
             TouchpadGesturePolicy.isSecondTap(elapsedSinceReleaseMillis = 120)
