@@ -298,15 +298,17 @@ object KeyboardLayouts {
     fun getLayout(
         type: KeyboardLayoutType,
         characterLayout: KeyboardCharacterLayout = KeyboardCharacterLayout.US_QWERTY,
+        modifierStyle: KeyboardModifierStyle = KeyboardModifierStyle.PC,
     ): List<List<KeyLayoutInfo>> {
         val kle = getKleString(type)
-        return parseKleString(kle).withCharacterLayout(characterLayout)
+        return parseKleString(kle).withCharacterLayout(characterLayout).withModifierStyle(modifierStyle)
     }
 
     fun getLayout(
         geometry: KeyboardGeometry,
         characterLayout: KeyboardCharacterLayout = KeyboardCharacterLayout.US_QWERTY,
-    ): List<List<KeyLayoutInfo>> = getLayout(geometry.legacySource, characterLayout)
+        modifierStyle: KeyboardModifierStyle = KeyboardModifierStyle.PC,
+    ): List<List<KeyLayoutInfo>> = getLayout(geometry.legacySource, characterLayout, modifierStyle)
 
     private fun getKleString(type: KeyboardLayoutType): String {
         return when (type) {

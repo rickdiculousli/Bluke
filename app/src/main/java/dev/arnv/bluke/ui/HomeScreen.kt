@@ -105,6 +105,11 @@ fun HomeScreen(
             )
         )
     }
+    var modifierStyle by rememberSaveable {
+        mutableStateOf(
+            KeyboardModifierStyle.fromPreference(sharedPrefs.getString(KEYBOARD_MODIFIER_STYLE_PREFERENCE, null))
+        )
+    }
     var isKeyboardActive by rememberSaveable { mutableStateOf(false) }
     BackHandler(enabled = isKeyboardActive) {
         isKeyboardActive = false
@@ -153,6 +158,9 @@ fun HomeScreen(
                 )
                 selectedGeometry = KeyboardGeometry.fromPreference(
                     sharedPrefs.getString(KEYBOARD_GEOMETRY_PREFERENCE, null)
+                )
+                modifierStyle = KeyboardModifierStyle.fromPreference(
+                    sharedPrefs.getString(KEYBOARD_MODIFIER_STYLE_PREFERENCE, null)
                 )
                 selectedKeyboardTheme = keyboardThemeRepository.selectedTheme()
                 val enabledModes = sharedPrefs.enabledInputModes().map(InputMode::id)
@@ -634,6 +642,7 @@ fun HomeScreen(
                                     },
                                     sharedPrefs = sharedPrefs,
                                     caseBrush = caseBrush,
+                                    modifierStyle = modifierStyle,
                                 )
                             }
                             2 -> {
@@ -1093,6 +1102,7 @@ fun HomeScreen(
                                 geometry = selectedGeometry,
                                 theme = selectedKeyboardTheme,
                                 characterLayout = characterLayout,
+                                modifierStyle = modifierStyle,
                                 activePressedKeys = activePressedKeys,
                                 isConnected = isConnected,
                                 isCapsLockActive = isCapsLockActive,

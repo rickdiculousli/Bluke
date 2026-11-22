@@ -67,6 +67,7 @@ fun TouchpadView(
     onModeChange: (Int) -> Unit,
     sharedPrefs: SharedPreferences,
     caseBrush: Brush,
+    modifierStyle: KeyboardModifierStyle = KeyboardModifierStyle.PC,
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
@@ -438,6 +439,7 @@ fun TouchpadView(
                     TouchpadModifierRail(
                         modifier = Modifier.width(72.dp).fillMaxHeight(),
                         rightHandKeys = false,
+                        modifierStyle = modifierStyle,
                         theme = keyboardTheme,
                         btManager = btManager,
                         triggerVibration = triggerVibration,
@@ -492,6 +494,7 @@ fun TouchpadView(
                     TouchpadModifierRail(
                         modifier = Modifier.width(72.dp).fillMaxHeight(),
                         rightHandKeys = true,
+                        modifierStyle = modifierStyle,
                         theme = keyboardTheme,
                         btManager = btManager,
                         triggerVibration = triggerVibration,
@@ -506,14 +509,16 @@ fun TouchpadView(
 private fun TouchpadModifierRail(
     modifier: Modifier,
     rightHandKeys: Boolean,
+    modifierStyle: KeyboardModifierStyle,
     theme: KeyboardThemeDefinition,
     btManager: BluetoothKeyboardManager,
     triggerVibration: (Long) -> Unit,
 ) {
+    val guiLabel = if (modifierStyle == KeyboardModifierStyle.MAC) modifierStyle.guiLabel else "Meta"
     val keys = if (rightHandKeys) {
-        listOf("Ctrl" to 0xE4, "Shift" to 0xE5, "Alt" to 0xE6, "Meta" to 0xE7)
+        listOf("Ctrl" to 0xE4, "Shift" to 0xE5, modifierStyle.altLabel to 0xE6, guiLabel to 0xE7)
     } else {
-        listOf("Ctrl" to 0xE0, "Shift" to 0xE1, "Alt" to 0xE2, "Meta" to 0xE3)
+        listOf("Ctrl" to 0xE0, "Shift" to 0xE1, modifierStyle.altLabel to 0xE2, guiLabel to 0xE3)
     }
     Column(
         modifier = modifier,
@@ -524,7 +529,7 @@ private fun TouchpadModifierRail(
             MechanicalModifierKey(
                 label = label,
                 keyCode = keyCode,
-                style = if (label == "Meta") theme.accentStyle else theme.modifierStyle,
+                style = if (label == guiLabel) theme.accentStyle else theme.modifierStyle,
                 btManager = btManager,
                 triggerVibration = triggerVibration,
             )
@@ -724,7 +729,11 @@ fun TouchGestureLayer(
 
     // Multi-touch tracking
     var isTwoFingerActive by remember { mutableStateOf(false) }
+    var lastTwoFingerX by remember { mutableFloatStateOf(0f) }
     var lastTwoFingerY by remember { mutableFloatStateOf(0f) }
+    var accumulatedScrollX by remember { mutableFloatStateOf(0f) }
+    var gestureTravelX by remember { mutableFloatStateOf(0f) }
+    var gestureTravelY by remember { mutableFloatStateOf(0f) }
     var accumulatedScrollY by remember { mutableFloatStateOf(0f) }
 
     // Tap tracking
@@ -809,6 +818,7 @@ fun TouchGestureLayer(
 
                         if (downCount == 1) {
                             isTwoFingerActive = false
+                            accumulatedScrollX = 0f
                             accumulatedScrollY = 0f
                             val pointer = changes.first { it.pressed }
                             
@@ -872,22 +882,42 @@ fun TouchGestureLayer(
                         } else if (downCount == 2) {
                             val pressedList = changes.filter { it.pressed }
                             if (pressedList.size == 2) {
+                                val currentXAverage = (pressedList[0].position.x + pressedList[1].position.x) / 2f
                                 val currentYAverage = (pressedList[0].position.y + pressedList[1].position.y) / 2f
                                 if (!isTwoFingerActive) {
                                     isTwoFingerActive = true
+                                    accumulatedScrollX = 0f
                                     accumulatedScrollY = 0f
+                                    gestureTravelX = 0f
+                                    gestureTravelY = 0f
+                                    lastTwoFingerX = currentXAverage
                                     lastTwoFingerY = currentYAverage
                                 } else {
-                                    accumulatedScrollY += (currentYAverage - lastTwoFingerY) * 0.06f * scrollSensitivity
+                                    val fingerDx = currentXAverage - lastTwoFingerX
+                                    val fingerDy = currentYAverage - lastTwoFingerY
+                                    gestureTravelX += fingerDx
+                                    gestureTravelY += fingerDy
+                                    val step = TouchpadGesturePolicy.scrollStep(
+                                        fingerDx = fingerDx,
+                                        fingerDy = fingerDy,
+                                        gestureDx = gestureTravelX,
+                                        gestureDy = gestureTravelY,
+                                        scrollSensitivity = scrollSensitivity,
+                                    )
+                                    accumulatedScrollX += step.pan
+                                    accumulatedScrollY += step.wheel
                                     val now = System.currentTimeMillis()
                                     if (now - lastReportTime >= 10L) {
+                                        val sendPan = accumulatedScrollX.roundToInt().coerceIn(-127, 127)
                                         val sendScroll = accumulatedScrollY.roundToInt().coerceIn(-127, 127)
-                                        if (sendScroll != 0) {
-                                            btManager.sendMouseReport(0, 0, 0, sendScroll.toByte())
+                                        if (sendScroll != 0 || sendPan != 0) {
+                                            btManager.sendMouseReport(0, 0, 0, sendScroll.toByte(), sendPan.toByte())
+                                            accumulatedScrollX -= sendPan
                                             accumulatedScrollY -= sendScroll
                                             lastReportTime = now
                                         }
                                     }
+                                    lastTwoFingerX = currentXAverage
                                     lastTwoFingerY = currentYAverage
                                 }
                             }
@@ -904,12 +934,14 @@ fun TouchGestureLayer(
                                     btManager.sendMouseReport(activeMouseButton, sendX.toByte(), sendY.toByte(), 0)
                                 }
                             }
+                            val sendPan = accumulatedScrollX.roundToInt().coerceIn(-127, 127)
                             val sendScroll = accumulatedScrollY.roundToInt().coerceIn(-127, 127)
-                            if (sendScroll != 0) {
-                                btManager.sendMouseReport(0, 0, 0, sendScroll.toByte())
+                            if (sendScroll != 0 || sendPan != 0) {
+                                btManager.sendMouseReport(0, 0, 0, sendScroll.toByte(), sendPan.toByte())
                             }
                             accumulatedX = 0f
                             accumulatedY = 0f
+                            accumulatedScrollX = 0f
                             accumulatedScrollY = 0f
                         }
 

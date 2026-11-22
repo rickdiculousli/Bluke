@@ -67,6 +67,11 @@ class BluetoothKeyboardManager(private val context: Context) {
 
     private val reportDiagnostics = HidReportDiagnostics()
 
+    // The latest input report submitted under each ID, and the host's last LED byte: a host's GET_REPORT is answered from these.
+    private val lastInputReports = java.util.concurrent.ConcurrentHashMap<Int, ByteArray>()
+    @Volatile
+    private var ledOutputByte: Byte = 0
+
     private fun logHidEvent(event: String) {
         if (!DeveloperLogManager.isEnabled) return
         val message = "t=${android.os.SystemClock.elapsedRealtime()} thread=${Thread.currentThread().name} " +
@@ -84,6 +89,7 @@ class BluetoothKeyboardManager(private val context: Context) {
         val epoch = connectionEpoch.get()
         val reportMode = gamepadDpadOutputMode
         if (hid != null && !closed) {
+            lastInputReports[reportId] = report.copyOf()
             try {
             reportExecutor.submit {
                 if (closed || epoch != connectionEpoch.get() || hid !== hidDeviceProfile ||
@@ -92,7 +98,7 @@ class BluetoothKeyboardManager(private val context: Context) {
                     val accepted = hid.sendReport(dev, reportId, report)
                     if (DeveloperLogManager.isEnabled) {
                         reportDiagnostics.record(reportId, accepted, android.os.SystemClock.elapsedRealtime())?.let { summary ->
-                            val axes = if (reportId == 3) gamepadAxisDiagnostic(report) else ""
+                            val axes = if (reportId == GAMEPAD_REPORT_ID) gamepadAxisDiagnostic(report) else ""
                             val message = "sendReport ID=0x${reportId.toString(16)} $summary " +
                                 "mode=$reportMode epoch=$epoch $axes " +
                                 "Data=[${report.joinToString(" ") { String.format("%02X", it) }}]"
@@ -257,7 +263,6 @@ class BluetoothKeyboardManager(private val context: Context) {
     }
 
     // 8-byte Keyboard HID report parameters
-    private val reportId = 1
     private var activeModifiers = 0
     private val activeKeys = ByteArray(6)
 
@@ -351,7 +356,7 @@ class BluetoothKeyboardManager(private val context: Context) {
                     _connectedDevice.value?.let { device ->
                         submitReport(
                             device,
-                            3,
+                            GAMEPAD_REPORT_ID,
                             buildGamepadReport(0, 0, 0f, 0f, 0f, 0f, gamepadDpadOutputMode),
                         )
                     }
@@ -363,7 +368,7 @@ class BluetoothKeyboardManager(private val context: Context) {
                     _connectedDevice.value?.let { device ->
                         submitReport(
                             device,
-                            3,
+                            GAMEPAD_REPORT_ID,
                             buildGamepadReport(0, 0, 0f, 0f, 0f, 0f, newMode),
                         )
                     }
@@ -1144,7 +1149,10 @@ class BluetoothKeyboardManager(private val context: Context) {
             _hasPendingConnection.value = false
         }
         val isNewLink = _connectedDevice.value?.address != device.address
-        if (isNewLink) connectionEpoch.incrementAndGet()
+        if (isNewLink) {
+            connectionEpoch.incrementAndGet()
+            lastInputReports.clear() // A new host's GET_REPORT sees idle input, not the last host's.
+        }
         automaticReconnectAttempted = true
         recordSupportedFirmware()
         _connectionTargetAddress.value = if (_hasPendingConnection.value) device.address else null
@@ -1266,7 +1274,7 @@ class BluetoothKeyboardManager(private val context: Context) {
             if (activeRegistrationAttempt !== attempt) return
             logHidEvent("callback setReport device=${device.address} type=$type id=$id length=${data.size}")
             if (type == BluetoothHidDevice.REPORT_TYPE_OUTPUT) {
-                if (id == 1.toByte()) {
+                if (id == KEYBOARD_REPORT_ID.toByte()) {
                     parseLedReport(data)
                 }
             }
@@ -1281,7 +1289,7 @@ class BluetoothKeyboardManager(private val context: Context) {
             super.onInterruptData(device, reportId, data)
             if (activeRegistrationAttempt !== attempt) return
             logHidEvent("callback interruptData device=${device.address} id=$reportId length=${data.size}")
-            if (reportId == 1.toByte()) {
+            if (reportId == KEYBOARD_REPORT_ID.toByte()) {
                 parseLedReport(data)
             }
         }
@@ -1296,6 +1304,16 @@ class BluetoothKeyboardManager(private val context: Context) {
             super.onGetReport(device, type, id, bufferSize)
             if (activeRegistrationAttempt !== attempt) return
             logHidEvent("callback getReport device=${device.address} type=$type id=$id bufferSize=$bufferSize")
+            val reply = replyToGetReport(type, id.toInt(), lastInputReports::get, ledOutputByte, gamepadDpadOutputMode)
+            try {
+                val accepted = when (reply) {
+                    is GetReportReply.Report -> hidDeviceProfile?.replyReport(device, type, id, reply.data)
+                    is GetReportReply.Error -> hidDeviceProfile?.reportError(device, reply.code)
+                }
+                logHidEvent("result getReport reply=${reply.javaClass.simpleName} accepted=$accepted")
+            } catch (e: Exception) {
+                Log.e("BluetoothKeyboard", "Failed to answer getReport: $e")
+            }
         }
 
         override fun onVirtualCableUnplug(device: BluetoothDevice) {
@@ -1311,6 +1329,7 @@ class BluetoothKeyboardManager(private val context: Context) {
             } else {
                 data[0].toInt()
             }
+            ledOutputByte = ledByte.toByte()
             _numLockState.value = (ledByte and 0x01) != 0
             numLockTogglePending.set(false)
             _capsLockState.value = (ledByte and 0x02) != 0
@@ -1589,7 +1608,7 @@ class BluetoothKeyboardManager(private val context: Context) {
     fun sendKey(keyCode: Int, isPress: Boolean) {
         val dev = _connectedDevice.value
         
-        val report = ByteArray(8)
+        val report = ByteArray(KEYBOARD_REPORT_SIZE)
         synchronized(activeKeys) {
             // Update local HID state variables (Modifiers or standard key codes)
             if (keyCode in 0xE0..0xE7) {
@@ -1651,20 +1670,15 @@ class BluetoothKeyboardManager(private val context: Context) {
 
         // Transmit HID report
         if (dev != null) {
-            submitReport(dev, reportId, report)
+            submitReport(dev, KEYBOARD_REPORT_ID, report)
         }
     }
 
     @SuppressLint("MissingPermission")
-    fun sendMouseReport(buttons: Byte, x: Byte, y: Byte, wheel: Byte) {
+    fun sendMouseReport(buttons: Byte, x: Byte, y: Byte, wheel: Byte, pan: Byte = 0) {
         val dev = _connectedDevice.value
         if (dev != null) {
-            val report = ByteArray(4)
-            report[0] = buttons
-            report[1] = x
-            report[2] = y
-            report[3] = wheel
-            submitReport(dev, 2, report) // Mouse report ID is 2
+            submitReport(dev, MOUSE_REPORT_ID, buildMouseReport(buttons, x, y, wheel, pan))
         }
     }
 
@@ -1693,7 +1707,7 @@ class BluetoothKeyboardManager(private val context: Context) {
                 rightYFloat,
                 gamepadDpadOutputMode,
             )
-            submitReport(dev, 3, report) // Gamepad report ID is 3
+            submitReport(dev, GAMEPAD_REPORT_ID, report)
         }
     }
 
@@ -1726,7 +1740,7 @@ class BluetoothKeyboardManager(private val context: Context) {
         connectionEpoch.incrementAndGet() // Discard held-input reports that have not been sent yet.
         resetKeyboardState()
         val device = _connectedDevice.value ?: return
-        submitReport(device, reportId, ByteArray(8))
+        submitReport(device, KEYBOARD_REPORT_ID, ByteArray(KEYBOARD_REPORT_SIZE))
         sendMouseReport(0, 0, 0, 0)
         sendGamepadReport(0, 0, 0f, 0f, 0f, 0f)
         sendConsumerControl(null)
@@ -1844,7 +1858,7 @@ class BluetoothKeyboardManager(private val context: Context) {
     fun sendConsumerControl(control: ConsumerControl?) {
         val dev = _connectedDevice.value
         if (dev != null) {
-            submitReport(dev, 4, buildConsumerControlReport(control))
+            submitReport(dev, CONSUMER_REPORT_ID, buildConsumerControlReport(control))
         }
     }
 }

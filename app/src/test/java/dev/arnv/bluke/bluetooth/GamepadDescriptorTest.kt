@@ -42,7 +42,7 @@ class GamepadDescriptorTest {
     @Test fun allProfilesShareDescriptorAndPreserveOriginalFields() {
         for (mode in GamepadDpadOutputMode.entries) {
             val descriptor = hidDescriptorForMode(mode)
-            assertEquals(239, descriptor.size)
+            assertEquals(246, descriptor.size)
             assertArrayEquals(hidDescriptorForMode(GamepadDpadOutputMode.NATIVE_HAT), descriptor)
             val axes = byteArrayOf(0x09, 0x30, 0x09, 0x31, 0x09, 0x32, 0x09, 0x33, 0x09, 0x35)
             val offset = (0..descriptor.size - axes.size).single { start ->
@@ -54,6 +54,11 @@ class GamepadDescriptorTest {
             assertEquals(0x95.toByte(), original[offset + 17])
             assertEquals(5.toByte(), original[offset + 18])
             original[offset + 18] = 4
+            // The mouse's horizontal pan field, added after the original fields were pinned.
+            val pan = listOf(0x05, 0x0c, 0x0a, 0x38, 0x02, 0x81, 0x06)
+                .map { it.toByte() }
+            val panOffset = (0..original.size - pan.size).single { original.subList(it, it + pan.size) == pan }
+            repeat(pan.size) { original.removeAt(panOffset) }
             val hash = MessageDigest.getInstance("SHA-256").digest(original.toByteArray())
                 .joinToString("") { "%02X".format(it.toInt() and 0xff) }
             assertEquals("6A99D5607B74B803329498B709761B898616A6F7905527456FDCD5A3BBD2DB62", hash)
@@ -109,7 +114,7 @@ class GamepadDescriptorTest {
                 0x80 -> bits[id] = bits.getOrDefault(id, 0) + size * count
             }
         }
-        assertEquals(mapOf(1 to 64, 2 to 32, 3 to 112, 4 to 16), bits)
+        assertEquals(mapOf(1 to KEYBOARD_REPORT_SIZE * 8, 2 to buildMouseReport(0, 0, 0, 0, 0).size * 8, 3 to 112, 4 to 16), bits)
         assertEquals(GAMEPAD_REPORT_SIZE_BYTES * 8, bits[3])
     }
 }

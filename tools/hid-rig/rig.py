@@ -33,6 +33,7 @@ HOST_NAME = "BlukeRigHost"
 TIMEOUT = 20.0
 
 DATA_INPUT = 0xA1  # HIDP DATA | INPUT report header
+DATA_OUTPUT = 0xA2  # HIDP DATA | OUTPUT report header
 
 
 # ---------------------------------------------------------------------------- adb
@@ -134,6 +135,26 @@ class Host:
             if len(pdu) >= 2 and pdu[0] == DATA_INPUT and pdu[1] == report_id:
                 return pdu[2:]
 
+    async def get_report(self, report_type: int, report_id: int) -> bytes | hid.Message.Handshake:
+        """Ask for a report on the control channel, as macOS and Windows hosts do. Returns the
+        DATA PDU (header, ID, report) or the handshake error the device answered with."""
+        answer: asyncio.Future = asyncio.get_running_loop().create_future()
+
+        def settle(value) -> None:
+            if not answer.done():
+                answer.set_result(value)
+
+        self.hid.on(hid.HID.EVENT_CONTROL_DATA, settle)
+        self.hid.on(hid.HID.EVENT_HANDSHAKE, settle)
+        try:
+            self.hid.get_report(report_type, report_id, 0)
+            return await asyncio.wait_for(answer, 5.0)
+        except asyncio.TimeoutError:
+            raise AssertionError(f"no answer to GET_REPORT type {report_type} id {report_id}") from None
+        finally:
+            self.hid.remove_listener(hid.HID.EVENT_CONTROL_DATA, settle)
+            self.hid.remove_listener(hid.HID.EVENT_HANDSHAKE, settle)
+
     async def descriptor(self) -> bytes:
         connection = self.hid.connection
         assert connection is not None, "no ACL connection for SDP"
@@ -204,9 +225,11 @@ async def check_keyboard(app: App, host: Host) -> None:
 
 async def check_mouse(app: App, host: Host) -> None:
     await call(app, "mouse", buttons=1, x=5, y=-3, wheel=1)
-    expect("mouse move+click", await host.next_report(2), "01 05 fd 01")
+    expect("mouse move+click", await host.next_report(2), "01 05 fd 01 00")
+    await call(app, "mouse", pan=-2)
+    expect("horizontal scroll", await host.next_report(2), "00 00 00 00 fe")
     await call(app, "mouse", buttons=0, x=0, y=0, wheel=0)
-    expect("mouse release", await host.next_report(2), "00 00 00 00")
+    expect("mouse release", await host.next_report(2), "00 00 00 00 00")
 
 
 async def check_consumer(app: App, host: Host) -> None:
@@ -260,6 +283,30 @@ async def check_numpad(app: App, host: Host) -> None:
     await call(app, "numpad", legend="%", press=False)
     expect("% up", await host.next_report(1), "02 00 00 00 00 00 00 00")
     expect("% shift up", await host.next_report(1), "00 00 00 00 00 00 00 00")
+
+
+async def check_get_report(app: App, host: Host) -> None:
+    """Every GET_REPORT gets an answer: the current input, the LED byte, or an error."""
+    input_, output, feature = (hid.Message.ReportType.INPUT_REPORT, hid.Message.ReportType.OUTPUT_REPORT,
+                               hid.Message.ReportType.FEATURE_REPORT)
+    await call(app, "key", code=0x04, press=True)       # a, held
+    await host.next_report(1)
+    expect("keyboard input", await host.get_report(input_, 1), "a1 01 00 00 04 00 00 00 00 00")
+    await call(app, "key", code=0x04, press=False)
+    await host.next_report(1)
+    expect("keyboard input released", await host.get_report(input_, 1), "a1 01 00 00 00 00 00 00 00 00")
+    expect("mouse input", await host.get_report(input_, 2), "a1 02 00 00 00 00 00")
+    expect("consumer input", await host.get_report(input_, 4), "a1 04 00 00")
+    host.hid.send_data(bytes([0x01, 0x03]))  # Num Lock and Caps Lock on
+    await wait_state(app, lambda s: s["numLock"] and s["capsLock"], "Num and Caps Lock from the host")
+    expect("LED output", await host.get_report(output, 1), "a2 01 03")
+    host.hid.send_data(bytes([0x01, 0x01]))  # back to Num Lock only
+    await wait_state(app, lambda s: s["numLock"] and not s["capsLock"], "Num Lock only from the host")
+    for report_type, report_id in ((feature, 1), (input_, 9)):
+        answer = await host.get_report(report_type, report_id)
+        if answer != hid.Message.Handshake.ERR_INVALID_REPORT_ID:
+            raise AssertionError(f"GET_REPORT type {report_type} id {report_id}: got {answer!r}, "
+                                 "want ERR_INVALID_REPORT_ID")
 
 
 async def switch_mode(app: App, host: Host, mode: str) -> None:
@@ -337,6 +384,7 @@ async def run(args: argparse.Namespace) -> int:
         await step("consumer reports", check_consumer(app, host))
         await step("LED output reports", check_leds(app, host))
         await step("numpad keys", check_numpad(app, host))
+        await step("GET_REPORT answers", check_get_report(app, host))
         for mode in ("native_hat", "android", "web_buttons"):
             await step(f"switch to {mode}", switch_mode(app, host, mode))
             await step(f"descriptor in {mode}", read_descriptor(mode))

@@ -80,6 +80,7 @@ class RigReceiver : BroadcastReceiver() {
                     intent.getIntExtra("x", 0).toByte(),
                     intent.getIntExtra("y", 0).toByte(),
                     intent.getIntExtra("wheel", 0).toByte(),
+                    intent.getIntExtra("pan", 0).toByte(),
                 )
                 result.put("ok", true)
             }

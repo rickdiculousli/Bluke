@@ -20,6 +20,7 @@ fun KeyboardView(
     geometry: KeyboardGeometry,
     theme: KeyboardThemeDefinition,
     characterLayout: KeyboardCharacterLayout = KeyboardCharacterLayout.US_QWERTY,
+    modifierStyle: KeyboardModifierStyle = KeyboardModifierStyle.PC,
     activePressedKeys: List<Int>,
     isConnected: Boolean = false,
     isCapsLockActive: Boolean,
@@ -36,7 +37,7 @@ fun KeyboardView(
             modifier = Modifier.fillMaxSize(),
             contentAlignment = Alignment.Center
         ) {
-            val keyboardRows = KeyboardLayouts.getLayout(geometry, characterLayout)
+            val keyboardRows = KeyboardLayouts.getLayout(geometry, characterLayout, modifierStyle)
             val allKeys = keyboardRows.flatten()
 
         val totalLayoutWidthInUnits = allKeys.maxOfOrNull { it.x + it.widthRatio } ?: 15.0f

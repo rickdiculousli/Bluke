@@ -42,6 +42,8 @@ import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
 import dev.arnv.bluke.ui.KEYBOARD_CHARACTER_LAYOUT_PREFERENCE
 import dev.arnv.bluke.ui.KeyboardCharacterLayout
+import dev.arnv.bluke.ui.KEYBOARD_MODIFIER_STYLE_PREFERENCE
+import dev.arnv.bluke.ui.KeyboardModifierStyle
 import dev.arnv.bluke.ui.SettingsCardGroup
 import dev.arnv.bluke.ui.SettingsGroup
 import dev.arnv.bluke.ui.SettingsItemData
@@ -58,6 +60,9 @@ class KeyboardSettingsActivity : ComponentActivity() {
                 var lockSyncMode by remember { mutableStateOf(preferences.getString("lock_sync_mode", "host") ?: "host") }
                 var characterLayout by remember {
                     mutableStateOf(KeyboardCharacterLayout.fromPreference(preferences.getString(KEYBOARD_CHARACTER_LAYOUT_PREFERENCE, null)))
+                }
+                var modifierStyle by remember {
+                    mutableStateOf(KeyboardModifierStyle.fromPreference(preferences.getString(KEYBOARD_MODIFIER_STYLE_PREFERENCE, null)))
                 }
                 var dialog by remember { mutableStateOf<KeyboardDialog?>(null) }
                 val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
@@ -114,6 +119,12 @@ class KeyboardSettingsActivity : ComponentActivity() {
                                     onClick = { dialog = KeyboardDialog.TYPING_LAYOUT },
                                 ),
                                 SettingsItemData(
+                                    title = "Modifier keys",
+                                    subtitle = "${modifierStyle.displayName} · ${modifierStyle.summary}",
+                                    icon = { Icon(Icons.Default.Keyboard, null, tint = MaterialTheme.colorScheme.primary) },
+                                    onClick = { dialog = KeyboardDialog.MODIFIER_KEYS },
+                                ),
+                                SettingsItemData(
                                     title = "Caps Lock",
                                     subtitle = if (lockSyncMode == "host") "Follow host indicators" else "Track locally on this phone",
                                     icon = { Icon(Icons.Default.Settings, null, tint = MaterialTheme.colorScheme.primary) },
@@ -161,6 +172,18 @@ class KeyboardSettingsActivity : ComponentActivity() {
                         },
                         onDismiss = { dialog = null },
                     )
+                    KeyboardDialog.MODIFIER_KEYS -> ChoiceDialog(
+                        title = "Modifier keys",
+                        explanation = "Match the computer: Mac puts Command beside the space bar and labels Option.",
+                        choices = KeyboardModifierStyle.entries.map { "${it.displayName} · ${it.summary}" },
+                        selectedIndex = KeyboardModifierStyle.entries.indexOf(modifierStyle),
+                        onSelect = { index ->
+                            modifierStyle = KeyboardModifierStyle.entries[index]
+                            preferences.edit { putString(KEYBOARD_MODIFIER_STYLE_PREFERENCE, modifierStyle.preferenceValue) }
+                            dialog = null
+                        },
+                        onDismiss = { dialog = null },
+                    )
                     KeyboardDialog.CAPS_LOCK -> ChoiceDialog(
                         title = "Caps Lock",
                         explanation = "Choose where lock-key state is controlled.",
@@ -180,7 +203,7 @@ class KeyboardSettingsActivity : ComponentActivity() {
     }
 }
 
-private enum class KeyboardDialog { TYPING_LAYOUT, CAPS_LOCK }
+private enum class KeyboardDialog { TYPING_LAYOUT, MODIFIER_KEYS, CAPS_LOCK }
 
 @Composable
 internal fun ChoiceDialog(

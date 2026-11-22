@@ -60,9 +60,9 @@ cleanup() {
 }
 trap cleanup EXIT
 
-"$adb" wait-for-device
+"$adb" -e wait-for-device
 for _ in $(seq 1 150); do
-  [[ "$("$adb" shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == 1 ]] && break
+  [[ "$("$adb" -e shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == 1 ]] && break
   sleep 2
 done
 serial=$("$adb" devices | awk '/^emulator-.*device$/ {print $1; exit}')
