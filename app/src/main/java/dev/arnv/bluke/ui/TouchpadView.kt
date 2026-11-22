@@ -848,7 +848,10 @@ fun TouchGestureLayer(
                         // 1. Process Down Events for Taps
                         changes.forEach { change ->
                             if (change.pressed && !change.previousPressed) {
-                                if (pointerDownInfo.isEmpty()) scroller.stop()
+                                if (pointerDownInfo.isEmpty()) {
+                                    scroller.stop()
+                                    btManager.holdLinkAwake() // the link is ready by the time the finger moves
+                                }
                                 pointerDownInfo[change.id] = change.uptimeMillis to change.position
                                 
                                 if (pointerDownInfo.size == 1) {

@@ -20,6 +20,7 @@ import dev.arnv.bluke.utils.DeveloperLogManager
 import dev.arnv.bluke.utils.LogType
 import androidx.core.content.edit
 import java.util.concurrent.Executors
+import java.util.concurrent.TimeUnit
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CoroutineStart
 import kotlinx.coroutines.CancellationException
@@ -83,13 +84,25 @@ class BluetoothKeyboardManager(private val context: Context) {
         DeveloperLogManager.log("BlukeLifecycle", message)
     }
 
+    // When input last went out and when anything did (keepalives included): see LinkKeepAlive.
+    @Volatile private var lastInputAt = Long.MIN_VALUE / 2
+    @Volatile private var lastSentAt = Long.MIN_VALUE / 2
+    private var keepAliveTask: java.util.concurrent.ScheduledFuture<*>? = null
+    private val keepAliveLock = Any()
+
     @SuppressLint("MissingPermission")
-    private fun submitReport(dev: BluetoothDevice, reportId: Int, report: ByteArray) {
+    private fun submitReport(dev: BluetoothDevice, reportId: Int, report: ByteArray, isKeepAlive: Boolean = false) {
         val hid = hidDeviceProfile
         val epoch = connectionEpoch.get()
         val reportMode = gamepadDpadOutputMode
         if (hid != null && !closed) {
             lastInputReports[reportId] = report.copyOf()
+            val now = android.os.SystemClock.uptimeMillis()
+            lastSentAt = now
+            if (!isKeepAlive) {
+                lastInputAt = now
+                startKeepAlive()
+            }
             try {
             reportExecutor.submit {
                 if (closed || epoch != connectionEpoch.get() || hid !== hidDeviceProfile ||
@@ -1657,21 +1670,57 @@ class BluetoothKeyboardManager(private val context: Context) {
                 }
             }
 
-            // Package report: 8 bytes
-            // byte 0: Modifiers
-            // byte 1: Reserved (0x00)
-            // bytes 2-7: Scancodes
-            report[0] = activeModifiers.toByte()
-            report[1] = 0x00.toByte()
-            for (j in 0 until 6) {
-                report[j + 2] = activeKeys[j]
-            }
+            keyboardReportLocked().copyInto(report)
         }
 
         // Transmit HID report
         if (dev != null) {
             submitReport(dev, KEYBOARD_REPORT_ID, report)
         }
+    }
+
+    /** Modifiers, a reserved byte, then the six held key codes. Call holding the activeKeys lock. */
+    private fun keyboardReportLocked(): ByteArray {
+        val report = ByteArray(KEYBOARD_REPORT_SIZE)
+        report[0] = activeModifiers.toByte()
+        activeKeys.copyInto(report, destinationOffset = 2)
+        return report
+    }
+
+    /**
+     * Someone is about to give input (a finger landed on the touchpad): wake the link now, before the
+     * first real report, and hold it awake as [LinkKeepAlive] describes.
+     */
+    fun holdLinkAwake() {
+        lastInputAt = android.os.SystemClock.uptimeMillis()
+        startKeepAlive()
+        sendKeepAlive()
+    }
+
+    private fun sendKeepAlive() {
+        val dev = _connectedDevice.value ?: return
+        val report = synchronized(activeKeys) { keyboardReportLocked() }
+        submitReport(dev, KEYBOARD_REPORT_ID, report, isKeepAlive = true)
+    }
+
+    private fun startKeepAlive() = synchronized(keepAliveLock) {
+        if (keepAliveTask?.isDone == false || closed) return
+        keepAliveTask = try {
+            executor.scheduleWithFixedDelay(::keepAliveTick, LinkKeepAlive.CHECK_MILLIS, LinkKeepAlive.CHECK_MILLIS, TimeUnit.MILLISECONDS)
+        } catch (_: java.util.concurrent.RejectedExecutionException) {
+            null // closed meanwhile
+        }
+    }
+
+    private fun keepAliveTick() {
+        val now = android.os.SystemClock.uptimeMillis()
+        if (!LinkKeepAlive.active(now, lastInputAt)) {
+            synchronized(keepAliveLock) {
+                if (!LinkKeepAlive.active(android.os.SystemClock.uptimeMillis(), lastInputAt)) keepAliveTask?.cancel(false)
+            }
+            return
+        }
+        if (LinkKeepAlive.due(now, lastInputAt, lastSentAt)) sendKeepAlive()
     }
 
     @SuppressLint("MissingPermission")

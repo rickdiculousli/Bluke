@@ -107,7 +107,16 @@ class Host:
         self.device = device
         self.hid = hid.Host(device)
         self.reports: asyncio.Queue[bytes] = asyncio.Queue()
-        self.hid.on(hid.HID.EVENT_INTERRUPT_DATA, self.reports.put_nowait)
+        self.last_keyboard: bytes | None = None
+        self.hid.on(hid.HID.EVENT_INTERRUPT_DATA, self.on_report)
+
+    def on_report(self, pdu: bytes) -> None:
+        # Bluke re-sends the unchanged keyboard state to keep the link awake; a repeat changes nothing.
+        if len(pdu) >= 2 and pdu[0] == DATA_INPUT and pdu[1] == 1:
+            if pdu == self.last_keyboard:
+                return
+            self.last_keyboard = pdu
+        self.reports.put_nowait(pdu)
 
     @property
     def interrupt_open(self) -> bool:

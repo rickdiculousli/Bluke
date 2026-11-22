@@ -100,6 +100,22 @@ class RigReceiver : BroadcastReceiver() {
                 }.start()
                 result.put("ok", true)
             }
+            "probe" -> {
+                // Link latency against the pause before a report: after each gap, one wheel step, its send
+                // time logged as wall-clock ms ("BlukeRig: sent <ms>") to pair with the host's arrival times.
+                val gaps = (intent.getStringExtra("gaps") ?: "8,50,100,200,400,800,1600").split(",").map { it.trim().toLong() }
+                val repeats = intent.getIntExtra("repeats", 3)
+                Thread {
+                    repeat(repeats) {
+                        for (gap in gaps) {
+                            Thread.sleep(gap)
+                            android.util.Log.i("BlukeRig", "sent ${System.currentTimeMillis()} gap $gap")
+                            manager.sendMouseReport(0, 0, 0, 1, 0)
+                        }
+                    }
+                }.start()
+                result.put("ok", true)
+            }
             "flick" -> {
                 // A scripted two-finger flick through the real scroll engine and the saved scroll settings:
                 // fingers travel dy dp over ms, lift, and the engine plays out at its frame rate.
