@@ -54,7 +54,7 @@ Nothing changes in the app. `HomeScreen.kt` loses about 600 lines to two new fil
 - Mode-switch tests deleted or rewritten: `GamepadModeSwitchStateTest` deleted; `GamepadDescriptorTest` keeps only its descriptor and report tests.
 - Gamepad reports dropped while unregistered: `BluetoothManagerSessionTest.gamepadReportsAreDroppedWhileUnregistered`, which fails (`expected:<0> but was:<1>`) with the guard removed.
 - Existing baselines unchanged: `./gradlew verifyRoborazziDebug --tests 'dev.arnv.bluke.ui.MediaPresentationScreenshotTest'` -> `BUILD SUCCESSFUL in 23s`, and `git diff --stat main` on the three PNGs is empty.
-- One screenshot helper: `captureMatrix` in `app/src/test/java/dev/arnv/bluke/testing/ScreenshotMatrix.kt`, exercised by `ScreenshotMatrixTest` (8 committed baselines).
+- One screenshot helper: `captureMatrix` in `app/src/test/java/dev/arnv/bluke/testing/ScreenshotMatrix.kt`. `ScreenshotMatrixTest` checks its pixels in memory through `onCaptured`, so a plain test run catches a broken helper: forcing light theme in the helper -> `failures="1"`, dropping its font scale -> `failures="2"`, as written -> `failures="0"`.
 - The harness asset runs and produces its captures: `ls screens-branch | wc -l` -> `122`, with no `SCREEN FAILURES`. Its header says how to run it (`recordRoborazziDebug`, since a plain test run writes no images).
 - Easy to miss: the move keeps the keyboard's state as long-lived as before. `KeyboardSurfaceState` is remembered by HomeScreen rather than inside the surface, so lock LEDs, held keys and a pending character layout survive leaving the surface: `rememberKeyboardSurfaceState` in `KeyboardSurface.kt`, called from `HomeScreen.kt`.
 
