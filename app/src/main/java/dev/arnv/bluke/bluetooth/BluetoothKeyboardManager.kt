@@ -107,6 +107,8 @@ class BluetoothKeyboardManager(private val context: Context) {
             reportExecutor.submit {
                 if (closed || epoch != connectionEpoch.get() || hid !== hidDeviceProfile ||
                     _connectedDevice.value?.address != dev.address) return@submit
+                // Android reconnects to deliver a report, so a keepalive would reopen a link being closed.
+                if (isKeepAlive && (_hasPendingConnection.value || switchingGamepadDescriptor)) return@submit
                 try {
                     val accepted = hid.sendReport(dev, reportId, report)
                     if (DeveloperLogManager.isEnabled) {

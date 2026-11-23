@@ -13,6 +13,7 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothConnected
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.LaptopMac
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
@@ -144,11 +145,22 @@ class HelpActivity : ComponentActivity() {
                         )
 
                         StepSection(
+                            icon = Icons.Default.LaptopMac,
+                            title = "Using a Mac",
+                            steps = listOf(
+                                "On first pairing macOS opens the Keyboard Setup Assistant: press the keys it asks for and choose ANSI or ISO as on your layout.",
+                                "Set Keyboard settings > Modifier keys to Mac so Cmd and Opt sit beside the space bar.",
+                                "Games and browsers read the gamepad only with Input Monitoring permission: System Settings > Privacy & Security > Input Monitoring. If you denied it to Chrome or Steam, turn it on there.",
+                                "Two-finger scrolling, its direction and the momentum glide are in Settings > Touchpad."
+                            )
+                        )
+
+                        StepSection(
                             icon = Icons.Default.Warning,
                             title = "Platform limitations",
                             steps = listOf(
                                 "Support depends on the phone firmware exposing Android's Bluetooth HID Device role.",
-                                "Apple hosts may pair but can restrict composite keyboard, pointer, or gamepad functions; behavior varies by iOS/iPadOS release.",
+                                "iPhone and iPad are not supported hosts.",
                                 "Host audio routing prevention is a best-effort workaround for Linux and may be undone by the host or phone firmware.",
                                 "If Android repeatedly rejects HID registration, use Retry once. The incompatible-device screen appears only after the registration attempt ceiling."
                             )

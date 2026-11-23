@@ -5,7 +5,7 @@ Android app that registers the phone as a Bluetooth HID device (keyboard, touchp
 ## Requirements
 
 - Android 9 (API 28)+ with firmware that exposes the Bluetooth HID Device profile; some chipsets and OEM ROMs don't.
-- Hosts: Windows, Linux, Android, ChromeOS. Apple hosts are unsupported.
+- Hosts: Windows, Linux, Android, ChromeOS, macOS. iPhone and iPad are unsupported.
 - JDK compatible with the project's Android Gradle Plugin, Android SDK as set in `app/build.gradle.kts`, and the bundled Gradle wrapper.
 
 ## Build and test
@@ -34,6 +34,10 @@ Release builds sign from the `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_ALIAS` and 
 - Keyboard layouts send key positions, not characters; the host's input language decides what gets typed.
 - Some hosts route audio to the phone as a Bluetooth speaker; the "Keep audio on this phone" setting counters it.
 - Battery savers can kill the background session when the screen locks.
+- After ~100 ms with nothing to send, the Bluetooth link drops into sniff subrating and the next report lands 100-450 ms late. While Bluke is in use (a minute after the last input or touch) the manager re-sends the unchanged keyboard state whenever nothing went out for 40 ms, which holds the delay near 30 ms; hosts ignore a repeated report.
+- Hosts may ask for a report's current state (GET_REPORT); macOS does. Bluke answers from the last report it sent, mouse movement zeroed.
+- macOS sees one device whose main role is keyboard, so an app reads the gamepad only with Input Monitoring permission (System Settings > Privacy & Security). On first pairing it runs the Keyboard Setup Assistant. "Modifier keys: Mac" in keyboard settings puts Cmd and Opt beside the space bar.
+- macOS treats the touchpad as a mouse: it accelerates wheel steps and adds no momentum. Two-finger scrolling therefore sends wheel steps by physical finger distance, follows the faster finger, and plays its own short glide after a flick, timed after a Mac trackpad's.
 
 ## License and credits
 
