@@ -57,8 +57,25 @@ import org.robolectric.annotation.GraphicsMode
 import java.io.File
 
 /**
- * Throwaway visual-audit harness: renders every user-facing screen in light and dark theme
- * at Pixel 8 size and writes PNGs to [OUT]. Not a regression test.
+ * Visual-audit harness: renders every user-facing screen in light and dark theme at Pixel 8 size
+ * and writes PNGs to [OUT]. Not a regression test and not part of the suite: it lives under
+ * `docs/proposals/assets/` and runs only when copied into a checkout.
+ *
+ * To capture a tree (a UI spec's reviewer runs it on a scratch checkout of `main` for the
+ * "from main" captures, then on the branch):
+ *
+ *     cp docs/proposals/assets/001-AllScreensScreenshotTest.kt \
+ *        app/src/test/java/dev/arnv/bluke/AllScreensScreenshotTest.kt
+ *     SCREENS_OUT="$PWD/app/build/screens-main" ./gradlew recordRoborazziDebug \
+ *        --tests 'dev.arnv.bluke.AllScreensScreenshotTest'
+ *     rm app/src/test/java/dev/arnv/bluke/AllScreensScreenshotTest.kt
+ *
+ * Roborazzi writes images only in record mode, so `testDebugUnitTest` alone captures nothing.
+ * Without `SCREENS_OUT` the PNGs go to `app/build/all-screens/`. A screen that fails to render
+ * doesn't stop the others: each test prints `SCREEN FAILURES:` with the ones that failed (see
+ * the test report's standard output), so count the PNGs to see what was captured. It renders
+ * the screens through their public entry points (HomeScreen, the activities), so a spec that
+ * renames or removes one of those updates this file in the same change.
  */
 @OptIn(ExperimentalRoborazziApi::class)
 @RunWith(RobolectricTestRunner::class)
@@ -74,11 +91,7 @@ class AllScreensScreenshotTest {
     private val openScenarios = mutableListOf<ActivityScenario<*>>()
 
     private companion object {
-        val OUT = File(
-            System.getProperty("screens.out")
-                ?: "/private/tmp/claude-501/-Users-rickli--t3-worktrees-Bluke-t3-3cfd70f1-2acbc8e7503662b3/" +
-                "96a4cbe2-f52a-45cf-a48f-98bb117854bc/scratchpad/research/screens",
-        )
+        val OUT = File(System.getenv("SCREENS_OUT") ?: "build/all-screens").apply { mkdirs() }
         const val PORTRAIT = "w411dp-h914dp-port"
         const val LANDSCAPE = "w914dp-h411dp-land"
         const val TALL = "w411dp-h2400dp-port"
