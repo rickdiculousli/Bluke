@@ -10,20 +10,21 @@ use std::io::BufRead;
 use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::Duration;
 
 const USAGE: &str = "\
 rig: bluke-mirror's synthetic source and recording injector, for the Android mirror rig.
 
 Usage:
-  rig --phone <ip>[:port] [--record <file>] [--config-dir <dir>] [--pair] [--seconds <n>]
+  rig --phone <ip>[:port] [--record <file>] [--config-dir <dir>] [--pair] [--seconds <n>] [--stop-on-eof]
 
   --phone        the phone (e.g. 127.0.0.1:<port> through adb forward)
   --record       append one JSON line per injected event to this file
   --config-dir   where identity.key, identity.crt and paired-phone live (default: cache/rig-companion)
   --pair         first pair: read the six-digit code from stdin, then continue into a session
   --seconds      how long to stream (default 10)
+  --stop-on-eof  also stop, and print the summary, when stdin closes (after the code, with --pair)
 
 At exit prints one JSON line: frames sent and acked, frame send-to-ack and pointer
 read-to-inject latencies in ms (count, p50, p95, max).
@@ -43,6 +44,7 @@ struct Args {
     config_dir: PathBuf,
     pair: bool,
     seconds: u64,
+    stop_on_eof: bool,
 }
 
 fn parse() -> Result<Option<Args>, String> {
@@ -51,6 +53,7 @@ fn parse() -> Result<Option<Args>, String> {
     let mut config_dir = None;
     let mut pair = false;
     let mut seconds = 10;
+    let mut stop_on_eof = false;
     let mut it = std::env::args().skip(1);
     while let Some(a) = it.next() {
         let mut value = || it.next().ok_or(format!("{a} needs a value"));
@@ -60,13 +63,14 @@ fn parse() -> Result<Option<Args>, String> {
             "--record" => record = Some(PathBuf::from(value()?)),
             "--config-dir" => config_dir = Some(PathBuf::from(value()?)),
             "--pair" => pair = true,
+            "--stop-on-eof" => stop_on_eof = true,
             "--seconds" => seconds = value()?.parse().map_err(|_| "--seconds takes a whole number")?,
             other => return Err(format!("unknown argument: {other}")),
         }
     }
     let phone = phone.ok_or("--phone is required")?;
     let config_dir = config_dir.unwrap_or_else(|| PathBuf::from("cache/rig-companion"));
-    Ok(Some(Args { phone, record, config_dir, pair, seconds }))
+    Ok(Some(Args { phone, record, config_dir, pair, seconds, stop_on_eof }))
 }
 
 /// count, p50, p95 and max of µs samples, as a JSON object in ms.
@@ -155,11 +159,19 @@ fn main() -> ExitCode {
         },
         None => Box::new(Discard),
     };
-    let stop = AtomicBool::new(false);
+    static STOP: AtomicBool = AtomicBool::new(false);
+    if args.stop_on_eof {
+        std::thread::spawn(|| {
+            // Drain stdin until it closes; the code line, if any, was read above.
+            let _ = std::io::copy(&mut std::io::stdin().lock(), &mut std::io::sink());
+            STOP.store(true, Ordering::Relaxed);
+        });
+    }
+    let stop = &STOP;
     let (mut sent, mut acked, mut sessions) = (0u64, 0u64, 0u32);
     let (mut ack_us, mut inject_us) = (Vec::new(), Vec::new());
     let mut last_end = String::from("never connected");
-    while now_us() < deadline {
+    while now_us() < deadline && !stop.load(Ordering::Relaxed) {
         let link = match Link::connect(args.phone, &id) {
             Ok(l) => l,
             Err(e) => {
@@ -169,7 +181,7 @@ fn main() -> ExitCode {
             }
         };
         sessions += 1;
-        let opts = session::Options { name: "bluke-mirror rig".into(), stop: &stop, until_us: Some(deadline) };
+        let opts = session::Options { name: "bluke-mirror rig".into(), stop, until_us: Some(deadline) };
         let capture = Box::new(Synthetic::new(Schedule::Every(1)));
         let report =
             session::run(link, Some(pinned), capture, injector.as_mut(), &mut jpeg::Jpeg::default(), &opts, &mut |s| eprintln!("rig: {s}"));
