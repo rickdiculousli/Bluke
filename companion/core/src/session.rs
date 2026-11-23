@@ -6,7 +6,9 @@ use crate::frames::{FrameCredit, Prepared};
 use crate::pairing::Fingerprint;
 use crate::pointer::{Buttons, Display, Injector};
 
-/// While a button is held, this much silence releases it.
+/// While a button is held, this much silence releases it. Only the phone's main-thread traffic
+/// (Pointer, Wheel, Heartbeat, Release, Ping) counts: `FrameAck`s come from its decoder thread,
+/// so they keep flowing while a hung main thread can't lift the finger.
 pub const SILENCE_RELEASE_US: u64 = 1_000_000;
 
 /// The phone's `Welcome` parameters.
@@ -47,6 +49,11 @@ impl std::fmt::Display for Close {
     }
 }
 
+/// Whether `m` shows the phone's main thread is alive: what it sends from touches and its tick.
+fn is_live(m: &Message) -> bool {
+    matches!(m, Message::Pointer { .. } | Message::Wheel { .. } | Message::Heartbeat | Message::Release | Message::Ping { .. })
+}
+
 /// The peer's fingerprint didn't match the pinned one; nothing may be sent.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct NotPinned;
@@ -72,7 +79,8 @@ pub struct Session {
     credit: FrameCredit,
     last_sent_hash: Option<u64>,
     next_seq: u32,
-    last_rx_us: u64,
+    /// When the phone's main thread last spoke: the clock of the held-button silence rule.
+    last_live_us: u64,
     next_capture_us: u64,
     pub stats: Stats,
 }
@@ -97,7 +105,7 @@ impl Session {
             credit: FrameCredit::default(),
             last_sent_hash: None,
             next_seq: 0,
-            last_rx_us: now_us,
+            last_live_us: now_us,
             next_capture_us: 0,
             stats: Stats::default(),
         };
@@ -131,7 +139,9 @@ impl Session {
 
     /// Handles one message from the phone. `Err` means close the connection (then call [`Session::close`]).
     pub fn on_message(&mut self, now_us: u64, m: Message, inj: &mut dyn Injector) -> Result<Vec<Message>, Close> {
-        self.last_rx_us = now_us;
+        if is_live(&m) {
+            self.last_live_us = now_us;
+        }
         let Some(_) = self.welcome else {
             return match m {
                 Message::Welcome { version, codecs, max_width, max_height, fps } => {
@@ -230,9 +240,10 @@ impl Session {
         self.welcome.map(|_| self.display_message())
     }
 
-    /// Time passes with no message: after 1 s of silence a held button is released.
+    /// Time passes: after 1 s with no main-thread message (see [`SILENCE_RELEASE_US`]) a held
+    /// button is released.
     pub fn tick(&mut self, now_us: u64, inj: &mut dyn Injector) {
-        if self.buttons.held() && now_us.saturating_sub(self.last_rx_us) >= SILENCE_RELEASE_US {
+        if self.buttons.held() && now_us.saturating_sub(self.last_live_us) >= SILENCE_RELEASE_US {
             self.buttons.release(&self.display, inj);
         }
     }

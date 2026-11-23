@@ -94,14 +94,11 @@ fn press_drag_release_in_order_with_mapping_and_clamping() {
             InputEvent::Up { x: -1.0, y: 1079.0 },
         ]
     );
-    // Every point lands inside the display's rect; points from outside it are clamped in.
-    let d = display();
+    // Every point lands inside the display's rect, the extremes on its edges.
     for e in &rec {
         let (x, y) = e.point();
         assert!((-1920.0..=-1.0).contains(&x) && (0.0..=1079.0).contains(&y), "{e:?}");
     }
-    assert_eq!(d.clamp(-5000.0, 99999.0), (-1920.0, 1079.0));
-    assert_eq!(d.clamp(10.0, -3.0), (-1.0, 0.0));
     let one_px = Display { id: 2, x: 5.0, y: 7.0, width: 1.0, height: 1.0, name: String::new() };
     assert_eq!(one_px.map(65535, 65535), (5.0, 7.0));
 }
@@ -179,6 +176,47 @@ fn silent_link_mid_drag_releases_after_one_second() {
     let n = rec.len();
     s.tick(10_000_000, &mut rec);
     assert_eq!(rec.len(), n);
+}
+
+#[test]
+fn frame_acks_alone_dont_keep_a_held_button() {
+    // A hung phone main thread: its decoder still acknowledges frames, but nothing else arrives.
+    let mut s = started(0);
+    let mut rec = Vec::new();
+    mid_drag(&mut s, &mut rec, 1_000);
+    let t0 = 1_000;
+    let mut cap = Synthetic::new(Schedule::Every(1));
+    let mut acked_at = t0;
+    for t in (t0 + 50_000..t0 + SILENCE_RELEASE_US).step_by(50_000) {
+        let f = downscale(&cap.grab().expect("grab"), 480, 480);
+        if let Some(Message::Frame { seq, .. }) = offer(&mut s, t, &f) {
+            s.on_message(t + 10_000, Message::FrameAck { seq, decode_us: 3_000 }, &mut rec).expect("ack");
+            acked_at = t + 10_000;
+        }
+        s.tick(t + 10_000, &mut rec);
+    }
+    assert!(acked_at > t0 + SILENCE_RELEASE_US / 2, "frames kept flowing");
+    assert!(s.button_held(), "not yet a second");
+    s.tick(t0 + SILENCE_RELEASE_US, &mut rec);
+    assert!(matches!(rec.last(), Some(InputEvent::Release { .. })), "acks don't count as the phone being alive");
+    assert!(!s.button_held());
+}
+
+#[test]
+fn each_main_thread_message_keeps_a_held_button() {
+    for (i, live) in [Message::Pointer { x: 9, y: 9, buttons: 1 }, Message::Wheel { dx: 0, dy: 1 }, Message::Heartbeat, Message::Ping { t_us: 5 }]
+        .into_iter()
+        .enumerate()
+    {
+        let mut s = started(0);
+        let mut rec = Vec::new();
+        mid_drag(&mut s, &mut rec, 1_000);
+        s.on_message(900_000, live, &mut rec).expect("ok");
+        s.tick(1_000 + SILENCE_RELEASE_US, &mut rec);
+        assert!(s.button_held(), "message {i} counts as alive");
+        s.tick(900_000 + SILENCE_RELEASE_US, &mut rec);
+        assert!(!s.button_held(), "message {i}: a second after it, released");
+    }
 }
 
 #[test]

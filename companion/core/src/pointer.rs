@@ -23,11 +23,6 @@ impl Display {
     pub fn map(&self, x: u16, y: u16) -> (f64, f64) {
         (Display::map_axis(self.x, self.width, x), Display::map_axis(self.y, self.height, y))
     }
-
-    /// Clamps any global point into this display's rect.
-    pub fn clamp(&self, x: f64, y: f64) -> (f64, f64) {
-        (x.clamp(self.x, self.x + (self.width - 1.0).max(0.0)), y.clamp(self.y, self.y + (self.height - 1.0).max(0.0)))
-    }
 }
 
 /// One injected input event, at global coordinates.
