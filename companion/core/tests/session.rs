@@ -70,7 +70,9 @@ fn nothing_is_sent_or_injected_before_welcome() {
 fn press_drag_release_in_order_with_mapping_and_clamping() {
     let mut s = started(0);
     let mut rec: Vec<InputEvent> = Vec::new();
-    for m in [pointer(0, 0, false), pointer(0, 0, true), pointer(32768, 16384, true), pointer(65535, 65535, true), pointer(65535, 65535, false)] {
+    for m in
+        [pointer(0, 0, false), pointer(0, 0, true), pointer(32768, 16384, true), pointer(65535, 65535, true), pointer(65535, 65535, false)]
+    {
         s.on_message(1, m, &mut rec).expect("ok");
     }
     let x_mid = -1920.0 + 32768.0 / 65535.0 * 1919.0;

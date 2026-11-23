@@ -89,11 +89,11 @@ pub fn downscale(img: &Image, max_w: u16, max_h: u16) -> Scaled {
 pub fn hash_pixels(w: u16, h: u16, rgb: &[u8]) -> u64 {
     const PRIME: u64 = 0x0000_0100_0000_01b3;
     let mut hash: u64 = 0xcbf2_9ce4_8422_2325 ^ (u64::from(w) << 16 | u64::from(h));
-    let mut chunks = rgb.chunks_exact(8);
-    for c in &mut chunks {
-        hash = (hash ^ u64::from_le_bytes(c.try_into().expect("8"))).wrapping_mul(PRIME);
+    let (words, rest) = rgb.as_chunks::<8>();
+    for c in words {
+        hash = (hash ^ u64::from_le_bytes(*c)).wrapping_mul(PRIME);
     }
-    for &b in chunks.remainder() {
+    for &b in rest {
         hash = (hash ^ u64::from(b)).wrapping_mul(PRIME);
     }
     hash

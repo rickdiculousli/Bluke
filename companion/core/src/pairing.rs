@@ -77,7 +77,7 @@ pub enum CompanionStep {
 enum CState {
     AwaitCode,
     NeedCode,
-    AwaitReply(Spake2),
+    AwaitReply(Box<Spake2>),
     AwaitResult,
     Done,
 }
@@ -133,7 +133,7 @@ impl CompanionPairing {
         }
         let pake = Spake2::new(Role::A, &code_to_w(code), secret, &self.own, &self.phone, AAD);
         let share = pake.share();
-        self.state = CState::AwaitReply(pake);
+        self.state = CState::AwaitReply(Box::new(pake));
         Ok(Message::PakeShare { p_a: share })
     }
 }

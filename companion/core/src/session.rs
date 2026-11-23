@@ -78,7 +78,13 @@ pub struct Session {
 impl Session {
     /// Starts a session on a connection whose peer presented `peer`. Only a pinned phone gets
     /// a `Hello`; any other peer gets nothing and the connection must close.
-    pub fn start(name: &str, display: Display, pinned: Option<Fingerprint>, peer: Fingerprint, now_us: u64) -> Result<(Session, Message), NotPinned> {
+    pub fn start(
+        name: &str,
+        display: Display,
+        pinned: Option<Fingerprint>,
+        peer: Fingerprint,
+        now_us: u64,
+    ) -> Result<(Session, Message), NotPinned> {
         if pinned != Some(peer) {
             return Err(NotPinned);
         }

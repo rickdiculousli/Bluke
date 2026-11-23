@@ -108,7 +108,9 @@ fn pair_command(config: &Config, phone: Option<SocketAddr>) -> ExitCode {
                     found[0].addr
                 }
                 Ok(found) if found.is_empty() => {
-                    return fail("no phone found. Open Mirror on the phone (on the same Wi-Fi), or pass --phone with the address Mirror shows.");
+                    return fail(
+                        "no phone found. Open Mirror on the phone (on the same Wi-Fi), or pass --phone with the address Mirror shows.",
+                    );
                 }
                 Ok(found) => {
                     let list: Vec<String> = found.iter().map(|f| format!("  {} at {}", f.name, f.addr)).collect();
@@ -193,7 +195,8 @@ fn run_command(config: &Config, phone: Option<SocketAddr>) -> ExitCode {
         let d = capture.display();
         println!("Connected to the phone at {addr}; mirroring {} ({}x{} points).", d.name, d.width, d.height);
         let opts = session::Options { name: name.clone(), stop: &STOP, until_us: None };
-        let report = session::run(link, Some(pinned), capture, injector.as_mut(), &mut jpeg::Jpeg::default(), &opts, &mut |s| println!("{s}"));
+        let report =
+            session::run(link, Some(pinned), capture, injector.as_mut(), &mut jpeg::Jpeg::default(), &opts, &mut |s| println!("{s}"));
         println!("Session ended: {}.", report.end);
         match report.end {
             session::End::Closed(bluke_mirror_core::session::Close::Refused(1)) => {

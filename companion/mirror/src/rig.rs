@@ -1,7 +1,7 @@
 //! Test-only pieces (feature `rig`): the synthetic screen and a recording injector.
 
 pub use bluke_mirror_core::synthetic::{Schedule, Synthetic};
-use bluke_mirror_core::{InputEvent, Injector};
+use bluke_mirror_core::{Injector, InputEvent};
 use std::io::Write;
 use std::path::Path;
 
@@ -29,7 +29,8 @@ impl Injector for Recording {
             InputEvent::Wheel { dx, dy, .. } => format!(", \"dx\": {dx}, \"dy\": {dy}"),
             _ => String::new(),
         };
-        let line = format!("{{\"t_us\": {}, \"kind\": \"{}\", \"x\": {}, \"y\": {}{extra}}}\n", crate::now_us(), event.kind(), num(x), num(y));
+        let line =
+            format!("{{\"t_us\": {}, \"kind\": \"{}\", \"x\": {}, \"y\": {}{extra}}}\n", crate::now_us(), event.kind(), num(x), num(y));
         // One write per line, so a reader never sees half an event.
         if let Err(e) = self.file.write_all(line.as_bytes()) {
             eprintln!("recording injector: {e}");

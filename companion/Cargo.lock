@@ -182,6 +182,7 @@ dependencies = [
  "rcgen",
  "rustls",
  "rustls-pki-types",
+ "serde_json",
  "sha2",
  "xcap",
 ]

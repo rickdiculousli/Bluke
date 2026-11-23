@@ -14,4 +14,4 @@ pub mod synthetic;
 pub use codec::{DecodeError, Message};
 pub use frames::{Capture, FrameEncoder, Image, Scaled};
 pub use pairing::Fingerprint;
-pub use pointer::{Display, InputEvent, Injector};
+pub use pointer::{Display, Injector, InputEvent};

@@ -5,7 +5,7 @@
 use bluke_mirror::config::Config;
 use bluke_mirror::rig::{Recording, Schedule, Synthetic};
 use bluke_mirror::{jpeg, link::Link, now_us, pair, parse_phone, session};
-use bluke_mirror_core::{InputEvent, Injector};
+use bluke_mirror_core::{Injector, InputEvent};
 use std::io::BufRead;
 use std::net::SocketAddr;
 use std::path::PathBuf;
@@ -88,6 +88,21 @@ fn summary(samples: &mut [u64]) -> String {
     )
 }
 
+/// A JSON string literal.
+fn json_str(s: &str) -> String {
+    let mut out = String::from("\"");
+    for c in s.chars() {
+        match c {
+            '"' => out.push_str("\\\""),
+            '\\' => out.push_str("\\\\"),
+            c if (c as u32) < 0x20 => out.push_str(&format!("\\u{:04x}", c as u32)),
+            c => out.push(c),
+        }
+    }
+    out.push('"');
+    out
+}
+
 fn fail(msg: &str) -> ExitCode {
     eprintln!("rig: {msg}");
     ExitCode::FAILURE
@@ -117,7 +132,9 @@ fn main() -> ExitCode {
                     break;
                 }
                 // The phone may not be listening yet.
-                Err(pair::PairError::Io(e)) if e.kind() == std::io::ErrorKind::ConnectionRefused && now_us() < deadline => std::thread::sleep(RETRY),
+                Err(pair::PairError::Io(e)) if e.kind() == std::io::ErrorKind::ConnectionRefused && now_us() < deadline => {
+                    std::thread::sleep(RETRY)
+                }
                 Err(e) => return fail(&format!("pairing failed: {e}")),
             }
         }
@@ -154,7 +171,8 @@ fn main() -> ExitCode {
         sessions += 1;
         let opts = session::Options { name: "bluke-mirror rig".into(), stop: &stop, until_us: Some(deadline) };
         let capture = Box::new(Synthetic::new(Schedule::Every(1)));
-        let report = session::run(link, Some(pinned), capture, injector.as_mut(), &mut jpeg::Jpeg::default(), &opts, &mut |s| eprintln!("rig: {s}"));
+        let report =
+            session::run(link, Some(pinned), capture, injector.as_mut(), &mut jpeg::Jpeg::default(), &opts, &mut |s| eprintln!("rig: {s}"));
         sent += report.stats.frames_sent;
         acked += report.stats.frames_acked;
         ack_us.extend(report.stats.ack_latency_us);
@@ -166,10 +184,10 @@ fn main() -> ExitCode {
         }
     }
     println!(
-        "{{\"sessions\": {sessions}, \"frames_sent\": {sent}, \"frames_acked\": {acked}, \"frame_ack_ms\": {}, \"inject_ms\": {}, \"end\": {:?}}}",
+        "{{\"sessions\": {sessions}, \"frames_sent\": {sent}, \"frames_acked\": {acked}, \"frame_ack_ms\": {}, \"inject_ms\": {}, \"end\": {}}}",
         summary(&mut ack_us),
         summary(&mut inject_us),
-        last_end
+        json_str(&last_end)
     );
     if sessions == 0 { ExitCode::FAILURE } else { ExitCode::SUCCESS }
 }

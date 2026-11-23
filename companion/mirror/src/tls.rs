@@ -33,15 +33,32 @@ impl AnyCertificate {
 const NO_TLS12: &str = "TLS 1.2 is not allowed";
 
 impl ServerCertVerifier for AnyCertificate {
-    fn verify_server_cert(&self, _: &CertificateDer<'_>, _: &[CertificateDer<'_>], _: &ServerName<'_>, _: &[u8], _: UnixTime) -> Result<ServerCertVerified, Error> {
+    fn verify_server_cert(
+        &self,
+        _: &CertificateDer<'_>,
+        _: &[CertificateDer<'_>],
+        _: &ServerName<'_>,
+        _: &[u8],
+        _: UnixTime,
+    ) -> Result<ServerCertVerified, Error> {
         Ok(ServerCertVerified::assertion())
     }
 
-    fn verify_tls12_signature(&self, _: &[u8], _: &CertificateDer<'_>, _: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, Error> {
+    fn verify_tls12_signature(
+        &self,
+        _: &[u8],
+        _: &CertificateDer<'_>,
+        _: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
         Err(Error::General(NO_TLS12.into()))
     }
 
-    fn verify_tls13_signature(&self, message: &[u8], cert: &CertificateDer<'_>, dss: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, Error> {
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
         self.tls13(message, cert, dss)
     }
 
@@ -59,11 +76,21 @@ impl ClientCertVerifier for AnyCertificate {
         Ok(ClientCertVerified::assertion())
     }
 
-    fn verify_tls12_signature(&self, _: &[u8], _: &CertificateDer<'_>, _: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, Error> {
+    fn verify_tls12_signature(
+        &self,
+        _: &[u8],
+        _: &CertificateDer<'_>,
+        _: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
         Err(Error::General(NO_TLS12.into()))
     }
 
-    fn verify_tls13_signature(&self, message: &[u8], cert: &CertificateDer<'_>, dss: &DigitallySignedStruct) -> Result<HandshakeSignatureValid, Error> {
+    fn verify_tls13_signature(
+        &self,
+        message: &[u8],
+        cert: &CertificateDer<'_>,
+        dss: &DigitallySignedStruct,
+    ) -> Result<HandshakeSignatureValid, Error> {
         self.tls13(message, cert, dss)
     }
 

@@ -48,9 +48,13 @@ impl Capture for Synthetic {
         // A gradient background, and a white bar 240 px wide that steps across with each generation.
         let bar = (g as usize * 97) % w;
         for (y, row) in rgba.chunks_exact_mut(w * 4).enumerate() {
-            for (x, p) in row.chunks_exact_mut(4).enumerate() {
+            for (x, p) in row.as_chunks_mut::<4>().0.iter_mut().enumerate() {
                 let on_bar = (x + w - bar) % w < 240;
-                p.copy_from_slice(&if on_bar { [255, 255, 255, 255] } else { [(x * 255 / w) as u8, (y * 255 / h) as u8, (g % 256) as u8, 255] });
+                p.copy_from_slice(&if on_bar {
+                    [255, 255, 255, 255]
+                } else {
+                    [(x * 255 / w) as u8, (y * 255 / h) as u8, (g % 256) as u8, 255]
+                });
             }
         }
         Ok(Image { width: WIDTH, height: HEIGHT, stride: w * 4, rgba })

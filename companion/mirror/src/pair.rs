@@ -36,7 +36,12 @@ impl From<io::Error> for PairError {
 /// Pairs with the phone at `addr`. `ask_code` is called with the phone's remaining attempts
 /// and returns the six digits the user typed. On success the phone's fingerprint is pinned
 /// in `config` and returned; on any failure nothing is pinned.
-pub fn pair(addr: SocketAddr, config: &Config, name: &str, ask_code: &mut dyn FnMut(u8) -> io::Result<String>) -> Result<Fingerprint, PairError> {
+pub fn pair(
+    addr: SocketAddr,
+    config: &Config,
+    name: &str,
+    ask_code: &mut dyn FnMut(u8) -> io::Result<String>,
+) -> Result<Fingerprint, PairError> {
     let id = config.identity()?;
     let mut link = Link::connect(addr, &id)?;
     let (mut run, request) = CompanionPairing::start(id.fingerprint(), link.peer(), name);

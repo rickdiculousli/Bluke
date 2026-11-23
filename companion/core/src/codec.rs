@@ -50,26 +50,78 @@ pub mod refused_reason {
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Message {
-    PairRequest { name: String },
-    PairCode { attempts_left: u8 },
-    PakeShare { p_a: [u8; 65] },
-    PakeReply { p_b: [u8; 65], c_b: [u8; 32] },
-    PakeConfirm { c_a: [u8; 32] },
-    PairResult { status: u8 },
-    Refused { reason: u8 },
-    Hello { version: u16, name: String },
-    Welcome { version: u16, codecs: u8, max_width: u16, max_height: u16, fps: u8 },
-    Display { id: u32, width: u32, height: u32, name: String },
-    Frame { seq: u32, codec: u8, width: u16, height: u16, sent_us: u64, data: Vec<u8> },
-    FrameAck { seq: u32, decode_us: u32 },
-    Pointer { x: u16, y: u16, buttons: u8 },
-    Wheel { dx: i16, dy: i16 },
+    PairRequest {
+        name: String,
+    },
+    PairCode {
+        attempts_left: u8,
+    },
+    PakeShare {
+        p_a: [u8; 65],
+    },
+    PakeReply {
+        p_b: [u8; 65],
+        c_b: [u8; 32],
+    },
+    PakeConfirm {
+        c_a: [u8; 32],
+    },
+    PairResult {
+        status: u8,
+    },
+    Refused {
+        reason: u8,
+    },
+    Hello {
+        version: u16,
+        name: String,
+    },
+    Welcome {
+        version: u16,
+        codecs: u8,
+        max_width: u16,
+        max_height: u16,
+        fps: u8,
+    },
+    Display {
+        id: u32,
+        width: u32,
+        height: u32,
+        name: String,
+    },
+    Frame {
+        seq: u32,
+        codec: u8,
+        width: u16,
+        height: u16,
+        sent_us: u64,
+        data: Vec<u8>,
+    },
+    FrameAck {
+        seq: u32,
+        decode_us: u32,
+    },
+    Pointer {
+        x: u16,
+        y: u16,
+        buttons: u8,
+    },
+    Wheel {
+        dx: i16,
+        dy: i16,
+    },
     Heartbeat,
     Release,
-    Ping { t_us: u64 },
-    Pong { t_us: u64 },
+    Ping {
+        t_us: u64,
+    },
+    Pong {
+        t_us: u64,
+    },
     /// A type this version doesn't know, inside the cap.
-    Unknown { kind: u8 },
+    Unknown {
+        kind: u8,
+    },
 }
 
 impl Message {
@@ -179,13 +231,7 @@ impl Message {
             0x06 => Message::PairResult { status: r.u8()? },
             0x07 => Message::Refused { reason: r.u8()? },
             0x10 => Message::Hello { version: r.u16()?, name: r.str()? },
-            0x11 => Message::Welcome {
-                version: r.u16()?,
-                codecs: r.u8()?,
-                max_width: r.u16()?,
-                max_height: r.u16()?,
-                fps: r.u8()?,
-            },
+            0x11 => Message::Welcome { version: r.u16()?, codecs: r.u8()?, max_width: r.u16()?, max_height: r.u16()?, fps: r.u8()? },
             0x12 => Message::Display { id: r.u32()?, width: r.u32()?, height: r.u32()?, name: r.str()? },
             0x13 => {
                 let (seq, codec, width, height, sent_us) = (r.u32()?, r.u8()?, r.u16()?, r.u16()?, r.u64()?);

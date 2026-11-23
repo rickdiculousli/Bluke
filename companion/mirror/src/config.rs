@@ -78,7 +78,9 @@ impl Config {
     /// The pinned phone's fingerprint, if one is paired.
     pub fn paired_phone(&self) -> io::Result<Option<Fingerprint>> {
         match std::fs::read_to_string(self.paired_phone_path()) {
-            Ok(s) => parse_hex32(s.trim()).map(Some).ok_or_else(|| io::Error::other(format!("{} is not a fingerprint", self.paired_phone_path().display()))),
+            Ok(s) => parse_hex32(s.trim())
+                .map(Some)
+                .ok_or_else(|| io::Error::other(format!("{} is not a fingerprint", self.paired_phone_path().display()))),
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(e),
         }

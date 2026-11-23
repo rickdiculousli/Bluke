@@ -27,7 +27,13 @@ struct Outcome {
 
 /// One pairing connection. `companion_sees` is the phone fingerprint the companion's TLS session
 /// presents; `phone_sees` the companion fingerprint the phone's presents (they differ under a relay).
-fn run(phone: &mut PhonePairing, now: u64, companion_sees: Fingerprint, phone_sees: Fingerprint, typed: impl Fn(&str) -> String) -> Outcome {
+fn run(
+    phone: &mut PhonePairing,
+    now: u64,
+    companion_sees: Fingerprint,
+    phone_sees: Fingerprint,
+    typed: impl Fn(&str) -> String,
+) -> Outcome {
     let mut out = Outcome::default();
     let (mut c, request) = CompanionPairing::start(COMPANION, companion_sees, "Mac");
     let shown = draw_code(&mut |b: &mut [u8]| b.fill(0x42));

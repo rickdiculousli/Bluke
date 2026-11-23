@@ -34,3 +34,4 @@ core-graphics = { version = "0.25", features = ["highsierra"] }
 
 [dev-dependencies]
 bluke-mirror = { path = ".", features = ["rig"] }
+serde_json = { version = "1", features = ["float_roundtrip"] }

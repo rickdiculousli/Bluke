@@ -1,7 +1,7 @@
 //! macOS: capture through xcap (ScreenCaptureKit), injection through CGEvent on the HID tap.
 
 use bluke_mirror_core::frames::{Capture, Image};
-use bluke_mirror_core::pointer::{Display, InputEvent, Injector};
+use bluke_mirror_core::pointer::{Display, Injector, InputEvent};
 use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton, EventField, ScrollEventUnit};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
