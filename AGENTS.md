@@ -16,7 +16,7 @@ adb logcat -s BlukeHID BlukeLifecycle   # live HID and lifecycle logs from a dev
 ```
 
 - `fastTest` excludes any test class annotated `@RunWith(RobolectricTestRunner::class)`, found by scanning `app/src/test` sources. A new test that needs Android framework classes must carry that annotation, or `fastTest` runs it and fails.
-- Screenshot baselines are committed under `app/src/test/screenshots/`; each test passes its own `filePath` to `captureRoboImage`.
+- Screenshot baselines are committed under `app/src/test/screenshots/`; each test passes its own `filePath` to `captureRoboImage`. For light, dark and font-scale captures of one screen, call `captureMatrix` (`app/src/test/java/dev/arnv/bluke/testing/ScreenshotMatrix.kt`) rather than writing the loop again.
 - There is no lint or formatter task beyond the Android Gradle Plugin defaults. Code style is Kotlin `official`.
 - Release builds sign from `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` (or `local.properties`).
 
@@ -39,7 +39,7 @@ adb logcat -s BlukeHID BlukeLifecycle   # live HID and lifecycle logs from a dev
 **Policy is pulled out into small testable files.** The manager is too framework-bound to unit test, so decisions live in pure functions and coordinators beside it in `bluetooth/`, tested in `app/src/test/.../bluetooth/`:
 - `HidRegistrationCoordinator` and `HidConnectionCoordinator` sit behind `BluetoothRegistrationFacade` and `BluetoothConnectionFacade`, so retries, timeouts and teardown are tested without Android Bluetooth.
 - `HidLifecycle.kt` has the lifecycle states, failure kinds, `RetryPolicy`, and the rule for when a failure means the firmware lacks a usable HID Device role (the terminal `ProfileNotSupported` state).
-- `HidSessionPolicy.kt`, `LatestRequestProcessor`, `GamepadModeSwitchState` cover incoming-host adoption, latest-wins request handling and mode-switch locking.
+- `HidSessionPolicy.kt` and `LatestRequestProcessor` cover incoming-host adoption and latest-wins request handling.
 - UI-side policies follow the same pattern in `ui/*Policy.kt`.
 
 When adding behavior to the manager, put the decision in one of these pure units and test it there.
@@ -48,7 +48,7 @@ When adding behavior to the manager, put the decision in one of these pure units
 
 **Foreground service.** `BluetoothSessionService` is a connected-device foreground service that exists only to stop Android unregistering the HID app when the UI is backgrounded. It stops itself when `shouldKeepBluetoothSession` turns false (app hidden, no host, nothing pending). App visibility comes from activity counting in `BlukeApplication`, not from `MainActivity`.
 
-**UI.** Each settings screen is its own `ComponentActivity` (all declared in `AndroidManifest.xml`); the main input surfaces (`KeyboardView`, `TouchpadView`, `GamepadView`, `MediaPresentationView`) are Compose views in `ui/`, chosen by `InputMode`. Settings persist in `SharedPreferences`/DataStore. Keyboard layouts send key positions, not characters (`KeyboardLayouts.kt`, `KeyboardCharacterLayouts.kt` for on-screen labels). Key-click sound packs are audio assets under `app/src/main/assets/audio/<pack>/{press,release}/` played by `sound/`.
+**UI.** Each settings screen is its own `ComponentActivity` (all declared in `AndroidManifest.xml`); the main input surfaces (`KeyboardView`, `TouchpadView`, `GamepadView`, `MediaPresentationView`) are Compose views in `ui/`, chosen by `InputMode` in `InputSurface.kt`, which `HomeScreen` calls once. The keyboard surface's toolbar, key handling and state live in `KeyboardSurface.kt`; `HomeScreen` remembers that state, so it outlives the surface. Settings persist in `SharedPreferences`/DataStore. Keyboard layouts send key positions, not characters (`KeyboardLayouts.kt`, `KeyboardCharacterLayouts.kt` for on-screen labels). Key-click sound packs are audio assets under `app/src/main/assets/audio/<pack>/{press,release}/` played by `sound/`.
 
 **Diagnostics.** `DeveloperLogManager` keeps the in-app log shown in Developer options; it only records when enabled. Logs include Bluetooth MAC addresses and raw keycodes, so don't paste them into anything outward-facing.
 
