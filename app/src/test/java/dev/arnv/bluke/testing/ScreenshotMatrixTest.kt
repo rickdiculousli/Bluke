@@ -13,7 +13,7 @@ import dev.arnv.bluke.bluetooth.BluetoothKeyboardManager
 import dev.arnv.bluke.ui.InputMode
 import dev.arnv.bluke.ui.MediaPresentationView
 import dev.arnv.bluke.ui.MultimediaPosture
-import java.io.File
+import android.graphics.Bitmap
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
@@ -42,7 +42,12 @@ class ScreenshotMatrixTest {
         appPrefs.edit().putInt("theme_mode", 0).putBoolean("dynamic_color", true).commit()
         val preferences = context.getSharedPreferences("screenshot-matrix", Context.MODE_PRIVATE)
 
-        captureMatrix(name = "matrix-multimedia", landscape = true) {
+        val images = mutableMapOf<Pair<Boolean, Float>, IntArray>()
+        captureMatrix(
+            name = "matrix-multimedia",
+            landscape = true,
+            onCaptured = { dark, scale, image -> images[dark to scale] = image.pixels() },
+        ) {
             MediaPresentationView(
                 btManager = manager,
                 onClose = {},
@@ -54,12 +59,9 @@ class ScreenshotMatrixTest {
             )
         }
 
-        for (dark in listOf("light", "dark")) {
-            for (scale in listOf("1.0", "1.3")) {
-                val file = File("src/test/screenshots/matrix-multimedia-$dark-fs$scale-land.png")
-                assertTrue("missing ${file.path}", file.isFile)
-            }
-        }
+        assertEquals(setOf(false to 1.0f, false to 1.3f, true to 1.0f, true to 1.3f), images.keys)
+        // The surface paints fixed dark colors, so only the font scale shows in its pixels.
+        assertFalse(images.getValue(false to 1.0f).contentEquals(images.getValue(false to 1.3f)))
         assertEquals(0, appPrefs.getInt("theme_mode", -1))
         assertTrue(appPrefs.getBoolean("dynamic_color", false))
     }
@@ -68,7 +70,12 @@ class ScreenshotMatrixTest {
     // effect; a Surface and Text that follow the theme can.
     @Test
     fun themeAndFontScaleChangeThePixels() {
-        captureMatrix(name = "matrix-probe", landscape = false) {
+        val images = mutableMapOf<Pair<Boolean, Float>, IntArray>()
+        captureMatrix(
+            name = "matrix-probe",
+            landscape = false,
+            onCaptured = { dark, scale, image -> images[dark to scale] = image.pixels() },
+        ) {
             Surface(color = MaterialTheme.colorScheme.background) {
                 Box(Modifier.size(width = 200.dp, height = 80.dp)) {
                     Text("Bluke 123", color = MaterialTheme.colorScheme.onBackground)
@@ -76,10 +83,11 @@ class ScreenshotMatrixTest {
             }
         }
 
-        fun bytes(dark: String, scale: String) =
-            File("src/test/screenshots/matrix-probe-$dark-fs$scale.png").readBytes()
-        assertFalse(bytes("light", "1.0").contentEquals(bytes("dark", "1.0")))
-        assertFalse(bytes("light", "1.0").contentEquals(bytes("light", "1.3")))
-        assertFalse(bytes("dark", "1.0").contentEquals(bytes("dark", "1.3")))
+        fun pixels(dark: Boolean, scale: Float) = images.getValue(dark to scale)
+        assertFalse(pixels(false, 1.0f).contentEquals(pixels(true, 1.0f)))
+        assertFalse(pixels(false, 1.0f).contentEquals(pixels(false, 1.3f)))
+        assertFalse(pixels(true, 1.0f).contentEquals(pixels(true, 1.3f)))
     }
+
+    private fun Bitmap.pixels(): IntArray = IntArray(width * height).also { getPixels(it, 0, width, 0, 0, width, height) }
 }

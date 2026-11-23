@@ -8,6 +8,8 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.test.ExperimentalTestApi
 import androidx.compose.ui.test.runAndroidComposeUiTest
 import androidx.compose.ui.test.onRoot
+import android.graphics.Bitmap
+import androidx.core.view.drawToBitmap
 import androidx.compose.ui.unit.Density
 import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -41,12 +43,16 @@ import org.robolectric.RuntimeEnvironment
  * [content] is composed inside `MyApplicationTheme`; anything it needs (a manager, preferences) is
  * the caller's to build, and it must read its own state fresh in each composition because it is
  * composed once per variant, in a new activity.
+ *
+ * Roborazzi writes the PNGs only under `recordRoborazziDebug`; a plain test run writes nothing. To
+ * assert on the pixels in any run, pass [onCaptured]: it gets each variant's window drawn to a bitmap.
  */
 @OptIn(ExperimentalTestApi::class)
 fun captureMatrix(
     name: String,
     landscape: Boolean = false,
     fontScales: List<Float> = listOf(1.0f, 1.3f),
+    onCaptured: (dark: Boolean, fontScale: Float, image: Bitmap) -> Unit = { _, _, _ -> },
     content: @Composable () -> Unit,
 ) {
     val prefs = ApplicationProvider.getApplicationContext<Context>()
@@ -71,6 +77,7 @@ fun captureMatrix(
                         }
                     }
                     waitForIdle()
+                    onCaptured(dark, scale, runOnUiThread { activity!!.window.decorView.drawToBitmap() })
                     onRoot().captureRoboImage(filePath = matrixFilePath(name, dark, scale, landscape))
                 }
             }
