@@ -271,4 +271,12 @@ class MirrorTouchPolicyTest {
     policy.abandon()
     assertEquals(listOf(Pointer(10, 20, 1)), touch(0, f(10f, 20f)))
   }
+
+  @Test
+  fun onlyTouchTrafficAndPingKeepAHeldButtonAliveNotFrameAcks() {
+    listOf(Pointer(1, 2, 1), Wheel(0, 3), MirrorMessage.Heartbeat, MirrorMessage.Release, MirrorMessage.Ping(5)).forEach {
+      assertTrue("$it", MirrorTouchPolicy.countsAsLiveness(it))
+    }
+    assertFalse(MirrorTouchPolicy.countsAsLiveness(MirrorMessage.FrameAck(7, 1200)))
+  }
 }

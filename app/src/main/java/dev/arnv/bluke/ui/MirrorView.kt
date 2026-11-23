@@ -125,6 +125,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
@@ -1012,7 +1013,7 @@ private fun StatusContent(
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
                 TextButton(
                     onClick = onOpenWifiSettings,
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
                     modifier = Modifier.testTag("mirror_wifi_settings"),
                 ) {
                     Text("Wi-Fi settings")
@@ -1235,7 +1236,8 @@ private fun MirrorNoticePill(
                     colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.inverseOnSurface),
                     modifier = Modifier.padding(end = 4.dp).testTag("mirror_undo_forget"),
                 ) {
-                    Text("Undo")
+                    // The host scheme sets no inverse primary, so weight, not hue, marks the action.
+                    Text("Undo", fontWeight = FontWeight.Bold)
                 }
             }
         }

@@ -266,6 +266,21 @@ class MirrorTouchPolicy(
 
   companion object {
     const val HEARTBEAT_INTERVAL_MS = 250L
+
+    /**
+     * Whether the companion's held-button rule (released after 1 s of silence) counts [message] as
+     * the phone being alive: the touch thread's traffic and Ping, never FrameAck, which the decoder
+     * sends even while the touch thread hangs. The heartbeat keys on the last of these.
+     */
+    fun countsAsLiveness(message: MirrorMessage): Boolean =
+        when (message) {
+          is MirrorMessage.Pointer,
+          is MirrorMessage.Wheel,
+          MirrorMessage.Heartbeat,
+          MirrorMessage.Release,
+          is MirrorMessage.Ping -> true
+          else -> false
+        }
   }
 }
 

@@ -536,7 +536,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
             val now = SystemClock.uptimeMillis()
             val current = session
             if (current != null) {
-                touchPolicy.heartbeat(now, current.lastSentAtMs)?.let { current.send(it) }
+                touchPolicy.heartbeat(now, current.lastLiveSentAtMs)?.let { current.send(it) }
                 if (now - lastPingAt >= PING_INTERVAL_MS) {
                     lastPingAt = now
                     current.send(MirrorMessage.Ping(nowUs()))
@@ -598,7 +598,11 @@ class MirrorController(context: Context) : MirrorFrameSource {
     /** A verified session's writer: every message goes out in submit order, on one thread. */
     private inner class Session(val socket: SSLSocket, private val output: OutputStream) {
         private val writer = Executors.newSingleThreadExecutor { Thread(it, "mirror-write") }
-        @Volatile var lastSentAtMs = SystemClock.uptimeMillis()
+        /**
+         * When a message the companion counts as liveness for a held button last went out. FrameAcks
+         * come from the decoder, not the touch thread, so they don't count (or reset the heartbeat).
+         */
+        @Volatile var lastLiveSentAtMs = SystemClock.uptimeMillis()
             private set
 
         fun send(message: MirrorMessage, touchedAtNs: Long? = null, eventNs: Long? = null) {
@@ -607,7 +611,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
                     try {
                         output.write(MirrorCodec.encode(message))
                         output.flush()
-                        lastSentAtMs = SystemClock.uptimeMillis()
+                        if (MirrorTouchPolicy.countsAsLiveness(message)) lastLiveSentAtMs = SystemClock.uptimeMillis()
                         if (touchedAtNs != null && message is MirrorMessage.Pointer) {
                             val flushedNs = System.nanoTime()
                             touchToFlushUs.add((flushedNs - touchedAtNs) / 1000)
