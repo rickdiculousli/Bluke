@@ -138,7 +138,7 @@ class HelpActivity : ComponentActivity() {
                             isWarning = true,
                             steps = listOf(
                                 "Choose Native for Windows/Linux games, Android for Android games, or Web when a browser game ignores directions.",
-                                "Tap the controller mode button to cycle Native / Android / Web. Hold it to open Controller compatibility settings. All modes switch live without reconnecting. After updating to the shared controller descriptor, forget both devices and pair again once; subsequent mode switches need no re-pairing.",
+                                "Tap the controller mode button to cycle Native / Android / Web. Hold it to open Controller compatibility settings. All modes switch live without reconnecting.",
                                 "For Steam, enable the controller in Steam Input and verify it in Steam's controller test or the operating system's game-controller panel.",
                                 "Bluke is a generic HID gamepad, not an Xbox XInput device. Some newer Windows games accept only XInput without a compatibility layer."
                             )

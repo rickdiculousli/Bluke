@@ -323,7 +323,7 @@ async def check_get_report(app: App, host: Host) -> None:
 
 async def switch_mode(app: App, host: Host, mode: str) -> None:
     await call(app, "mode", value=mode)
-    await wait_state(app, lambda s: s["gamepadModeSwitch"] == "IDLE" and s["host"], f"mode {mode} to settle")
+    await wait_state(app, lambda s: s["host"], f"mode {mode} to settle")
     await host.wait_channels(True)
     host.drain()
 

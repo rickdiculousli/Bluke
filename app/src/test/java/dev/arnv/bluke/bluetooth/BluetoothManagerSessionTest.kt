@@ -42,6 +42,7 @@ class BluetoothManagerSessionTest {
             val registerCalls = AtomicInteger()
             val disconnectCalls = AtomicInteger()
             val connectCalls = AtomicInteger()
+            val gamepadReports = AtomicInteger()
             var disconnectAccepted = true
             var unregisterAccepted = true
             var deliverUnregisterCallback = true
@@ -63,7 +64,10 @@ class BluetoothManagerSessionTest {
             states[device] = BluetoothProfile.STATE_CONNECTED
             return true
         }
-        @Implementation fun sendReport(device: BluetoothDevice, id: Int, bytes: ByteArray) = true
+        @Implementation fun sendReport(device: BluetoothDevice, id: Int, bytes: ByteArray): Boolean {
+            if (id == GAMEPAD_REPORT_ID) gamepadReports.incrementAndGet()
+            return true
+        }
         @Implementation fun unregisterApp(): Boolean {
             unregisterCalls.incrementAndGet()
             val oldCallback = callback
@@ -91,6 +95,7 @@ class BluetoothManagerSessionTest {
         HidShadow.registerCalls.set(0)
         HidShadow.disconnectCalls.set(0)
         HidShadow.connectCalls.set(0)
+        HidShadow.gamepadReports.set(0)
         HidShadow.disconnectAccepted = true
         HidShadow.unregisterAccepted = true
         HidShadow.deliverUnregisterCallback = true
@@ -105,9 +110,8 @@ class BluetoothManagerSessionTest {
         shadowOf(device).setBondState(BluetoothDevice.BOND_BONDED)
         ReflectionHelpers.setField(manager, "hidDeviceProfile", Shadow.newInstanceOf(BluetoothHidDevice::class.java))
         ReflectionHelpers.setField(manager, "appInForeground", true)
-        ReflectionHelpers.setField(manager, "registeredGamepadMode", GamepadDpadOutputMode.NATIVE_HAT)
         ReflectionHelpers.getField<MutableStateFlow<Boolean>>(manager, "appRegistrationState").value = true
-        val attempt = HidRegistrationAttempt(GamepadDpadOutputMode.NATIVE_HAT)
+        val attempt = HidRegistrationAttempt()
         attempt.commandCompleted(true)
         attempt.statusChanged(true)
         ReflectionHelpers.setField(manager, "activeRegistrationAttempt", attempt)
@@ -122,6 +126,25 @@ class BluetoothManagerSessionTest {
     private fun awaitIdle() = runBlocking {
         withTimeout(5_000) { while (ReflectionHelpers.getField<Any?>(manager, "sessionOperationJob") != null) delay(10) }
         synchronized(ReflectionHelpers.getField<Any>(manager, "connectionSelectionLock")) { Unit }
+    }
+
+    /** Waits until every report submitted so far has reached the HID proxy. */
+    private fun drainReports() {
+        ReflectionHelpers.getField<java.util.concurrent.ExecutorService>(manager, "reportExecutor").submit {}.get()
+    }
+
+    @Test fun gamepadReportsAreDroppedWhileUnregistered() {
+        drainReports()
+        HidShadow.gamepadReports.set(0)
+        val registered = ReflectionHelpers.getField<MutableStateFlow<Boolean>>(manager, "appRegistrationState")
+        registered.value = false
+        manager.sendGamepadReport(1, 0, 0f, 0f, 0f, 0f)
+        drainReports()
+        assertEquals(0, HidShadow.gamepadReports.get())
+        registered.value = true
+        manager.sendGamepadReport(1, 0, 0f, 0f, 0f, 0f)
+        drainReports()
+        assertEquals(1, HidShadow.gamepadReports.get())
     }
 
     @Test fun disconnectClearsStaleUiWithoutUnregisteringEvenIfCallbackIsMissing() {

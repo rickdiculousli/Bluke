@@ -81,7 +81,7 @@ class ControllerSettingsActivity : ComponentActivity() {
                 if (showDialog) {
                     ChoiceDialog(
                         title = "Controller compatibility",
-                        explanation = "Use Native for Windows/Linux games, Android for games on Android, or Web when a browser game ignores directions. All modes switch live without reconnecting. After updating to the shared controller descriptor, forget both devices and pair again once. Games may not support Share or touchpad-click.",
+                        explanation = "Use Native for Windows/Linux games, Android for games on Android, or Web when a browser game ignores directions. All modes switch live without reconnecting. Games may not support Share or touchpad-click.",
                         choices = GamepadDpadOutputMode.entries.map { it.label },
                         selectedIndex = dpadMode.ordinal,
                         onSelect = { index ->
