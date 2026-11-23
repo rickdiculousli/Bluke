@@ -1,5 +1,7 @@
-//! One TLS connection carrying protocol messages, driven by hand over a blocking socket with
-//! a read timeout, so one thread can wait for messages and still keep time.
+//! One TLS connection carrying protocol messages, driven by hand over a blocking socket. Read
+//! it either with a timeout ([`Link::recv`]), or by handing the socket's reads to a thread
+//! ([`Link::spawn_reader`]) whose bytes the caller feeds back in ([`Link::ingest`]), so one
+//! channel can wake the caller for phone bytes and other events alike.
 
 use crate::config::{Identity, fingerprint};
 use crate::tls;
@@ -9,10 +11,19 @@ use rustls_pki_types::ServerName;
 use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
+use std::sync::mpsc;
 use std::time::Duration;
 
 /// How long a TCP connect and the TLS handshake may take.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// One read from the socket reader thread: raw TLS bytes for [`Link::ingest`], or how the
+/// stream ended (`UnexpectedEof` when the phone closed it).
+pub struct Received {
+    /// When the bytes were read, on [`crate::now_us`]'s clock.
+    pub at_us: u64,
+    pub bytes: io::Result<Vec<u8>>,
+}
 
 pub struct Link {
     tls: Connection,
@@ -87,6 +98,15 @@ impl Link {
             Err(e) if matches!(e.kind(), io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut) => return Ok(out),
             Err(e) => return Err(e),
         }
+        let closed = self.absorb(&mut out)?;
+        if out.is_empty() && closed {
+            return Err(io::ErrorKind::UnexpectedEof.into());
+        }
+        Ok(out)
+    }
+
+    /// Processes the TLS records read so far into `out`'s messages; true once the peer sent close_notify.
+    fn absorb(&mut self, out: &mut Vec<Message>) -> io::Result<bool> {
         let state = self.tls.process_new_packets().map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         // Alerts or key updates may need an answer.
         while self.tls.wants_write() {
@@ -106,8 +126,37 @@ impl Link {
                 Err(e) => return Err(e),
             }
         }
-        if out.is_empty() && state.peer_has_closed() {
-            return Err(io::ErrorKind::UnexpectedEof.into());
+        Ok(state.peer_has_closed())
+    }
+
+    /// Hands the socket's reads to a thread that sends each read into `tx` until the stream
+    /// ends or `tx`'s receiver is gone. Afterwards read only through [`Link::ingest`].
+    pub fn spawn_reader<E: From<Received> + Send + 'static>(&self, tx: mpsc::Sender<E>) -> io::Result<()> {
+        let mut sock = self.sock.try_clone()?;
+        sock.set_read_timeout(None)?;
+        std::thread::Builder::new().name("link-reader".into()).spawn(move || {
+            let mut buf = vec![0u8; 16 * 1024];
+            loop {
+                let (bytes, last) = match sock.read(&mut buf) {
+                    Ok(0) => (Err(io::ErrorKind::UnexpectedEof.into()), true),
+                    Ok(n) => (Ok(buf[..n].to_vec()), false),
+                    Err(e) if e.kind() == io::ErrorKind::Interrupted => continue,
+                    Err(e) => (Err(e), true),
+                };
+                if tx.send(Received { at_us: crate::now_us(), bytes }.into()).is_err() || last {
+                    break;
+                }
+            }
+        })?;
+        Ok(())
+    }
+
+    /// Feeds bytes the reader thread read and returns every whole message they complete.
+    pub fn ingest(&mut self, mut bytes: &[u8]) -> io::Result<Vec<Message>> {
+        let mut out = Vec::new();
+        while !bytes.is_empty() {
+            self.tls.read_tls(&mut bytes)?;
+            self.absorb(&mut out)?;
         }
         Ok(out)
     }

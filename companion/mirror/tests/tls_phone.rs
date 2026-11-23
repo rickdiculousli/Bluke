@@ -170,7 +170,7 @@ fn run_session(phone: &Phone, config: &Config, record: &Path) -> session::Report
     let opts = session::Options { name: "test".into(), stop: &stop, until_us: Some(now_us() + 15_000_000) };
     let mut rec = Recording::create(record).expect("record file");
     let pinned = config.paired_phone().expect("read pin");
-    session::run(link, pinned, Box::new(Synthetic::new(Schedule::Every(1))), &mut rec, &mut jpeg::Jpeg::default(), &opts, &mut |_| {})
+    session::run(link, pinned, Box::new(Synthetic::new(Schedule::Every(1))), &mut rec, Box::new(jpeg::Jpeg::default()), &opts, &mut |_| {})
 }
 
 fn events(record: &Path) -> Vec<(String, f64, f64)> {
@@ -236,6 +236,7 @@ fn pair_reconnect_stream_and_inject_over_tls() {
         assert_eq!(&data[data.len() - 2..], &[0xff, 0xd9], "JPEG EOI");
     }
     assert!(report.stats.frames_acked >= 5);
+    assert_eq!(report.stats.capture_to_sent_us.len() as u64, report.stats.frames_sent, "every frame sent is timed from capture start");
     assert_eq!(report.inject_latency_us.len(), 3);
     let x_mid = -1920.0 + 32768.0 / 65535.0 * 1919.0;
     let y_mid = 32768.0 / 65535.0 * 1079.0;

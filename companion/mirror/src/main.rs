@@ -196,7 +196,7 @@ fn run_command(config: &Config, phone: Option<SocketAddr>) -> ExitCode {
         println!("Connected to the phone at {addr}; mirroring {} ({}x{} points).", d.name, d.width, d.height);
         let opts = session::Options { name: name.clone(), stop: &STOP, until_us: None };
         let report =
-            session::run(link, Some(pinned), capture, injector.as_mut(), &mut jpeg::Jpeg::default(), &opts, &mut |s| println!("{s}"));
+            session::run(link, Some(pinned), capture, injector.as_mut(), Box::new(jpeg::Jpeg::default()), &opts, &mut |s| println!("{s}"));
         println!("Session ended: {}.", report.end);
         match report.end {
             session::End::Closed(bluke_mirror_core::session::Close::Refused(1)) => {

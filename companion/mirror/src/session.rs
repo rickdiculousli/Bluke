@@ -1,9 +1,10 @@
-//! One session connection: the core [`Session`] driven over a [`Link`], with captures taken on
-//! their own thread so a slow grab never delays a touch.
+//! One session connection: the core [`Session`] driven over a [`Link`]. Captures are grabbed,
+//! downscaled and encoded on their own thread, and socket reads happen on another, so a slow
+//! grab never delays a touch; both wake the session through one channel.
 
-use crate::link::Link;
+use crate::link::{Link, Received};
 use crate::now_us;
-use bluke_mirror_core::frames::{Capture, FrameEncoder, Scaled, downscale};
+use bluke_mirror_core::frames::{Capture, FrameEncoder, Prepared, downscale};
 use bluke_mirror_core::pointer::{Display, Injector};
 use bluke_mirror_core::session::{Close, Session, Stats};
 use bluke_mirror_core::{Fingerprint, Message};
@@ -13,8 +14,10 @@ use std::time::Duration;
 
 /// The phone pings once a second; this much total silence means the link is gone.
 pub const LINK_SILENCE: Duration = Duration::from_secs(3);
-/// How long one wait for phone messages lasts; bounds how late a capture is picked up.
-const POLL: Duration = Duration::from_millis(4);
+/// The longest the session sleeps with nothing arriving; bounds how late a stop, a silence
+/// release or a status line is noticed. Phone bytes, finished captures and the next capture
+/// time all wake it sooner.
+const MAX_WAIT_US: u64 = 50_000;
 /// How often the status line prints frames per second.
 const STATUS_EVERY_US: u64 = 5_000_000;
 
@@ -79,24 +82,49 @@ impl Injector for Counting<'_> {
     }
 }
 
-type Captured = Result<(Scaled, Display), String>;
+type Captured = Result<(Prepared, Display), String>;
 
-/// Spawns the capture thread: each request `(max_w, max_h)` gets one grab, downscaled.
-fn spawn_capture(mut capture: Box<dyn Capture + Send>) -> (mpsc::Sender<(u16, u16)>, mpsc::Receiver<Captured>) {
-    let (req_tx, req_rx) = mpsc::channel::<(u16, u16)>();
-    let (resp_tx, resp_rx) = mpsc::channel::<Captured>();
+/// What wakes the session.
+enum Event {
+    Net(Received),
+    Captured(Captured),
+}
+
+impl From<Received> for Event {
+    fn from(r: Received) -> Self {
+        Event::Net(r)
+    }
+}
+
+/// One capture to take: fit in `max` and skip encoding if the pixels hash to `unchanged_from`.
+struct Request {
+    max: (u16, u16),
+    unchanged_from: Option<u64>,
+}
+
+/// Spawns the capture thread: each request gets one grab, downscaled and encoded there.
+fn spawn_capture(
+    mut capture: Box<dyn Capture + Send>,
+    mut encoder: Box<dyn FrameEncoder + Send>,
+    events: mpsc::Sender<Event>,
+) -> mpsc::Sender<Request> {
+    let (req_tx, req_rx) = mpsc::channel::<Request>();
     std::thread::Builder::new()
         .name("capture".into())
         .spawn(move || {
-            for (w, h) in req_rx {
-                let r = capture.grab().map(|img| (downscale(&img, w, h), capture.display()));
-                if resp_tx.send(r).is_err() {
+            for r in req_rx {
+                let t = now_us();
+                let got = capture.grab().map(|img| {
+                    let scaled = downscale(&img, r.max.0, r.max.1);
+                    (Prepared::prepare(&scaled, t, r.unchanged_from, encoder.as_mut()), capture.display())
+                });
+                if events.send(Event::Captured(got)).is_err() {
                     break;
                 }
             }
         })
         .expect("spawn capture thread");
-    (req_tx, resp_rx)
+    req_tx
 }
 
 /// Runs one session on a connected link until it ends. Every held button is released on the
@@ -106,7 +134,7 @@ pub fn run(
     pinned: Option<Fingerprint>,
     capture: Box<dyn Capture + Send>,
     injector: &mut dyn Injector,
-    encoder: &mut dyn FrameEncoder,
+    encoder: Box<dyn FrameEncoder + Send>,
     opts: &Options<'_>,
     status: &mut dyn FnMut(&str),
 ) -> Report {
@@ -119,40 +147,74 @@ pub fn run(
             return Report { end: End::NotPinned, stats: Stats::default(), inject_latency_us: latencies, releases: 0 };
         }
     };
-    let (req_tx, resp_rx) = spawn_capture(capture);
-    let mut capture_pending = false;
+    let (events_tx, events) = mpsc::channel::<Event>();
     let mut last_rx = now_us();
     let mut status_at = (now_us(), 0u64);
+    let mut capture_pending = false;
     let end = 'session: {
-        if let Err(e) = link.send(&hello) {
+        if let Err(e) = link.send(&hello).and_then(|()| link.spawn_reader(events_tx.clone())) {
             break 'session End::Io(e);
         }
+        let requests = spawn_capture(capture, encoder, events_tx);
         loop {
-            if opts.stop.load(Ordering::Relaxed) || opts.until_us.is_some_and(|u| now_us() >= u) {
+            let now = now_us();
+            if opts.stop.load(Ordering::Relaxed) || opts.until_us.is_some_and(|u| now >= u) {
                 break 'session End::Stopped;
             }
-            let msgs = match link.recv(POLL) {
-                Ok(m) => m,
-                Err(e) => break 'session End::Io(e),
-            };
-            let t_read = now_us();
-            if !msgs.is_empty() {
-                last_rx = t_read;
+            if !capture_pending && session.wants_frame(now) {
+                let max = session.welcome().map_or((0, 0), |w| (w.max_width, w.max_height));
+                capture_pending = requests.send(Request { max, unchanged_from: session.last_sent_hash() }).is_ok();
             }
-            for m in msgs {
-                let input = matches!(m, Message::Pointer { .. } | Message::Wheel { .. } | Message::Release);
-                match session.on_message(t_read, m, &mut inj) {
-                    Ok(out) => {
-                        for o in out {
-                            if let Err(e) = link.send(&o) {
-                                break 'session End::Io(e);
+            let mut wait = MAX_WAIT_US;
+            if !capture_pending && let Some(due) = session.next_frame_at() {
+                wait = wait.min(due.saturating_sub(now));
+            }
+            if let Some(u) = opts.until_us {
+                wait = wait.min(u.saturating_sub(now));
+            }
+            match events.recv_timeout(Duration::from_micros(wait)) {
+                Ok(Event::Net(Received { at_us, bytes })) => {
+                    let msgs = match bytes.and_then(|b| link.ingest(&b)) {
+                        Ok(m) => m,
+                        Err(e) => break 'session End::Io(e),
+                    };
+                    if !msgs.is_empty() {
+                        last_rx = at_us;
+                    }
+                    for m in msgs {
+                        let input = matches!(m, Message::Pointer { .. } | Message::Wheel { .. } | Message::Release);
+                        match session.on_message(at_us, m, &mut inj) {
+                            Ok(out) => {
+                                for o in out {
+                                    if let Err(e) = link.send(&o) {
+                                        break 'session End::Io(e);
+                                    }
+                                }
                             }
+                            Err(c) => break 'session End::Closed(c),
+                        }
+                        if input {
+                            latencies.push(now_us().saturating_sub(at_us));
                         }
                     }
-                    Err(c) => break 'session End::Closed(c),
                 }
-                if input {
-                    latencies.push(now_us() - t_read);
+                Ok(Event::Captured(Ok((frame, display)))) => {
+                    capture_pending = false;
+                    let mut out: Vec<Message> = session.set_display(display).into_iter().collect();
+                    out.extend(session.offer_frame(now_us(), frame));
+                    for o in out {
+                        if let Err(e) = link.send(&o) {
+                            break 'session End::Io(e);
+                        }
+                    }
+                }
+                Ok(Event::Captured(Err(e))) => {
+                    capture_pending = false;
+                    status(&format!("capture failed: {e}"));
+                }
+                Err(mpsc::RecvTimeoutError::Timeout) => {}
+                Err(mpsc::RecvTimeoutError::Disconnected) => {
+                    break 'session End::Io(std::io::Error::other("the reader and capture threads stopped"));
                 }
             }
             let now = now_us();
@@ -163,30 +225,6 @@ pub fn run(
             }
             if now.saturating_sub(last_rx) >= LINK_SILENCE.as_micros() as u64 {
                 break 'session End::Silent;
-            }
-            if !capture_pending
-                && session.wants_frame(now)
-                && let Some(w) = session.welcome()
-            {
-                capture_pending = req_tx.send((w.max_width, w.max_height)).is_ok();
-            }
-            match resp_rx.try_recv() {
-                Ok(Ok((scaled, display))) => {
-                    capture_pending = false;
-                    let now = now_us();
-                    let mut out: Vec<Message> = session.set_display(display).into_iter().collect();
-                    out.extend(session.offer_frame(now, &scaled, encoder));
-                    for o in out {
-                        if let Err(e) = link.send(&o) {
-                            break 'session End::Io(e);
-                        }
-                    }
-                }
-                Ok(Err(e)) => {
-                    capture_pending = false;
-                    status(&format!("capture failed: {e}"));
-                }
-                Err(_) => {}
             }
             if now - status_at.0 >= STATUS_EVERY_US {
                 let sent = session.stats.frames_sent;

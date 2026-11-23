@@ -1,7 +1,7 @@
 //! The companion's session logic with a fake clock, the synthetic screen and a recording injector.
 
 use bluke_mirror_core::codec::{CODEC_JPEG, Message};
-use bluke_mirror_core::frames::{Capture, FrameCredit, FrameEncoder, MAX_IN_FLIGHT, Scaled, downscale, fit};
+use bluke_mirror_core::frames::{Capture, FrameCredit, FrameEncoder, MAX_IN_FLIGHT, Prepared, Scaled, downscale, fit};
 use bluke_mirror_core::pairing::Fingerprint;
 use bluke_mirror_core::pointer::{Display, InputEvent};
 use bluke_mirror_core::session::{Close, NotPinned, SILENCE_RELEASE_US, Session};
@@ -19,6 +19,12 @@ impl FrameEncoder for FakeJpeg {
     fn encode(&mut self, f: &Scaled) -> Vec<u8> {
         f.hash.to_be_bytes().to_vec()
     }
+}
+
+/// Prepares `f` as the capture thread does, grabbed at `t`, and offers it at `t`.
+fn offer(s: &mut Session, t: u64, f: &Scaled) -> Option<Message> {
+    let p = Prepared::prepare(f, t, s.last_sent_hash(), &mut FakeJpeg);
+    s.offer_frame(t, p)
 }
 
 fn display() -> Display {
@@ -54,7 +60,7 @@ fn nothing_is_sent_or_injected_before_welcome() {
     let mut cap = Synthetic::new(Schedule::Every(1));
     let frame = downscale(&cap.grab().expect("grab"), 480, 480);
     assert!(!s.wants_frame(0));
-    assert_eq!(s.offer_frame(0, &frame, &mut FakeJpeg), None);
+    assert_eq!(offer(&mut s, 0, &frame), None);
     let mut rec = Vec::new();
     assert_eq!(s.on_message(0, pointer(0, 0, true), &mut rec), Err(Close::Unexpected(0x20)));
     assert!(rec.is_empty());
@@ -195,7 +201,7 @@ fn unchanged_frames_send_nothing() {
     let mut t = 0;
     for _ in 0..10 {
         let f = downscale(&cap.grab().expect("grab"), 480, 480);
-        if let Some(Message::Frame { seq, .. }) = s.offer_frame(t, &f, &mut FakeJpeg) {
+        if let Some(Message::Frame { seq, .. }) = offer(&mut s, t, &f) {
             sent += 1;
             s.on_message(t, Message::FrameAck { seq, decode_us: 1 }, &mut Vec::new()).expect("ack");
         }
@@ -213,7 +219,7 @@ fn changing_frames_send_on_their_schedule() {
     for i in 0..9u64 {
         let f = downscale(&cap.grab().expect("grab"), 480, 480);
         assert_eq!((f.width, f.height), (480, 270));
-        if let Some(Message::Frame { seq, width, height, sent_us, .. }) = s.offer_frame(i * 50_000, &f, &mut FakeJpeg) {
+        if let Some(Message::Frame { seq, width, height, sent_us, .. }) = offer(&mut s, i * 50_000, &f) {
             assert_eq!((width, height, sent_us), (480, 270, i * 50_000));
             seqs.push(seq);
             s.on_message(i * 50_000 + 10, Message::FrameAck { seq, decode_us: 1 }, &mut Vec::new()).expect("ack");
@@ -231,7 +237,7 @@ fn credit_never_exceeds_two_and_acks_are_cumulative() {
     let mut sent = Vec::new();
     for _ in 0..6 {
         let f = downscale(&cap.grab().expect("grab"), 480, 480);
-        if let Some(Message::Frame { seq, .. }) = s.offer_frame(t, &f, &mut FakeJpeg) {
+        if let Some(Message::Frame { seq, .. }) = offer(&mut s, t, &f) {
             sent.push(seq);
         }
         assert!(s.in_flight() <= MAX_IN_FLIGHT);
@@ -246,7 +252,7 @@ fn credit_never_exceeds_two_and_acks_are_cumulative() {
     assert_eq!(s.stats.frames_acked, 2);
     assert!(s.wants_frame(t));
     let f = downscale(&cap.grab().expect("grab"), 480, 480);
-    assert!(matches!(s.offer_frame(t, &f, &mut FakeJpeg), Some(Message::Frame { seq: 2, .. })));
+    assert!(matches!(offer(&mut s, t, &f), Some(Message::Frame { seq: 2, .. })));
 
     // The credit counter alone: acks for unknown frames change nothing.
     let mut c = FrameCredit::default();
@@ -261,7 +267,7 @@ fn frame_cap_paces_captures() {
     let mut cap = Synthetic::new(Schedule::Every(1));
     let f = downscale(&cap.grab().expect("grab"), 480, 480);
     assert!(s.wants_frame(0));
-    let Some(Message::Frame { seq, .. }) = s.offer_frame(0, &f, &mut FakeJpeg) else { panic!("frame") };
+    let Some(Message::Frame { seq, .. }) = offer(&mut s, 0, &f) else { panic!("frame") };
     s.on_message(0, Message::FrameAck { seq, decode_us: 1 }, &mut Vec::new()).expect("ack");
     assert!(!s.wants_frame(49_999), "20 fps: next capture 50 ms later");
     assert!(s.wants_frame(50_000));
@@ -272,12 +278,12 @@ fn display_change_is_announced_and_resends_the_frame() {
     let mut s = started(0);
     let mut cap = Synthetic::new(Schedule::Static);
     let f = downscale(&cap.grab().expect("grab"), 480, 480);
-    let Some(Message::Frame { seq, .. }) = s.offer_frame(0, &f, &mut FakeJpeg) else { panic!("frame") };
+    let Some(Message::Frame { seq, .. }) = offer(&mut s, 0, &f) else { panic!("frame") };
     s.on_message(0, Message::FrameAck { seq, decode_us: 1 }, &mut Vec::new()).expect("ack");
     assert_eq!(s.set_display(display()), None, "same display, nothing to say");
     let bigger = Display { width: 2560.0, height: 1440.0, ..display() };
     assert_eq!(s.set_display(bigger), Some(Message::Display { id: 1, width: 2560, height: 1440, name: "Synthetic".into() }));
-    assert!(s.offer_frame(100_000, &f, &mut FakeJpeg).is_some());
+    assert!(offer(&mut s, 100_000, &f).is_some());
 }
 
 #[test]
@@ -327,4 +333,55 @@ fn downscale_averages_and_is_fast_on_a_retina_capture() {
     assert_eq!(&out.rgb[479 * 3..480 * 3], &[255, 255, 255]);
     // Bounded work per output pixel: even unoptimised test builds stay well under 100 ms.
     assert!(per.as_millis() < 100, "downscale took {per:?}");
+}
+
+/// Counts encodes, to show what is and isn't encoded.
+#[derive(Default)]
+struct CountingJpeg(u32);
+
+impl FrameEncoder for CountingJpeg {
+    fn codec(&self) -> u8 {
+        CODEC_JPEG
+    }
+    fn encode(&mut self, f: &Scaled) -> Vec<u8> {
+        self.0 += 1;
+        FakeJpeg.encode(f)
+    }
+}
+
+#[test]
+fn an_unchanged_capture_is_not_encoded_and_sent_frames_time_capture_to_send() {
+    let mut s = started(0);
+    let mut cap = Synthetic::new(Schedule::Static);
+    let mut enc = CountingJpeg::default();
+    let f = downscale(&cap.grab().expect("grab"), 480, 480);
+    // Grabbed at 1000, sent at 4500: 3.5 ms from capture start to sent.
+    let p = Prepared::prepare(&f, 1_000, s.last_sent_hash(), &mut enc);
+    let Some(Message::Frame { seq, .. }) = s.offer_frame(4_500, p) else { panic!("frame") };
+    assert_eq!(s.stats.capture_to_sent_us, vec![3_500]);
+    s.on_message(5_000, Message::FrameAck { seq, decode_us: 1 }, &mut Vec::new()).expect("ack");
+    // The same pixels again: no encode, no frame, and the frame cap still paces the next capture.
+    let p = Prepared::prepare(&f, 60_000, s.last_sent_hash(), &mut enc);
+    assert!(p.encoded.is_none());
+    assert_eq!(s.offer_frame(60_100, p), None);
+    assert_eq!((enc.0, s.stats.skipped_unchanged, s.stats.capture_to_sent_us.len()), (1, 1, 1));
+    assert!(!s.wants_frame(60_101));
+}
+
+#[test]
+fn an_unencoded_capture_overtaken_by_a_display_change_is_retaken_at_once() {
+    let mut s = started(0);
+    let mut cap = Synthetic::new(Schedule::Static);
+    let f = downscale(&cap.grab().expect("grab"), 480, 480);
+    let Some(Message::Frame { seq, .. }) = offer(&mut s, 0, &f) else { panic!("frame") };
+    s.on_message(0, Message::FrameAck { seq, decode_us: 1 }, &mut Vec::new()).expect("ack");
+    // Requested while the hash still matched, so the capture thread didn't encode it...
+    let p = Prepared::prepare(&f, 50_000, s.last_sent_hash(), &mut FakeJpeg);
+    // ...but the display changed before it was offered, so it must be sent after all.
+    let bigger = Display { width: 2560.0, height: 1440.0, ..display() };
+    assert!(s.set_display(bigger).is_some());
+    assert_eq!(s.offer_frame(50_100, p), None);
+    assert_eq!(s.stats.skipped_unchanged, 0);
+    assert!(s.wants_frame(50_100), "not paced: capture again now");
+    assert!(offer(&mut s, 50_200, &f).is_some());
 }
