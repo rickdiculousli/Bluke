@@ -1,0 +1,45 @@
+{
+  "about": "Hand-written wire vectors for PROTOCOL.md. Each 'hex' is one whole message: u32 length, type, body. Both the Kotlin and the Rust tests decode every 'messages' entry to its fields, encode the fields back to the same bytes, and check every 'invalid' entry is refused with its error.",
+  "cap": 262144,
+  "messages": [
+    {"name": "PairRequest", "type": 1, "fields": {"name": "Mac"}, "hex": "00000005 01 03 4d6163"},
+    {"name": "PairCode", "type": 2, "fields": {"attempts_left": 3}, "hex": "00000002 02 03"},
+    {"name": "PakeShare", "type": 3, "fields": {"pA": "04daa4f2de95ad69ac75708c3e508917988af04c865ac3018aa0a14fc4457043d6bfcf5e7acb2c5c96c2972dc3098ab8ad39c05b1651cb35395a15e7b95d3e1215"},
+     "hex": "00000042 03 04daa4f2de95ad69ac75708c3e508917988af04c865ac3018aa0a14fc4457043d6bfcf5e7acb2c5c96c2972dc3098ab8ad39c05b1651cb35395a15e7b95d3e1215"},
+    {"name": "PakeReply", "type": 4, "fields": {"pB": "0432a213097a8601898277d7a1d450f67a2918a03ea3207eef370da4a8ffb18f5e79ec738ae8048746801f24b71222b7183a5a05c37bee568147018da841a6f9d0", "cB": "d1358d2d5505724d8e914c4246cddd9505b2f0352b3fe572f15333ddbf8176bf"},
+     "hex": "00000062 04 0432a213097a8601898277d7a1d450f67a2918a03ea3207eef370da4a8ffb18f5e79ec738ae8048746801f24b71222b7183a5a05c37bee568147018da841a6f9d0 d1358d2d5505724d8e914c4246cddd9505b2f0352b3fe572f15333ddbf8176bf"},
+    {"name": "PakeConfirm", "type": 5, "fields": {"cA": "6ac5641ac04353010c21999b2b73bdcb0416a0034ce2b3c28f67f072a140179e"},
+     "hex": "00000021 05 6ac5641ac04353010c21999b2b73bdcb0416a0034ce2b3c28f67f072a140179e"},
+    {"name": "PairResult", "type": 6, "fields": {"status": 0}, "hex": "00000002 06 00"},
+    {"name": "PairResult", "type": 6, "fields": {"status": 2}, "hex": "00000002 06 02"},
+    {"name": "Refused", "type": 7, "fields": {"reason": 1}, "hex": "00000002 07 01"},
+    {"name": "Hello", "type": 16, "fields": {"version": 1, "name": "Mac"}, "hex": "00000007 10 0001 03 4d6163"},
+    {"name": "Welcome", "type": 17, "fields": {"version": 1, "codecs": 1, "max_width": 480, "max_height": 480, "fps": 20}, "hex": "00000009 11 0001 01 01e0 01e0 14"},
+    {"name": "Display", "type": 18, "fields": {"id": 1, "width": 1512, "height": 982, "name": "Built-in"}, "hex": "00000016 12 00000001 000005e8 000003d6 08 4275696c742d696e"},
+    {"name": "Frame", "type": 19, "fields": {"seq": 7, "codec": 1, "width": 480, "height": 312, "sent_us": 1000000, "data": "ffd8ffd9"}, "hex": "00000016 13 00000007 01 01e0 0138 00000000000f4240 ffd8ffd9"},
+    {"name": "FrameAck", "type": 20, "fields": {"seq": 7, "decode_us": 3500}, "hex": "00000009 14 00000007 00000dac"},
+    {"name": "FrameAck", "type": 20, "fields": {"seq": 8, "decode_us": 4294967295}, "hex": "00000009 14 00000008 ffffffff"},
+    {"name": "Pointer", "type": 32, "fields": {"x": 32768, "y": 65535, "buttons": 1}, "hex": "00000006 20 8000 ffff 01"},
+    {"name": "Wheel", "type": 33, "fields": {"dx": 0, "dy": -120}, "hex": "00000005 21 0000 ff88"},
+    {"name": "Heartbeat", "type": 34, "fields": {}, "hex": "00000001 22"},
+    {"name": "Release", "type": 35, "fields": {}, "hex": "00000001 23"},
+    {"name": "Ping", "type": 48, "fields": {"t_us": 123456789}, "hex": "00000009 30 00000000075bcd15"},
+    {"name": "Pong", "type": 49, "fields": {"t_us": 123456789}, "hex": "00000009 31 00000000075bcd15"}
+  ],
+  "unknown": [
+    {"about": "An unknown type inside the cap decodes as Unknown and is skipped in a session.", "type": 127, "hex": "00000002 7f 00"}
+  ],
+  "invalid": [
+    {"about": "length 0: no type byte", "hex": "00000000", "error": "empty"},
+    {"about": "length one past the cap, refused from the header alone", "hex": "00040001 13", "error": "too_large"},
+    {"about": "length far past the cap", "hex": "ffffffff", "error": "too_large"},
+    {"about": "Pointer body one byte short", "hex": "00000005 20 8000 ffff", "error": "malformed"},
+    {"about": "Pointer body one byte long", "hex": "00000007 20 8000 ffff 01 00", "error": "malformed"},
+    {"about": "PakeShare point of 64 bytes", "hex": "00000041 03 daa4f2de95ad69ac75708c3e508917988af04c865ac3018aa0a14fc4457043d6bfcf5e7acb2c5c96c2972dc3098ab8ad39c05b1651cb35395a15e7b95d3e1215", "error": "malformed"},
+    {"about": "string length runs past the body", "hex": "00000005 01 05 4d6163", "error": "malformed"},
+    {"about": "string not UTF-8", "hex": "00000003 01 01 ff", "error": "malformed"},
+    {"about": "name longer than 64 bytes", "hex": "00000043 01 41 4141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141414141", "error": "malformed"},
+    {"about": "Frame with an empty payload", "hex": "00000012 13 00000007 01 01e0 0138 00000000000f4240", "error": "malformed"}
+  ],
+  "cap_header": {"about": "A header announcing exactly the cap is accepted before the body is read.", "hex": "00040000"}
+}
