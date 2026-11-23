@@ -6,7 +6,7 @@ import org.junit.Test
 
 class HidRegistrationAttemptTest {
     @Test fun commandAcceptanceIsNotRegistrationConfirmation() {
-        val attempt = HidRegistrationAttempt(GamepadDpadOutputMode.ANDROID)
+        val attempt = HidRegistrationAttempt()
         attempt.commandCompleted(true)
         assertEquals(State.WAITING, attempt.state.value)
         assertTrue(attempt.statusChanged(true))
@@ -14,14 +14,14 @@ class HidRegistrationAttemptTest {
     }
 
     @Test fun rejectedAttemptCannotBecomeRegisteredFromLateCallback() {
-        val attempt = HidRegistrationAttempt(GamepadDpadOutputMode.ANDROID)
+        val attempt = HidRegistrationAttempt()
         attempt.commandCompleted(false)
         assertFalse(attempt.statusChanged(true))
         assertEquals(State.REJECTED, attempt.state.value)
     }
 
     @Test fun oldSuccessDuringTeardownDoesNotCompleteRegistration() {
-        val attempt = HidRegistrationAttempt(GamepadDpadOutputMode.NATIVE_HAT)
+        val attempt = HidRegistrationAttempt()
         attempt.commandCompleted(true)
         attempt.statusChanged(true)
         attempt.beginUnregister()
@@ -33,7 +33,7 @@ class HidRegistrationAttemptTest {
     }
 
     @Test fun missingRegistrationCallbackStillRequiresTeardownOfAcceptedCommand() {
-        val attempt = HidRegistrationAttempt(GamepadDpadOutputMode.ANDROID)
+        val attempt = HidRegistrationAttempt()
         attempt.commandCompleted(true)
         attempt.beginUnregister()
         assertEquals(State.UNREGISTERING, attempt.state.value)
@@ -41,11 +41,11 @@ class HidRegistrationAttemptTest {
     }
 
     @Test fun retiredAttemptCannotConfirmReplacement() {
-        val old = HidRegistrationAttempt(GamepadDpadOutputMode.NATIVE_HAT)
+        val old = HidRegistrationAttempt()
         old.commandCompleted(true)
         old.beginUnregister()
         old.statusChanged(false)
-        val replacement = HidRegistrationAttempt(GamepadDpadOutputMode.ANDROID)
+        val replacement = HidRegistrationAttempt()
         replacement.commandCompleted(true)
         assertFalse(old.statusChanged(true))
         assertEquals(State.WAITING, replacement.state.value)

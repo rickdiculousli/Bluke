@@ -137,24 +137,3 @@ internal val SHARED_HID_DESCRIPTOR = byteArrayOf(
 internal fun hidDescriptorForMode(mode: GamepadDpadOutputMode): ByteArray {
     return SHARED_HID_DESCRIPTOR.copyOf()
 }
-
-@Suppress("UNUSED_PARAMETER")
-internal fun requiresGamepadDescriptorRestart(
-    previous: GamepadDpadOutputMode,
-    next: GamepadDpadOutputMode,
-): Boolean = false
-
-/** Wait for the latest descriptor choice without cancelling a registration already in flight. */
-internal suspend fun registerLatestGamepadDescriptor(
-    selectedMode: () -> GamepadDpadOutputMode,
-    registeredMode: () -> GamepadDpadOutputMode?,
-    register: suspend () -> Boolean,
-): Boolean {
-    do {
-        if (!register()) return false
-    } while (registeredMode()?.let {
-        requiresGamepadDescriptorRestart(it, selectedMode())
-    } != false)
-    return true
-}
-

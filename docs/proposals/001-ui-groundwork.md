@@ -4,7 +4,7 @@ title: Clear the ground for three parallel UI builds: cut the dead gamepad switc
 kind: maintenance
 size: M
 judge: opus
-status: proposed
+status: done
 lens: eng
 proposed_by: coordinator on ricks-macbook, from the operator's request
 proposed_on: 2026-11-23
@@ -48,6 +48,15 @@ Nothing changes in the app. `HomeScreen.kt` loses about 600 lines to two new fil
 - The harness asset runs and produces its captures. Paste the count into Shown.
 
 ## Shown
+- Nothing changes in the app: the all-screens harness run with `recordRoborazziDebug` on `main` and on this branch, then a sha256 compare of the 122 PNGs -> `identical 119 differ 3`. The three are `home-dialog-gamepad-guide-{light,dark}` and `help-full-light`, where the spec deletes the re-pair copy. Every keyboard, touchpad, gamepad and media capture is identical.
+- `HomeScreen.kt` loses its surfaces to two new files: `wc -l` -> `649 HomeScreen.kt` (from 1382), `108 InputSurface.kt`, `774 KeyboardSurface.kt`. HomeScreen calls `rememberKeyboardSurfaceState(...)` and `InputSurface(...)`.
+- The mode-switch code is gone: `grep -rnE "GamepadModeSwitch|switchGamepadDescriptor|registerLatestGamepadDescriptor|requiresGamepadDescriptorRestart|retryGamepadModeSwitch|gamepadModeSwitch" app tools README.md AGENTS.md | wc -l` -> `0`.
+- Mode-switch tests deleted or rewritten: `GamepadModeSwitchStateTest` deleted; `GamepadDescriptorTest` keeps only its descriptor and report tests.
+- Gamepad reports dropped while unregistered: `BluetoothManagerSessionTest.gamepadReportsAreDroppedWhileUnregistered`, which fails (`expected:<0> but was:<1>`) with the guard removed.
+- Existing baselines unchanged: `./gradlew verifyRoborazziDebug --tests 'dev.arnv.bluke.ui.MediaPresentationScreenshotTest'` -> `BUILD SUCCESSFUL in 23s`, and `git diff --stat main` on the three PNGs is empty.
+- One screenshot helper: `captureMatrix` in `app/src/test/java/dev/arnv/bluke/testing/ScreenshotMatrix.kt`. `ScreenshotMatrixTest` checks its pixels in memory through `onCaptured`, so a plain test run catches a broken helper: forcing light theme in the helper -> `failures="1"`, dropping its font scale -> `failures="2"`, as written -> `failures="0"`.
+- The harness asset runs and produces its captures: `ls screens-branch | wc -l` -> `122`, with no `SCREEN FAILURES`. Its header says how to run it (`recordRoborazziDebug`, since a plain test run writes no images).
+- Easy to miss: the move keeps the keyboard's state as long-lived as before. `KeyboardSurfaceState` is remembered by HomeScreen rather than inside the surface, so lock LEDs, held keys and a pending character layout survive leaving the surface: `rememberKeyboardSurfaceState` in `KeyboardSurface.kt`, called from `HomeScreen.kt`.
 
 ## Risks and the alternative considered
 - **The cut is the one part of this on the real-host path.** The rig covers it against a spec-following host. A real host keeps working because only unreachable branches go.

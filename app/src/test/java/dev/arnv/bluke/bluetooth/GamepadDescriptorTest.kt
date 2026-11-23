@@ -1,44 +1,10 @@
 package dev.arnv.bluke.bluetooth
 
 import java.security.MessageDigest
-import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Test
 
 class GamepadDescriptorTest {
-    @Test fun switchUsesLatestModeWhenToggleArrivesDuringRegistration() = runBlocking {
-        var selected = GamepadDpadOutputMode.ANDROID
-        var registered: GamepadDpadOutputMode? = null
-        val attempts = mutableListOf<GamepadDpadOutputMode>()
-        assertTrue(registerLatestGamepadDescriptor({ selected }, { registered }) {
-            attempts.add(selected)
-            registered = selected
-            if (attempts.size == 1) selected = GamepadDpadOutputMode.WEB_BUTTONS
-            true
-        })
-        assertEquals(listOf(GamepadDpadOutputMode.ANDROID), attempts)
-    }
-
-    @Test fun nativeToWebDuringRegistrationNeedsNoSecondDescriptor() = runBlocking {
-        var selected = GamepadDpadOutputMode.NATIVE_HAT
-        var attempts = 0
-        assertTrue(registerLatestGamepadDescriptor({ selected }, { GamepadDpadOutputMode.NATIVE_HAT }) {
-            attempts++
-            selected = GamepadDpadOutputMode.WEB_BUTTONS
-            true
-        })
-        assertEquals(1, attempts)
-    }
-
-    @Test fun failedSwitchStopsWithoutUnboundedRetry() = runBlocking {
-        var attempts = 0
-        assertFalse(registerLatestGamepadDescriptor({ GamepadDpadOutputMode.ANDROID }, { null }) {
-            attempts++
-            false
-        })
-        assertEquals(1, attempts)
-    }
-
     @Test fun allProfilesShareDescriptorAndPreserveOriginalFields() {
         for (mode in GamepadDpadOutputMode.entries) {
             val descriptor = hidDescriptorForMode(mode)
@@ -71,14 +37,6 @@ class GamepadDescriptorTest {
         assertEquals(desktop.size, android.size)
         val changed = desktop.indices.filter { desktop[it] != android[it] }
         assertTrue(changed.isEmpty())
-    }
-
-    @Test fun noModeTransitionRequiresRegistrationRestart() {
-        for (previous in GamepadDpadOutputMode.entries) {
-            for (next in GamepadDpadOutputMode.entries) {
-                assertFalse(requiresGamepadDescriptorRestart(previous, next))
-            }
-        }
     }
 
     @Test fun descriptorsAreIndependentCopies() {

@@ -251,7 +251,7 @@ class MirrorScreenshotTest {
     }
 
     /**
-     * The scheme the surface host wraps every input surface in: HomeScreen.kt's
+     * The scheme the surface host wraps every input surface in: InputSurface.kt's
      * `val darkScheme = darkColorScheme(` over the app theme's primary. Keep the two in step.
      */
     @Composable
