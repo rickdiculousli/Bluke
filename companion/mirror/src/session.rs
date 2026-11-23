@@ -57,6 +57,33 @@ impl std::fmt::Display for End {
     }
 }
 
+/// What the companion's run loop does once a connection to one address ends.
+#[derive(Debug, PartialEq, Eq)]
+pub enum Next {
+    /// Try the next address advertising the paired phone's id, before waiting.
+    TryNextAddress,
+    /// Wait, then find the phone and connect again.
+    Reconnect,
+    /// The user asked to stop.
+    Stop,
+    /// Give up with this message: only the user can fix it.
+    Fail(&'static str),
+}
+
+/// The rule for [`Next`]. `fixed_address` is a `--phone` address rather than mDNS results; an mDNS
+/// result that isn't the pinned phone may be anyone advertising its id, so the others are tried.
+pub fn next_after(end: &End, fixed_address: bool) -> Next {
+    match end {
+        End::Closed(Close::Refused(1)) => Next::Fail("the phone has forgotten this computer. Run `bluke-mirror pair` again."),
+        End::NotPinned if fixed_address => {
+            Next::Fail("the phone at that address isn't the paired phone. Run `bluke-mirror pair` to pair with it.")
+        }
+        End::NotPinned => Next::TryNextAddress,
+        End::Stopped => Next::Stop,
+        _ => Next::Reconnect,
+    }
+}
+
 pub struct Report {
     pub end: End,
     pub stats: Stats,

@@ -14,12 +14,16 @@ pub struct Found {
     pub name: String,
 }
 
-/// Browses for `wait`. With `want_id`, returns as soon as the phone with that `id` shows up;
-/// without, returns every phone seen in that time.
+/// After the first advertisement of the wanted `id`, how long to keep listening for others with
+/// the same `id`: anyone can advertise it, so the companion tries each address it was given.
+const SAME_ID_GRACE: Duration = Duration::from_millis(300);
+
+/// Browses for `wait`. With `want_id`, returns every address advertising that `id` seen within
+/// a short grace after the first; without, returns every phone seen in that time.
 pub fn browse(want_id: Option<&str>, wait: Duration) -> std::io::Result<Vec<Found>> {
     let daemon = ServiceDaemon::new().map_err(std::io::Error::other)?;
     let events = daemon.browse(SERVICE).map_err(std::io::Error::other)?;
-    let deadline = Instant::now() + wait;
+    let mut deadline = Instant::now() + wait;
     let mut found: Vec<Found> = Vec::new();
     while let Some(left) = deadline.checked_duration_since(Instant::now()) {
         let Ok(event) = events.recv_timeout(left) else { break };
@@ -31,15 +35,24 @@ pub fn browse(want_id: Option<&str>, wait: Duration) -> std::io::Result<Vec<Foun
         // Prefer IPv4: the phone listens on its Wi-Fi address.
         let mut ips: Vec<IpAddr> = s.get_addresses_v4().into_iter().map(IpAddr::V4).collect();
         ips.sort();
-        let Some(ip) = ips.first().copied() else { continue };
         let name = s.fullname.trim_end_matches(SERVICE).trim_end_matches('.').to_string();
-        let f = Found { addr: SocketAddr::new(ip, s.port), id, name };
-        if want_id.is_some_and(|w| w.eq_ignore_ascii_case(&f.id)) {
-            let _ = daemon.shutdown();
-            return Ok(vec![f]);
-        }
-        if want_id.is_none() && !found.iter().any(|g| g.id == f.id) {
-            found.push(f);
+        match want_id {
+            Some(w) if w.eq_ignore_ascii_case(&id) => {
+                for ip in ips {
+                    let addr = SocketAddr::new(ip, s.port);
+                    if !found.iter().any(|g| g.addr == addr) {
+                        found.push(Found { addr, id: id.clone(), name: name.clone() });
+                    }
+                }
+                deadline = deadline.min(Instant::now() + SAME_ID_GRACE);
+            }
+            Some(_) => {}
+            None => {
+                let Some(ip) = ips.first().copied() else { continue };
+                if !found.iter().any(|g| g.id == id) {
+                    found.push(Found { addr: SocketAddr::new(ip, s.port), id, name });
+                }
+            }
         }
     }
     let _ = daemon.shutdown();

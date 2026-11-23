@@ -180,45 +180,55 @@ fn run_command(config: &Config, phone: Option<SocketAddr>) -> ExitCode {
     let want_id = config::mdns_id(&pinned);
     let mut waiting_said = false;
     while !STOP.load(Ordering::Relaxed) {
-        let addr = match phone {
-            Some(a) => Some(a),
-            None => discover::browse(Some(&want_id), RETRY).ok().and_then(|f| f.first().map(|f| f.addr)),
+        let candidates: Vec<SocketAddr> = match phone {
+            Some(a) => vec![a],
+            None => discover::browse(Some(&want_id), RETRY).map(|f| f.into_iter().map(|f| f.addr).collect()).unwrap_or_default(),
         };
-        let connected = addr.map(|a| (a, link::Link::connect(a, &id)));
-        let (addr, link) = match connected {
-            Some((a, Ok(l))) => (a, l),
-            _ => {
-                if !waiting_said {
-                    println!("Waiting for the phone: open Mirror on it.");
-                    waiting_said = true;
+        let mut mirrored = false;
+        for addr in &candidates {
+            let Ok(link) = link::Link::connect(*addr, &id) else { continue };
+            // Checked again inside the session; here it keeps a stranger from opening the capture.
+            if link.peer() != pinned {
+                link.close();
+                println!("{addr} answers for the paired phone but isn't it; nothing was sent.");
+                match session::next_after(&session::End::NotPinned, phone.is_some()) {
+                    session::Next::Fail(m) => return fail(m),
+                    _ => continue,
                 }
-                // mDNS browsing already waited; a fixed address waits here.
-                if phone.is_some() || addr.is_some() {
-                    std::thread::sleep(RETRY);
-                }
-                continue;
             }
-        };
-        waiting_said = false;
-        let capture = match platform::open_capture() {
-            Ok(c) => c,
-            Err(e) => return fail(&e),
-        };
-        let d = capture.display();
-        println!("Connected to the phone at {addr}; mirroring {} ({}x{} points).", d.name, d.width, d.height);
-        let opts = session::Options { name: name.clone(), stop: &STOP, until_us: None };
-        let report =
-            session::run(link, Some(pinned), capture, injector.as_mut(), Box::new(jpeg::Jpeg::default()), &opts, &mut |s| println!("{s}"));
-        println!("Session ended: {}.", report.end);
-        match report.end {
-            session::End::Closed(bluke_mirror_core::session::Close::Refused(1)) => {
-                return fail("the phone has forgotten this computer. Run `bluke-mirror pair` again.");
+            waiting_said = false;
+            mirrored = true;
+            let capture = match platform::open_capture() {
+                Ok(c) => c,
+                Err(e) => return fail(&e),
+            };
+            let d = capture.display();
+            println!(
+                "Connected to the phone at {addr}; mirroring {} ({}x{} points) through {}.",
+                d.name,
+                d.width,
+                d.height,
+                capture.backend()
+            );
+            let opts = session::Options { name: name.clone(), stop: &STOP, until_us: None };
+            let report = session::run(link, Some(pinned), capture, injector.as_mut(), Box::new(jpeg::Jpeg::default()), &opts, &mut |s| {
+                println!("{s}")
+            });
+            println!("Session ended: {}.", report.end);
+            match session::next_after(&report.end, phone.is_some()) {
+                session::Next::Fail(m) => return fail(m),
+                session::Next::Stop => return ExitCode::SUCCESS,
+                session::Next::TryNextAddress => continue,
+                session::Next::Reconnect => break,
             }
-            session::End::NotPinned if phone.is_some() => {
-                return fail("the phone at that address isn't the paired phone. Run `bluke-mirror pair` to pair with it.");
-            }
-            session::End::Stopped => break,
-            _ => std::thread::sleep(RETRY),
+        }
+        if !mirrored && !waiting_said {
+            println!("Waiting for the phone: open Mirror on it.");
+            waiting_said = true;
+        }
+        // An mDNS browse that found nothing already waited.
+        if !candidates.is_empty() && !STOP.load(Ordering::Relaxed) {
+            std::thread::sleep(RETRY);
         }
     }
     ExitCode::SUCCESS

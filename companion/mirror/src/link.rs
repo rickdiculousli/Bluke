@@ -12,10 +12,46 @@ use std::collections::VecDeque;
 use std::io::{self, Read, Write};
 use std::net::{SocketAddr, TcpStream};
 use std::sync::mpsc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
-/// How long a TCP connect and the TLS handshake may take.
+/// How long a TCP connect and the TLS handshake may take, together.
 pub const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
+
+/// The socket, failing every read and write once `until` has passed. It bounds the whole
+/// handshake rather than each read, so a peer trickling bytes can't hold the companion in it.
+struct Deadline<'a> {
+    sock: &'a mut TcpStream,
+    until: Instant,
+}
+
+impl Deadline<'_> {
+    fn left(&self) -> io::Result<Duration> {
+        self.until
+            .checked_duration_since(Instant::now())
+            .filter(|d| !d.is_zero())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "the TLS handshake took too long"))
+    }
+}
+
+impl Read for Deadline<'_> {
+    fn read(&mut self, buf: &mut [u8]) -> io::Result<usize> {
+        let left = self.left()?;
+        self.sock.set_read_timeout(Some(left))?;
+        self.sock.read(buf)
+    }
+}
+
+impl Write for Deadline<'_> {
+    fn write(&mut self, buf: &[u8]) -> io::Result<usize> {
+        let left = self.left()?;
+        self.sock.set_write_timeout(Some(left))?;
+        self.sock.write(buf)
+    }
+
+    fn flush(&mut self) -> io::Result<()> {
+        self.sock.flush()
+    }
+}
 
 /// One read from the socket reader thread: raw TLS bytes for [`Link::ingest`], or how the
 /// stream ended (`UnexpectedEof` when the phone closed it).
@@ -37,31 +73,37 @@ impl Link {
     /// Connects to the phone as the TLS client and completes the handshake.
     /// Nothing is sent until the caller has checked [`Link::peer`].
     pub fn connect(addr: SocketAddr, id: &Identity) -> io::Result<Link> {
-        let sock = TcpStream::connect_timeout(&addr, HANDSHAKE_TIMEOUT)?;
+        Link::connect_within(addr, id, HANDSHAKE_TIMEOUT)
+    }
+
+    fn connect_within(addr: SocketAddr, id: &Identity, within: Duration) -> io::Result<Link> {
+        let until = Instant::now() + within;
+        let sock = TcpStream::connect_timeout(&addr, within)?;
         let config = tls::client_config(id).map_err(io::Error::other)?;
         let name = ServerName::try_from("bluke-phone").expect("valid name").to_owned();
         let conn = ClientConnection::new(config, name).map_err(io::Error::other)?;
-        Link::handshake(Connection::Client(conn), sock)
+        Link::handshake(Connection::Client(conn), sock, until)
     }
 
     /// Accepts one connection as the TLS server, requiring a client certificate (the phone's role).
     pub fn accept(sock: TcpStream, id: &Identity) -> io::Result<Link> {
         let config = tls::server_config(id).map_err(io::Error::other)?;
         let conn = ServerConnection::new(config).map_err(io::Error::other)?;
-        Link::handshake(Connection::Server(conn), sock)
+        Link::handshake(Connection::Server(conn), sock, Instant::now() + HANDSHAKE_TIMEOUT)
     }
 
-    fn handshake(mut tls: Connection, mut sock: TcpStream) -> io::Result<Link> {
+    fn handshake(mut tls: Connection, mut sock: TcpStream, until: Instant) -> io::Result<Link> {
         sock.set_nodelay(true)?;
-        sock.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
-        sock.set_write_timeout(Some(HANDSHAKE_TIMEOUT))?;
+        let mut io = Deadline { sock: &mut sock, until };
         while tls.is_handshaking() {
-            tls.complete_io(&mut sock)?;
+            tls.complete_io(&mut io)?;
         }
         // Flush the client's last flight (its Finished) before anything else happens.
         while tls.wants_write() {
-            tls.write_tls(&mut sock)?;
+            tls.write_tls(&mut io)?;
         }
+        sock.set_read_timeout(Some(HANDSHAKE_TIMEOUT))?;
+        sock.set_write_timeout(Some(HANDSHAKE_TIMEOUT))?;
         let cert = tls
             .peer_certificates()
             .and_then(|c| c.first())
@@ -204,5 +246,43 @@ impl Link {
             }
         }
         let _ = self.sock.shutdown(std::net::Shutdown::Both);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use rustls_pki_types::PrivateKeyDer;
+    use std::net::TcpListener;
+
+    fn identity() -> Identity {
+        let made = rcgen::generate_simple_self_signed(vec!["test".to_string()]).expect("cert");
+        Identity { cert: made.cert.der().clone(), key: PrivateKeyDer::Pkcs8(made.signing_key.serialize_der().into()) }
+    }
+
+    #[test]
+    fn a_peer_trickling_its_handshake_is_cut_off_at_the_deadline() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().expect("addr");
+        let peer = std::thread::spawn(move || {
+            let (mut sock, _) = listener.accept().expect("accept");
+            let mut hello = [0u8; 4096];
+            let _ = sock.read(&mut hello);
+            // A handshake record header promising 16 KiB, then one byte of it every 50 ms: each
+            // read succeeds long before a per-read timeout would fire.
+            let _ = sock.write_all(&[0x16, 0x03, 0x03, 0x40, 0x00]);
+            for _ in 0..100 {
+                std::thread::sleep(Duration::from_millis(50));
+                if sock.write_all(&[0]).is_err() {
+                    break;
+                }
+            }
+        });
+        let start = Instant::now();
+        let got = Link::connect_within(addr, &identity(), Duration::from_millis(400));
+        let took = start.elapsed();
+        assert_eq!(got.err().map(|e| e.kind()), Some(io::ErrorKind::TimedOut));
+        assert!(took < Duration::from_millis(1500), "cut off after {took:?}");
+        drop(peer);
     }
 }

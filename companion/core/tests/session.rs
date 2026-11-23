@@ -374,6 +374,23 @@ fn downscale_averages_and_is_fast_on_a_retina_capture() {
     assert!(per.as_millis() < 100, "downscale took {per:?}");
 }
 
+#[test]
+fn a_capture_already_at_the_fit_is_copied_pixel_for_pixel() {
+    // What a GPU-scaled (ScreenCaptureKit) grab hands over: every pixel reaches the frame and its
+    // hash, so a one-pixel change is a new frame.
+    use bluke_mirror_core::frames::Image;
+    let (w, h) = (480u32, 312u32);
+    let rgba: Vec<u8> = (0..w * h * 4).map(|i| (i * 7 % 251) as u8).collect();
+    let img = Image { width: w, height: h, stride: w as usize * 4, rgba: rgba.clone() };
+    let out = downscale(&img, 480, 480);
+    assert_eq!((out.width, out.height), (480, 312));
+    let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+    assert_eq!(out.rgb, rgb);
+    let mut changed = img.clone();
+    changed.rgba[(100 * w as usize + 333) * 4] ^= 1;
+    assert_ne!(downscale(&changed, 480, 480).hash, out.hash);
+}
+
 /// Counts encodes, to show what is and isn't encoded.
 #[derive(Default)]
 struct CountingJpeg(u32);
