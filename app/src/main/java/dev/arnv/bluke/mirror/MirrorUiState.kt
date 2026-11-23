@@ -24,6 +24,10 @@ sealed interface MirrorPhase {
     data class Failed(val reason: String) : MirrorPhase
 }
 
+/** A picture is on screen and touches reach the computer: connected, and the first frame decoded. */
+val MirrorPhase.isLive: Boolean
+    get() = this is MirrorPhase.Connected && hasFrame
+
 /** A short-lived message the surface shows once, over whatever else is on screen. */
 sealed interface MirrorNotice {
     data class Paired(val companionName: String) : MirrorNotice
