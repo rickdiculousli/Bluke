@@ -1,0 +1,10 @@
+[package]
+name = "bluke-mirror"
+description = "Bluke Mirror's host companion: captures the screen for the phone and injects its touches"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+bluke-mirror-core = { path = "../core" }

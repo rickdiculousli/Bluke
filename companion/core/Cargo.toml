@@ -1,0 +1,23 @@
+[package]
+name = "bluke-mirror-core"
+description = "Bluke Mirror's protocol, pairing and session logic, with no I/O and no platform code"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+p256 = { version = "0.13", default-features = false, features = ["arithmetic"] }
+sha2 = "0.10"
+hkdf = "0.12"
+hmac = "0.12"
+subtle = "2.6"
+
+[dev-dependencies]
+serde_json = "1"
+hex = "0.4"
+bluke-mirror-core = { path = ".", features = ["rig"] }
+
+[features]
+# Test-only pieces: the synthetic screen.
+rig = []

@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec mise exec zig@0.15.2 -- zig ar "$@"
