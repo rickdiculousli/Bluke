@@ -6,5 +6,31 @@ edition.workspace = true
 license.workspace = true
 rust-version.workspace = true
 
+[[bin]]
+name = "bluke-mirror"
+path = "src/main.rs"
+
+[[example]]
+name = "rig"
+required-features = ["rig"]
+
+[features]
+# Test-only pieces: the synthetic screen and the recording injector, for tests and the rig example.
+rig = ["bluke-mirror-core/rig"]
+
 [dependencies]
 bluke-mirror-core = { path = "../core" }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std"] }
+rustls-pki-types = { version = "1", features = ["std"] }
+rcgen = { version = "0.14", default-features = false, features = ["ring", "pem", "crypto"] }
+mdns-sd = "0.17"
+jpeg-encoder = "0.7"
+sha2 = "0.10"
+getrandom = "0.2"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+xcap = "0.9"
+core-graphics = { version = "0.25", features = ["highsierra"] }
+
+[dev-dependencies]
+bluke-mirror = { path = ".", features = ["rig"] }
