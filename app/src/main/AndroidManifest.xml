@@ -57,7 +57,6 @@
         <activity android:name=".AboutActivity" android:theme="@style/Theme.MyApplication" />
         <activity android:name=".LicensesActivity" android:theme="@style/Theme.MyApplication" />
         <activity android:name=".HelpActivity" android:theme="@style/Theme.MyApplication" />
-        <activity android:name=".OnboardingActivity" android:theme="@style/Theme.MyApplication" />
         <activity android:name=".DeveloperOptionsActivity" android:theme="@style/Theme.MyApplication" />
         <activity android:name=".DeveloperLogsActivity" android:theme="@style/Theme.MyApplication" />
     </application>

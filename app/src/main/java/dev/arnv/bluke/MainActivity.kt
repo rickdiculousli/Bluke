@@ -21,6 +21,10 @@ import dev.arnv.bluke.sound.migrateSoundPreferences
 import dev.arnv.bluke.data.migrateKeyboardCustomizationPreferences
 import dev.arnv.bluke.ui.theme.MyApplicationTheme
 import dev.arnv.bluke.ui.HomeScreen
+import dev.arnv.bluke.ui.PermissionStep
+import dev.arnv.bluke.ui.permissionStep
+
+private const val PERMISSION_REQUESTED_PREFERENCE = "bluetooth_permission_requested"
 
 interface RemoteVolumeKeyHost {
     fun setRemoteVolumeKeyHandler(handler: ((keyCode: Int, isPressed: Boolean) -> Unit)?)
@@ -46,12 +50,6 @@ class MainActivity : ComponentActivity(), RemoteVolumeKeyHost {
         val sharedPrefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
         migrateSoundPreferences(sharedPrefs)
         migrateKeyboardCustomizationPreferences(sharedPrefs)
-        if (!sharedPrefs.getBoolean("has_seen_onboarding", false)) {
-            startActivity(android.content.Intent(this, OnboardingActivity::class.java))
-            finish()
-            return
-        }
-
         btManager = (application as BlukeApplication).bluetoothKeyboardManager
         lifecycleScope.launch {
             repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -82,8 +80,60 @@ class MainActivity : ComponentActivity(), RemoteVolumeKeyHost {
 
         soundSynth = KeyboardSoundSynthesizer(applicationContext)
 
-        // Request Bluetooth and Location permissions dynamically
-        val permissions = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+        enableEdgeToEdge()
+        setContent {
+            MyApplicationTheme {
+                HomeScreen(
+                    btManager = btManager,
+                    soundSynth = soundSynth,
+                    onGrantPermission = ::requestBluetoothPermissions,
+                )
+            }
+        }
+    }
+
+    /**
+     * Home's Grant permission. Asks Android while it will still show the prompt; after a second denial it
+     * won't, so this opens Bluke's app settings instead, and onResume's re-check picks up the change.
+     */
+    private fun requestBluetoothPermissions() {
+        val prefs = getSharedPreferences("app_prefs", MODE_PRIVATE)
+        val denied = deniedBluetoothPermissions()
+        when (permissionStep(
+            askedBefore = prefs.getBoolean(PERMISSION_REQUESTED_PREFERENCE, false),
+            deniedShowsRationale = denied.map(::shouldShowRequestPermissionRationale),
+        )) {
+            PermissionStep.REQUEST -> {
+                prefs.edit().putBoolean(PERMISSION_REQUESTED_PREFERENCE, true).apply()
+                permissionLauncher.launch(requestedPermissions())
+            }
+            PermissionStep.OPEN_APP_SETTINGS -> startActivity(
+                android.content.Intent(
+                    android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                    android.net.Uri.fromParts("package", packageName, null),
+                ),
+            )
+        }
+    }
+
+    private fun granted(permission: String) =
+        checkSelfPermission(permission) == android.content.pm.PackageManager.PERMISSION_GRANTED
+
+    /** The permissions the manager checks, as `checkBluetoothCapabilities` does, that are still missing. */
+    private fun deniedBluetoothPermissions(): List<String> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+            listOf(
+                android.Manifest.permission.BLUETOOTH_CONNECT,
+                android.Manifest.permission.BLUETOOTH_ADVERTISE,
+                android.Manifest.permission.BLUETOOTH_SCAN,
+            ).filterNot(::granted)
+        } else {
+            val location = listOf(android.Manifest.permission.ACCESS_FINE_LOCATION, android.Manifest.permission.ACCESS_COARSE_LOCATION)
+            if (location.any(::granted)) emptyList() else location
+        }
+
+    private fun requestedPermissions(): Array<String> =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             arrayOf(
                 android.Manifest.permission.BLUETOOTH_CONNECT,
                 android.Manifest.permission.BLUETOOTH_ADVERTISE,
@@ -97,18 +147,6 @@ class MainActivity : ComponentActivity(), RemoteVolumeKeyHost {
                 android.Manifest.permission.ACCESS_COARSE_LOCATION
             )
         }
-        permissionLauncher.launch(permissions)
-
-        enableEdgeToEdge()
-        setContent {
-            MyApplicationTheme {
-                HomeScreen(
-                    btManager = btManager,
-                    soundSynth = soundSynth
-                )
-            }
-        }
-    }
 
     override fun onStart() {
         super.onStart()

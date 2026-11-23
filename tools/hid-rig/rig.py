@@ -376,7 +376,8 @@ async def run(args: argparse.Namespace) -> int:
                 await host.wait_channels(True, timeout=60)
             finally:
                 prompt.cancel()
-            await wait_state(app, lambda s: (s["host"] or "").upper() == address.upper(), "the app to see the host")
+            state = await wait_state(app, lambda s: (s["host"] or "").upper() == address.upper(), "the app to see the host")
+            assert state["lastFailure"] is None, f"connected with a failure still published: {state}"
             host.drain()
 
         await step("pair and connect", connect())
@@ -411,7 +412,7 @@ async def run(args: argparse.Namespace) -> int:
         async def reconnect() -> None:
             await call(app, "disconnect")
             await host.wait_channels(False)
-            await wait_state(app, lambda s: not s["host"], "the app to drop the host")
+            await wait_state(app, lambda s: not s["host"] and not s["disconnecting"], "the app to drop the host")
             await connect()
             await check_keyboard(app, host)
         await step("disconnect and reconnect", reconnect())

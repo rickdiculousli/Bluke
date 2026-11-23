@@ -1,66 +1,48 @@
 package dev.arnv.bluke.ui
 
-import dev.arnv.bluke.bluetooth.BluetoothState
+import dev.arnv.bluke.bluetooth.CURRENT_HID_DESCRIPTOR_REVISION
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class HomeUiPolicyTest {
-    @org.junit.Test fun discoveryReconcilesByAddressNotDeviceName() {
-        org.junit.Assert.assertFalse(shouldShowDiscoveredHost("A", setOf("A"), null))
-        org.junit.Assert.assertFalse(shouldShowDiscoveredHost("B", emptySet(), "B"))
-        org.junit.Assert.assertTrue(shouldShowDiscoveredHost("B", setOf("A"), null))
-    }
     @Test
-    fun gamepadEntryRequiresAcknowledgementRegardlessOfEntryPoint() {
-        assertTrue(shouldShowGamepadGuide(InputMode.GAMEPAD.id, guideSeen = false))
-        assertFalse(shouldShowGamepadGuide(InputMode.GAMEPAD.id, guideSeen = true))
-        assertFalse(shouldShowGamepadGuide(InputMode.KEYBOARD.id, guideSeen = false))
-        assertFalse(shouldShowGamepadGuide(InputMode.TOUCHPAD.id, guideSeen = false))
+    fun gamepadGuideShowsOnlyBeforeTheFirstGamepadLaunch() {
+        assertTrue(shouldShowGamepadGuide(InputMode.GAMEPAD, guideSeen = false))
+        assertFalse(shouldShowGamepadGuide(InputMode.GAMEPAD, guideSeen = true))
+        assertFalse(shouldShowGamepadGuide(InputMode.KEYBOARD, guideSeen = false))
+        assertFalse(shouldShowGamepadGuide(InputMode.TOUCHPAD, guideSeen = false))
     }
 
     @Test
-    fun launchControlsAreHiddenForBlockingBluetoothStates() {
-        assertTrue(BluetoothState.InitializingCapabilities.blocksInputLaunch())
-        assertTrue(BluetoothState.CheckingCapabilities.blocksInputLaunch())
-        assertTrue(BluetoothState.BluetoothOff.blocksInputLaunch())
-        assertTrue(BluetoothState.Unsupported.blocksInputLaunch())
-        assertTrue(BluetoothState.ProfileNotSupported.blocksInputLaunch())
-        assertFalse(BluetoothState.ReadyDisconnected.blocksInputLaunch())
-        assertFalse(BluetoothState.PairingMode("host").blocksInputLaunch())
+    fun aFreshInstallSeesNoLaunchNotice() {
+        assertEquals(LaunchNotice.NONE, launchNotice(savedVersionCode = 0, hasSeenOnboarding = false, savedDescriptorRevision = 1))
     }
 
     @Test
-    fun incompatibilityScreenReplacesDuplicateErrorToast() {
-        assertFalse(
-            shouldShowBluetoothErrorToast(
-                BluetoothState.InitializingCapabilities,
-                "Previous registration failed"
-            )
+    fun anAppUpdateAloneSaysNothing() {
+        assertEquals(
+            LaunchNotice.NONE,
+            launchNotice(savedVersionCode = 3, hasSeenOnboarding = true, savedDescriptorRevision = CURRENT_HID_DESCRIPTOR_REVISION),
         )
-        assertFalse(
-            shouldShowBluetoothErrorToast(
-                BluetoothState.CheckingCapabilities,
-                "Previous registration failed"
-            )
-        )
-        assertFalse(
-            shouldShowBluetoothErrorToast(
-                BluetoothState.ProfileNotSupported,
-                "Android repeatedly rejected HID Device registration"
-            )
-        )
-        assertFalse(
-            shouldShowBluetoothErrorToast(
-                BluetoothState.ReadyDisconnected,
-                "This device appears incompatible: Android repeatedly rejected HID Device registration."
-            )
-        )
-        assertTrue(
-            shouldShowBluetoothErrorToast(
-                BluetoothState.ReadyDisconnected,
-                "Connection refused by the host"
-            )
-        )
+    }
+
+    @Test
+    fun anUpgradeAcrossADescriptorChangeAsksToRepair() {
+        assertEquals(LaunchNotice.DESCRIPTOR_REFRESH, launchNotice(savedVersionCode = 3, hasSeenOnboarding = false, savedDescriptorRevision = 1))
+        assertEquals(LaunchNotice.DESCRIPTOR_REFRESH, launchNotice(savedVersionCode = 0, hasSeenOnboarding = true, savedDescriptorRevision = 1))
+    }
+
+    @Test
+    fun grantAsksAndroidUntilItStopsShowingThePrompt() {
+        // Never asked: Android shows the prompt even though no rationale is due yet.
+        assertEquals(PermissionStep.REQUEST, permissionStep(askedBefore = false, deniedShowsRationale = listOf(false, false)))
+        // Denied once: Android will ask again.
+        assertEquals(PermissionStep.REQUEST, permissionStep(askedBefore = true, deniedShowsRationale = listOf(true, true)))
+        // Denied twice: no prompt any more, so only app settings can grant it.
+        assertEquals(PermissionStep.OPEN_APP_SETTINGS, permissionStep(askedBefore = true, deniedShowsRationale = listOf(false, false)))
+        // Nothing denied: asking is harmless and re-checks.
+        assertEquals(PermissionStep.REQUEST, permissionStep(askedBefore = true, deniedShowsRationale = emptyList()))
     }
 }

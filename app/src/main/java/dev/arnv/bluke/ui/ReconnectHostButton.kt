@@ -33,7 +33,9 @@ internal fun ReconnectHostButton(btManager: BluetoothKeyboardManager, iconOnly: 
     val lifecycle by btManager.lifecycleState.collectAsState()
     val devices by btManager.bondedDevices.collectAsState()
     val target = btManager.getReconnectTarget()?.takeIf { it in devices } ?: return
-    if (state is BluetoothState.Connected || state.blocksInputLaunch()) return
+    // Home closes the surface when Bluetooth is blocked, so only the startup check remains to wait out here.
+    if (state is BluetoothState.Connected || state is BluetoothState.InitializingCapabilities ||
+        state is BluetoothState.CheckingCapabilities) return
     val enabled = lifecycle !is HidLifecycleState.Connecting &&
         lifecycle !is HidLifecycleState.Registering && lifecycle !is HidLifecycleState.BindingProxy
     Row(

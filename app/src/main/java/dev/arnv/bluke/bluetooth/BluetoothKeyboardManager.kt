@@ -248,6 +248,8 @@ class BluetoothKeyboardManager(private val context: Context) {
                             _hasPendingConnection.value = false
                             _connectionTargetAddress.value = null
                             if (prevBondState == BluetoothDevice.BOND_BONDING) {
+                                _lastConnectionFailure.value =
+                                    LastConnectionFailure(ConnectionFailure.HOST_REFUSED_PAIRING, device.address)
                                 _statusMessage.value = "Pairing with '$dName' refused or failed."
                             } else {
                                 _statusMessage.value = "Unpaired from '$dName'."
@@ -393,6 +395,12 @@ class BluetoothKeyboardManager(private val context: Context) {
     val connectionTargetAddress: StateFlow<String?> = _connectionTargetAddress
     private val _hasPendingConnection = MutableStateFlow(false)
     val hasPendingConnection: StateFlow<Boolean> = _hasPendingConnection
+    private val _lastConnectionFailure = MutableStateFlow<LastConnectionFailure?>(null)
+    /** Why the last attempt failed, set beside its status message and cleared when the next attempt starts. */
+    val lastConnectionFailure: StateFlow<LastConnectionFailure?> = _lastConnectionFailure
+    private val _isDisconnecting = MutableStateFlow(false)
+    /** True from an explicit disconnect until its transaction finishes. */
+    val isDisconnecting: StateFlow<Boolean> = _isDisconnecting
     private val _appVisible = MutableStateFlow(false)
     val appVisible: StateFlow<Boolean> = _appVisible
     @Volatile private var suppressIncomingConnection = false
@@ -506,6 +514,7 @@ class BluetoothKeyboardManager(private val context: Context) {
             _hasPendingConnection.value = false
             _connectionTargetAddress.value = null
             _connectedDevice.value = null
+            _lastConnectionFailure.value = null
             connectionEpoch.incrementAndGet()
             registrationCommandAccepted = false
             clearIncompatibleVerdict()
@@ -646,6 +655,7 @@ class BluetoothKeyboardManager(private val context: Context) {
             device.bondState == BluetoothDevice.BOND_BONDING) return
         connectRequestProcessor.clear()
         suppressIncomingConnection = false
+        _lastConnectionFailure.value = null
         _connectionTargetAddress.value = device.address
         _hasPendingConnection.value = true
         stopScanning()
@@ -658,11 +668,15 @@ class BluetoothKeyboardManager(private val context: Context) {
                 _statusMessage.value = "Pairing requested. Approve prompt on '$dName'."
             } else {
                 _hasPendingConnection.value = false
+                _lastConnectionFailure.value =
+                    LastConnectionFailure(ConnectionFailure.PAIRING_REQUEST_FAILED, device.address)
                 _statusMessage.value = "Failed to start pairing request for '$dName'."
             }
         } catch (e: Exception) {
             _hasPendingConnection.value = false
             Log.e("BluetoothKeyboard", "Error calling createBond", e)
+            _lastConnectionFailure.value =
+                LastConnectionFailure(ConnectionFailure.PAIRING_REQUEST_FAILED, device.address)
             _statusMessage.value = "Pairing failed: ${e.localizedMessage}"
         }
     }
@@ -679,6 +693,7 @@ class BluetoothKeyboardManager(private val context: Context) {
         if (pending?.device?.address == device.address && _hasPendingConnection.value &&
             !(pending.automatic && !automatic)) return
         lastConnectedDevice = device
+        _lastConnectionFailure.value = null
         stopScanning()
         val dName = device.name ?: device.address
 
@@ -738,6 +753,8 @@ class BluetoothKeyboardManager(private val context: Context) {
                 _lifecycleState.value = HidLifecycleState.Error(
                     if (appRegistrationState.value) HidFailure.CONNECTION_REJECTED else HidFailure.REGISTRATION_TIMEOUT)
                 if (!appRegistrationState.value) publishServiceState(BluetoothState.ReadyDisconnected)
+                _lastConnectionFailure.value =
+                    LastConnectionFailure(ConnectionFailure.CONNECTION_REJECTED, device.address)
                 _statusMessage.value = when (result) {
                     ConnectionResult.COMMAND_REJECTED -> "Android could not start the connection. Retry or toggle Bluetooth."
                     ConnectionResult.DISCONNECT_TIMED_OUT -> "Previous host has not disconnected. Retry connecting."
@@ -751,6 +768,8 @@ class BluetoothKeyboardManager(private val context: Context) {
             Log.e("BluetoothKeyboard", "Error connecting to $dName", e)
             if (closed || connectRequestProcessor.pending.value?.sequence != request.sequence) return
             _lifecycleState.value = HidLifecycleState.Error(HidFailure.CONNECTION_REJECTED)
+            _lastConnectionFailure.value =
+                LastConnectionFailure(ConnectionFailure.CONNECTION_REJECTED, device.address)
             _statusMessage.value = "Failed to initiate link: ${e.localizedMessage}"
         } finally {
             // A completed/cancelled old request must never clear a newer selection.
@@ -777,6 +796,7 @@ class BluetoothKeyboardManager(private val context: Context) {
         lastConnectedDeviceAddress = null
         automaticReconnectAttempted = true
         _statusMessage.value = "Disconnecting physical link..."
+        _isDisconnecting.value = true
         // Keep the foreground service alive until the bounded transaction finishes.
         _hasPendingConnection.value = true
         val job = managerScope.launch(start = CoroutineStart.LAZY) {
@@ -793,6 +813,7 @@ class BluetoothKeyboardManager(private val context: Context) {
                 synchronized(connectionSelectionLock) {
                     suppressIncomingConnection = false
                     _hasPendingConnection.value = false
+                    _isDisconnecting.value = false
                     if (sessionOperationJob === coroutineContext[Job]) sessionOperationJob = null
                     if (!closed && bluetoothAdapter?.isEnabled == true) {
                         publishRegisteredUiState(scheduleReconnect = false)
@@ -1129,6 +1150,7 @@ class BluetoothKeyboardManager(private val context: Context) {
         recordSupportedFirmware()
         _connectionTargetAddress.value = if (_hasPendingConnection.value) device.address else null
         _connectedDevice.value = device
+        _lastConnectionFailure.value = null
         lastConnectedDevice = device
         lastConnectedDeviceAddress = device.address
         _lifecycleState.value = HidLifecycleState.Connected(device.address)
@@ -1223,6 +1245,8 @@ class BluetoothKeyboardManager(private val context: Context) {
                         _lifecycleState.value == HidLifecycleState.Connecting(device.address) &&
                         hidDeviceProfile?.getConnectionState(device) == BluetoothProfile.STATE_DISCONNECTED) {
                         _lifecycleState.value = HidLifecycleState.Error(HidFailure.CONNECTION_REJECTED)
+                        _lastConnectionFailure.value =
+                            LastConnectionFailure(ConnectionFailure.CONNECTION_REJECTED, device.address)
                         _statusMessage.value = "The incoming connection did not complete. See the connection help below."
                         return
                     }
@@ -1453,6 +1477,7 @@ class BluetoothKeyboardManager(private val context: Context) {
         }
         connectRequestProcessor.clear()
         _connectionTargetAddress.value = null
+        _lastConnectionFailure.value = null
         _hasPendingConnection.value = true
         connectionEpoch.incrementAndGet()
         suppressIncomingConnection = true

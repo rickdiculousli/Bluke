@@ -36,6 +36,8 @@ class RigReceiver : BroadcastReceiver() {
                 result.put("lifecycle", manager.lifecycleState.value.toString())
                 result.put("host", host?.address ?: JSONObject.NULL)
                 result.put("status", manager.statusMessage.value)
+                result.put("lastFailure", manager.lastConnectionFailure.value?.failure?.name ?: JSONObject.NULL)
+                result.put("disconnecting", manager.isDisconnecting.value)
                 result.put("capsLock", manager.capsLockState.value)
                 result.put("numLock", manager.numLockState.value)
                 result.put("scrollLock", manager.scrollLockState.value)
@@ -54,10 +56,9 @@ class RigReceiver : BroadcastReceiver() {
                 }
             }
             "skip-onboarding" -> {
-                // The same writes as OnboardingActivity's finish, so MainActivity opens straight to the session.
+                // Marks an existing, up-to-date install, so home opens with no launch notice in the way.
                 context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE).edit {
                     putBoolean("has_seen_onboarding", true)
-                    putBoolean("has_seen_help", true)
                     putInt("last_run_version_code", BuildConfig.VERSION_CODE)
                     putInt(HID_DESCRIPTOR_REVISION_PREFERENCE, CURRENT_HID_DESCRIPTOR_REVISION)
                 }
