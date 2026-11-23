@@ -12,8 +12,9 @@ const USAGE: &str = "\
 bluke-mirror: mirror this computer's screen to Bluke's Mirror surface, and take touches back.
 
 Usage:
-  bluke-mirror [--phone <ip>[:port]]        mirror to the paired phone (reconnects when it goes away)
-  bluke-mirror pair [--phone <ip>[:port]]   pair with the phone showing Mirror; type the code it shows
+  bluke-mirror [--phone <ip>[:port]]        mirror to the paired phone (reconnects when it goes away);
+                                            with none paired yet, pair first, then mirror
+  bluke-mirror pair [--phone <ip>[:port]]   pair (again) with the phone showing Mirror; type the code it shows
   bluke-mirror --help
 
 Without --phone the phone is found over mDNS on the local network. The default port is 47800.
@@ -69,12 +70,7 @@ fn main() -> ExitCode {
         Err(e) => return fail(&e.to_string()),
     };
     let config = Config::new(dir);
-    if pairing {
-        pair_command(&config, phone)
-    } else {
-        catch_interrupt();
-        run_command(&config, phone)
-    }
+    if pairing { pair_command(&config, phone) } else { run_command(&config, phone) }
 }
 
 fn fail(msg: &str) -> ExitCode {
@@ -98,6 +94,21 @@ fn computer_name() -> String {
 }
 
 fn pair_command(config: &Config, phone: Option<SocketAddr>) -> ExitCode {
+    // The grants first: pairing is no use without them, and granting means restarting the terminal.
+    if let Err(e) = platform::check_permissions() {
+        return fail(&e);
+    }
+    match pair_with(config, phone) {
+        Ok(_) => {
+            println!("Run `bluke-mirror` to start mirroring.");
+            ExitCode::SUCCESS
+        }
+        Err(e) => fail(&e),
+    }
+}
+
+/// Finds the phone, asks the user at this terminal for its code, and pins it.
+fn pair_with(config: &Config, phone: Option<SocketAddr>) -> Result<bluke_mirror_core::Fingerprint, String> {
     let addr = match phone {
         Some(a) => a,
         None => {
@@ -108,15 +119,16 @@ fn pair_command(config: &Config, phone: Option<SocketAddr>) -> ExitCode {
                     found[0].addr
                 }
                 Ok(found) if found.is_empty() => {
-                    return fail(
-                        "no phone found. Open Mirror on the phone (on the same Wi-Fi), or pass --phone with the address Mirror shows.",
+                    return Err(
+                        "no phone found. Open Mirror on the phone (on the same Wi-Fi), or pass --phone with the address Mirror shows."
+                            .into(),
                     );
                 }
                 Ok(found) => {
                     let list: Vec<String> = found.iter().map(|f| format!("  {} at {}", f.name, f.addr)).collect();
-                    return fail(&format!("several phones are showing Mirror; pick one with --phone:\n{}", list.join("\n")));
+                    return Err(format!("several phones are showing Mirror; pick one with --phone:\n{}", list.join("\n")));
                 }
-                Err(e) => return fail(&format!("mDNS browse failed: {e}; pass --phone instead")),
+                Err(e) => return Err(format!("mDNS browse failed: {e}; pass --phone instead")),
             }
         }
     };
@@ -140,22 +152,22 @@ fn pair_command(config: &Config, phone: Option<SocketAddr>) -> ExitCode {
     match pair::pair(addr, config, &computer_name(), &mut ask) {
         Ok(fp) => {
             println!("Paired with the phone (key {}).", &config::hex(&fp)[..16]);
-            println!("Run `bluke-mirror` to start mirroring.");
-            ExitCode::SUCCESS
+            Ok(fp)
         }
-        Err(e) => fail(&format!("pairing failed: {e}")),
+        Err(e) => Err(format!("pairing failed: {e}")),
     }
 }
 
 fn run_command(config: &Config, phone: Option<SocketAddr>) -> ExitCode {
-    if let Err(e) = platform::check_permissions() {
-        return fail(&e);
-    }
-    let pinned = match config.paired_phone() {
-        Ok(Some(p)) => p,
-        Ok(None) => return fail("no phone is paired yet. Open Mirror on the phone and run `bluke-mirror pair`."),
-        Err(e) => return fail(&e.to_string()),
+    let pinned = match pair::ready_to_mirror(config, platform::check_permissions, || {
+        println!("No phone is paired yet, so pair first: open Mirror on the phone.");
+        pair_with(config, phone)
+    }) {
+        Ok(p) => p,
+        Err(e) => return fail(&e),
     };
+    // Only now: during pairing, Ctrl-C must still end the process at the code prompt.
+    catch_interrupt();
     let id = match config.identity() {
         Ok(i) => i,
         Err(e) => return fail(&e.to_string()),

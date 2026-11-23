@@ -15,7 +15,7 @@ Bluke (the phone) shows a low-resolution copy of a computer's screen and sends t
 - TLS 1.3 only. The companion is the TLS client, the phone the TLS server, and the phone requires a client certificate.
 - During the handshake both sides accept any certificate, but the TLS library still checks the CertificateVerify signature against the presented certificate, so a peer can only present a certificate whose private key it holds.
 - Right after the handshake, before reading or writing any message, each side compares the peer's fingerprint with the one it pinned:
-  - The companion, holding a pinned phone, closes the connection on a mismatch. It sends `Hello` only to its pinned phone, and `PairRequest` only when its user ran `bluke-mirror pair`.
+  - The companion, holding a pinned phone, closes the connection on a mismatch. It sends `Hello` only to its pinned phone, and `PairRequest` only on a local action by its user: running `bluke-mirror pair`, or plain `bluke-mirror` with no phone paired yet. Either way the user then types the phone's code at the companion.
   - The phone answers a `Hello` from a companion it hasn't pinned with `Refused(1)` and closes.
 - Until the peer's pinned fingerprint is verified on a connection, only the pairing messages (types 1-7) are accepted or sent. Any other message on an unverified connection closes it.
 
@@ -45,7 +45,7 @@ A pairing connection is one PAKE run, after which both sides close; the companio
 | 0x07 | Refused | P→C | `reason: u8`: 1 not paired with this companion, 2 unsupported version |
 
 The run:
-1. The companion sends `PairRequest` only after a local action by its user (`bluke-mirror pair`).
+1. The companion sends `PairRequest` only after a local action by its user: `bluke-mirror pair`, or plain `bluke-mirror` with no phone paired yet.
 2. If the phone can take an attempt, it draws a fresh code, shows it, and answers `PairCode(attempts_left)`. Otherwise it answers `PairResult(2)` when its attempts are used up, or `PairResult(3)` when it is busy with another pairing, and closes.
 3. The user types the code at the companion, which sends `PakeShare`.
 4. The phone answers `PakeReply`.
@@ -99,7 +99,7 @@ The PAKE is SPAKE2 from RFC 9382 with the suite **P256-SHA256-HKDF-HMAC** and it
     - up→up is a move;
     - up→down is a move, then a press;
     - down→down is a drag (on macOS a `LeftMouseDragged` event);
-    - down→up is a drag to the point, then a release.
+    - down→up is a drag to the point if it moved, then a release.
   - Only the left button exists. Keys are never injected.
 - **Wheel.** `dx` and `dy` are pixels, with the sign of a macOS `CGEvent` scroll and a Windows wheel delta: positive `dy` is the wheel turned up, so the view moves toward the top of the document; positive `dx` moves it toward the left.
 - **Release.** The companion releases every held button and forgets the button state when:

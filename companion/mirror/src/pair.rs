@@ -1,4 +1,5 @@
-//! One pairing connection, driven over a [`Link`]: the user's local `bluke-mirror pair`.
+//! One pairing connection, driven over a [`Link`], started only by the companion's user at its
+//! terminal: `bluke-mirror pair`, or plain `bluke-mirror` with no phone paired yet.
 
 use crate::config::Config;
 use crate::link::Link;
@@ -67,4 +68,20 @@ pub fn pair(
     };
     link.close();
     result
+}
+
+/// What `bluke-mirror` needs before it mirrors: the platform's grants (`check`), then the
+/// paired phone. With no phone paired it pairs now through `pair`, which asks the user at this
+/// terminal for the phone's code: that typing is the local action pairing needs. The grants
+/// come first, so nobody pairs only to find they can't mirror.
+pub fn ready_to_mirror(
+    config: &Config,
+    check: impl FnOnce() -> Result<(), String>,
+    pair: impl FnOnce() -> Result<Fingerprint, String>,
+) -> Result<Fingerprint, String> {
+    check()?;
+    match config.paired_phone().map_err(|e| e.to_string())? {
+        Some(phone) => Ok(phone),
+        None => pair(),
+    }
 }
