@@ -103,6 +103,8 @@ class MirrorController(context: Context) : MirrorFrameSource {
     private val decodedCount = AtomicLong()
     /** Touch event to Pointer written, in microseconds, for the rig's pipeline numbers. */
     private val touchToWriteUs = Collections.synchronizedList(ArrayDeque<Long>())
+    /** Ping to Pong round trips, in microseconds, for the rig's one-way share of the link. */
+    private val pingRoundTripUs = Collections.synchronizedList(ArrayDeque<Long>())
 
     override fun currentFrame(): ImageBitmap? = currentImage
 
@@ -209,6 +211,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
             "latencyMs" to ui.latencyMs,
             "imageBounds" to imageBoundsInWindow?.toList(),
             "touchToWriteUs" to synchronized(touchToWriteUs) { touchToWriteUs.toList() },
+            "pingRoundTripUs" to synchronized(pingRoundTripUs) { pingRoundTripUs.toList() },
         )
     }
 
@@ -408,7 +411,14 @@ class MirrorController(context: Context) : MirrorFrameSource {
                             return
                         }
                     }
-                    is MirrorMessage.Pong -> rates.roundTrip(nowUs() - message.tUs)
+                    is MirrorMessage.Pong -> {
+                        val roundTrip = nowUs() - message.tUs
+                        rates.roundTrip(roundTrip)
+                        synchronized(pingRoundTripUs) {
+                            pingRoundTripUs.add(roundTrip)
+                            while (pingRoundTripUs.size > 512) pingRoundTripUs.removeAt(0)
+                        }
+                    }
                     else -> Unit
                 }
             }
