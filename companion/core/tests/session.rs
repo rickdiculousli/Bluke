@@ -85,7 +85,6 @@ fn press_drag_release_in_order_with_mapping_and_clamping() {
             InputEvent::Down { x: -1920.0, y: 0.0 },
             InputEvent::Drag { x: x_mid, y: y_q },
             InputEvent::Drag { x: -1.0, y: 1079.0 },
-            InputEvent::Drag { x: -1.0, y: 1079.0 },
             InputEvent::Up { x: -1.0, y: 1079.0 },
         ]
     );
@@ -99,6 +98,28 @@ fn press_drag_release_in_order_with_mapping_and_clamping() {
     assert_eq!(d.clamp(10.0, -3.0), (-1.0, 0.0));
     let one_px = Display { id: 2, x: 5.0, y: 7.0, width: 1.0, height: 1.0, name: String::new() };
     assert_eq!(one_px.map(65535, 65535), (5.0, 7.0));
+}
+
+#[test]
+fn a_tap_in_place_injects_no_drag_and_a_moved_lift_drags_first() {
+    let mut s = started(0);
+    let mut rec: Vec<InputEvent> = Vec::new();
+    // Hover move, then press and lift at the same point: move, down, up — no zero-length drag.
+    for m in [pointer(100, 200, false), pointer(100, 200, true), pointer(100, 200, false)] {
+        s.on_message(1, m, &mut rec).expect("ok");
+    }
+    let (x, y) = display().map(100, 200);
+    assert_eq!(rec, vec![InputEvent::Move { x, y }, InputEvent::Move { x, y }, InputEvent::Down { x, y }, InputEvent::Up { x, y }]);
+    // A lift at a point the finger moved to drags there, then releases.
+    rec.clear();
+    for m in [pointer(100, 200, true), pointer(300, 400, false)] {
+        s.on_message(1, m, &mut rec).expect("ok");
+    }
+    let (x2, y2) = display().map(300, 400);
+    assert_eq!(
+        rec,
+        vec![InputEvent::Move { x, y }, InputEvent::Down { x, y }, InputEvent::Drag { x: x2, y: y2 }, InputEvent::Up { x: x2, y: y2 }]
+    );
 }
 
 #[test]
