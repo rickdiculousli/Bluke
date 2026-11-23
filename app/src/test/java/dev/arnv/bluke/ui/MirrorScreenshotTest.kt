@@ -5,16 +5,24 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.RectF
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.darkColorScheme
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.State
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.test.junit4.createComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.Density
 import androidx.core.content.edit
 import androidx.test.core.app.ApplicationProvider
@@ -33,8 +41,9 @@ import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
 /**
- * The Mirror surface in each state it can show, in the landscape the input surfaces run in, dark
- * (as the surface host draws it) at font scale 1.0 and 1.3, and light for the main states.
+ * The Mirror surface in each state it can show, in the landscape the input surfaces run in, on a
+ * 360dp-high phone, in the dark scheme the surface host wraps every input surface in, at font scale
+ * 1.0, 1.3 and 2.0; plus the touch ring on the first frame of a press.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -82,61 +91,120 @@ class MirrorScreenshotTest {
             touchMode = MirrorTouchMode.HOVER,
             notice = MirrorNotice.Paired("Rick's MacBook Pro"),
         ),
+        "forget-pending" to address.copy(
+            phase = MirrorPhase.Connected("Rick's MacBook Pro", "Built-in Retina Display", hasFrame = true),
+            pairedName = "Rick's MacBook Pro",
+            fps = 20,
+            latencyMs = 6,
+        ),
         "link-lost" to address.copy(
             phase = MirrorPhase.Waiting("Rick's MacBook Pro"),
             pairedName = "Rick's MacBook Pro",
         ),
     )
 
-    private data class Shot(val name: String, val state: MirrorUiState, val dark: Boolean, val fontScale: Float)
+    private data class Shot(val name: String, val state: MirrorUiState, val fontScale: Float)
 
     @Test
-    fun darkAtFontScale1() = captureAll(states.map { (name, state) -> Shot(name, state, dark = true, fontScale = 1f) })
+    fun fontScale1() = captureAll(states.map { (name, state) -> Shot(name, state, fontScale = 1f) })
 
     @Test
-    fun darkAtFontScale1_3() = captureAll(states.map { (name, state) -> Shot(name, state, dark = true, fontScale = 1.3f) })
+    fun fontScale1_3() = captureAll(states.map { (name, state) -> Shot(name, state, fontScale = 1.3f) })
 
     @Test
-    fun lightMainStates() = captureAll(
-        listOf("unpaired", "pairing", "streaming").map { Shot(it, states.getValue(it), dark = false, fontScale = 1f) },
-    )
+    fun fontScale2() = captureAll(states.map { (name, state) -> Shot(name, state, fontScale = 2f) })
+
+    /** The first frame of a press: filled ring in Direct (the button is held), hollow in Hover. */
+    @Test
+    fun touchRingDirect() = captureFirstFrameOfPress("streaming", "mirror-touch-direct-dark-fs1-land.png")
+
+    @Test
+    fun touchRingHover() = captureFirstFrameOfPress("streaming-hover", "mirror-touch-hover-dark-fs1-land.png")
 
     /** One composition per test (the rule allows one setContent), switched shot by shot. */
     private fun captureAll(shots: List<Shot>) {
         val current = mutableStateOf(shots.first())
-        val withPicture = FakeFrames(hasPicture = true)
-        val withoutPicture = FakeFrames(hasPicture = false)
         composeTestRule.setContent {
             val shot = current.value
-            MyApplicationTheme(darkTheme = shot.dark) {
-                val density = LocalDensity.current
-                CompositionLocalProvider(LocalDensity provides Density(density.density, shot.fontScale)) {
-                    key(shot) {
-                        MirrorSurface(
-                            state = shot.state,
-                            frames = if (shot.state.phase is MirrorPhase.Connected || shot.name == "link-lost") withPicture else withoutPicture,
-                            onClose = {},
-                            onNextMode = {},
-                            onConfigureModes = {},
-                            onTouchModeChange = {},
-                            onForgetCompanion = {},
-                            onNoticeShown = {},
-                            onTouch = {},
-                        )
-                    }
-                }
+            HostSurfaceTheme(shot.fontScale) {
+                key(shot) { Surface(shot.name, shot.state) }
             }
         }
         shots.forEach { shot ->
             current.value = shot
             composeTestRule.waitForIdle()
-            val theme = if (shot.dark) "dark" else "light"
-            val scale = if (shot.fontScale == 1f) "1" else shot.fontScale.toString()
+            val scale = if (shot.fontScale == 1f) "1" else if (shot.fontScale == 2f) "2" else shot.fontScale.toString()
             composeTestRule.onRoot().captureRoboImage(
-                filePath = "src/test/screenshots/mirror/mirror-${shot.name}-$theme-fs$scale-land.png",
+                filePath = "src/test/screenshots/mirror/mirror-${shot.name}-dark-fs$scale-land.png",
             )
         }
     }
+
+    private fun captureFirstFrameOfPress(stateName: String, fileName: String) {
+        val state = states.getValue(stateName).copy(notice = null)
+        var root: android.view.View? = null
+        composeTestRule.setContent {
+            root = LocalView.current
+            HostSurfaceTheme(fontScale = 1f) { Surface(stateName, state) }
+        }
+        composeTestRule.waitForIdle()
+        // Robolectric draws only when asked, and the touch layer learns the image's place from a draw.
+        composeTestRule.runOnIdle {
+            val view = checkNotNull(root)
+            view.draw(Canvas(Bitmap.createBitmap(view.width, view.height, Bitmap.Config.ARGB_8888)))
+        }
+        composeTestRule.waitForIdle()
+        composeTestRule.mainClock.autoAdvance = false
+        // Over the second card of the hand, where a player would reach to drag it.
+        composeTestRule.onNodeWithTag("mirror_image").performTouchInput {
+            down(Offset(width * 0.42f, height * 0.85f))
+        }
+        composeTestRule.mainClock.advanceTimeByFrame()
+        composeTestRule.waitForIdle()
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/mirror/$fileName")
+    }
+
+    @Composable
+    private fun Surface(name: String, state: MirrorUiState) {
+        MirrorSurface(
+            state = state,
+            frames = if (state.phase is MirrorPhase.Connected || name == "link-lost") withPicture else withoutPicture,
+            onClose = {},
+            onNextMode = {},
+            onConfigureModes = {},
+            onTouchModeChange = {},
+            onForgetCompanion = {},
+            onNoticeShown = {},
+            onTouch = {},
+            forgetPending = name == "forget-pending",
+        )
+    }
+
+    /**
+     * The scheme the surface host wraps every input surface in: HomeScreen.kt's
+     * `val darkScheme = darkColorScheme(` over the app theme's primary. Keep the two in step.
+     */
+    @Composable
+    private fun HostSurfaceTheme(fontScale: Float, content: @Composable () -> Unit) {
+        MyApplicationTheme(darkTheme = true) {
+            val hostScheme = darkColorScheme(
+                primary = MaterialTheme.colorScheme.primary,
+                background = Color(0xFF141218),
+                surface = Color(0xFF141218),
+                surfaceVariant = Color(0xFF2B2930),
+                onBackground = Color(0xFFE6E0E9),
+                onSurface = Color(0xFFE6E0E9),
+                onSurfaceVariant = Color(0xFFCBC4D0),
+            )
+            MaterialTheme(colorScheme = hostScheme) {
+                val density = LocalDensity.current
+                CompositionLocalProvider(LocalDensity provides Density(density.density, fontScale), content = content)
+            }
+        }
+    }
+
+    private val withPicture by lazy { FakeFrames(hasPicture = true) }
+    private val withoutPicture by lazy { FakeFrames(hasPicture = false) }
 
     /** A 480x300 stand-in for a card-game frame: a backdrop, two creatures and a hand of cards. */
     private class FakeFrames(hasPicture: Boolean) : MirrorFrameSource {
