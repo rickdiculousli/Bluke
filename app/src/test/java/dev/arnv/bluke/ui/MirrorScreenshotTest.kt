@@ -43,7 +43,7 @@ import org.robolectric.annotation.GraphicsMode
 /**
  * The Mirror surface in each state it can show, in the landscape the input surfaces run in, on a
  * 360dp-high phone, in the dark scheme the surface host wraps every input surface in, at font scale
- * 1.0, 1.3 and 2.0; plus the touch ring on the first frame of a press.
+ * 1.0, 1.3 and 2.0, with long and emoji computer names; plus the touch ring on the first frame of a press.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -101,7 +101,35 @@ class MirrorScreenshotTest {
             phase = MirrorPhase.Waiting("Rick's MacBook Pro"),
             pairedName = "Rick's MacBook Pro",
         ),
+        "off" to MirrorUiState(),
+        "failed" to address.copy(phase = MirrorPhase.Failed("Couldn't open a network port (Address already in use).")),
+        "waiting-long-name" to address.copy(phase = MirrorPhase.Waiting(LONG_NAME), pairedName = LONG_NAME),
+        "streaming-long-name" to address.copy(
+            phase = MirrorPhase.Connected(LONG_NAME, "Built-in Retina Display", hasFrame = true),
+            pairedName = LONG_NAME,
+            fps = 20,
+            latencyMs = 128,
+        ),
+        "forget-pending-long-name" to address.copy(
+            phase = MirrorPhase.Connected(LONG_NAME, "Built-in Retina Display", hasFrame = true),
+            pairedName = LONG_NAME,
+            fps = 20,
+            latencyMs = 6,
+        ),
+        "pairing-emoji-name" to address.copy(phase = MirrorPhase.Pairing("730146", EMOJI_NAME, attemptsLeft = 2)),
+        "streaming-emoji-name" to address.copy(
+            phase = MirrorPhase.Connected(EMOJI_NAME, "DELL U2720Q", hasFrame = true),
+            pairedName = EMOJI_NAME,
+            fps = 60,
+            latencyMs = 3,
+            touchMode = MirrorTouchMode.HOVER,
+        ),
     )
+
+    private companion object {
+        const val LONG_NAME = "Rick's MacBook Pro (Work) in the upstairs office"
+        const val EMOJI_NAME = "🎮 Gaming PC 🖥️"
+    }
 
     private data class Shot(val name: String, val state: MirrorUiState, val fontScale: Float)
 
@@ -176,7 +204,7 @@ class MirrorScreenshotTest {
             onForgetCompanion = {},
             onNoticeShown = {},
             onTouch = {},
-            forgetPending = name == "forget-pending",
+            forgetPending = name.startsWith("forget-pending"),
         )
     }
 
