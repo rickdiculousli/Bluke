@@ -125,7 +125,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
             sslContext = sslContext ?: identity.sslContext()
         } catch (e: Exception) {
             Log.e(TAG, "Mirror identity failed", e)
-            listenError = "This phone's secure key couldn't be created (${e.javaClass.simpleName})."
+            listenError = "This phone couldn't make the secure key Mirror pairs with."
         }
         wifi = MirrorWifi(appContext) { address -> main.post { relisten(address) } }.also { it.start() }
         relistenLocked(null)
@@ -241,7 +241,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
             listenError = null
         } catch (e: IOException) {
             Log.e(TAG, "Mirror listen failed", e)
-            listenError = "Couldn't open a network port (${e.message})."
+            listenError = "Another app may be using Mirror's network port."
         }
     }
 
