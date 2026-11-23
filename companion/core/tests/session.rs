@@ -384,7 +384,7 @@ fn a_capture_already_at_the_fit_is_copied_pixel_for_pixel() {
     let img = Image { width: w, height: h, stride: w as usize * 4, rgba: rgba.clone() };
     let out = downscale(&img, 480, 480);
     assert_eq!((out.width, out.height), (480, 312));
-    let rgb: Vec<u8> = rgba.chunks_exact(4).flat_map(|p| [p[0], p[1], p[2]]).collect();
+    let rgb: Vec<u8> = rgba.as_chunks::<4>().0.iter().flat_map(|p| [p[0], p[1], p[2]]).collect();
     assert_eq!(out.rgb, rgb);
     let mut changed = img.clone();
     changed.rgba[(100 * w as usize + 333) * 4] ^= 1;

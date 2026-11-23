@@ -115,4 +115,4 @@ The companion keeps its state in its config directory: `~/Library/Application Su
 - `identity.key` and `identity.crt`: its key pair and certificate, made on first run.
 - `paired-phone`: the pinned phone's fingerprint, as hex. **Deleting this file forgets the phone.**
 
-The phone keeps its key in the Android Keystore and the pinned companion's fingerprint and name in its preferences. Mirror's menu has Forget companion.
+The phone keeps its key in the Android Keystore and the pinned companion's fingerprint and its computer's name in its preferences. Mirror's menu forgets the computer: Forget <computer name>.
