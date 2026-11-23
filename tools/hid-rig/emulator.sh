@@ -41,11 +41,14 @@ if ! "$emulator" -list-avds | grep -qx "$avd"; then
 fi
 
 started=""
+# The adb server and the emulator outlive this script; started with the lock's descriptor open,
+# they would hold the lock and every later run would wait on it forever.
+"$adb" start-server 9>&- >/dev/null 2>&1
 if ! "$adb" devices | grep -q '^emulator-.*device$'; then
   echo "Booting emulator $avd" >&2
   # -wipe-data: Bumble keeps no keys between runs, so the emulator must not keep its bond either.
   "$emulator" -avd "$avd" -wipe-data -no-window -no-audio -no-snapshot -no-boot-anim \
-    -gpu swiftshader_indirect >"${TMPDIR:-/tmp}/bluke-rig-emulator.log" 2>&1 &
+    -gpu swiftshader_indirect >"${TMPDIR:-/tmp}/bluke-rig-emulator.log" 2>&1 9>&- &
   started=$!
 fi
 cleanup() {
