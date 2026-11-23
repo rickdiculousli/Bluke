@@ -47,3 +47,7 @@ ref
 # Python (tools/hid-rig)
 .venv/
 __pycache__/
+
+# Scratch and the companion's build output
+cache/
+companion/target/
