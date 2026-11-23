@@ -317,13 +317,15 @@ internal fun KeyboardSurface(
     soundSynth: KeyboardSoundSynthesizer,
     sharedPrefs: SharedPreferences,
     caseBrush: Brush,
-    launchMode: Int,
+    chrome: SurfaceChrome,
     isConnected: Boolean,
-    isHapticsEnabled: Boolean,
     connectedDevice: BluetoothDevice?,
-    onClose: () -> Unit,
-    onModeChange: (Int) -> Unit,
 ) {
+    // Shim until this surface adopts SurfaceToolbar: the old toolbar's inputs, from the chrome.
+    val onClose = chrome.onClose
+    val launchMode = chrome.mode.id
+    val onModeChange: (Int) -> Unit = { chrome.onNextMode() }
+    val isHapticsEnabled by rememberPreference(sharedPrefs, HAPTICS_PREFERENCE) { it.getBoolean(HAPTICS_PREFERENCE, true) }
     val context = LocalContext.current
     val view = LocalView.current
     // Seamless full-screen canvas acting as the aluminum keyboard plate and chassis

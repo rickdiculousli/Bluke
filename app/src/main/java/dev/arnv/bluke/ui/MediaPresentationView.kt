@@ -145,13 +145,15 @@ internal fun consumerControlForHardwareVolumeKey(keyCode: Int): ConsumerControl?
 @Composable
 internal fun MediaPresentationView(
     btManager: BluetoothKeyboardManager,
-    onClose: () -> Unit,
-    launchMode: Int,
-    onModeChange: (Int) -> Unit,
+    chrome: SurfaceChrome,
     sharedPrefs: SharedPreferences,
-    isConnected: Boolean,
     postureOverride: MultimediaPosture? = null,
 ) {
+    // Shim until this surface adopts SurfaceToolbar: the old toolbar's inputs, from the chrome.
+    val onClose = chrome.onClose
+    val launchMode = chrome.mode.id
+    val onModeChange: (Int) -> Unit = { chrome.onNextMode() }
+    val isConnected = chrome.host.status == SurfaceHostStatus.Connected
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val volumeKeyHost = remember(context) { context.findRemoteVolumeKeyHost() }

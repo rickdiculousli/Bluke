@@ -39,11 +39,8 @@ class MediaPresentationScreenshotTest {
             MyApplicationTheme {
                 MediaPresentationView(
                     btManager = manager,
-                    onClose = {},
-                    launchMode = InputMode.MEDIA_PRESENTATION.id,
-                    onModeChange = {},
+                    chrome = previewChrome(InputMode.MEDIA_PRESENTATION),
                     sharedPrefs = preferences,
-                    isConnected = false,
                     postureOverride = MultimediaPosture.LANDSCAPE,
                 )
             }
@@ -61,11 +58,8 @@ class MediaPresentationScreenshotTest {
             MyApplicationTheme {
                 MediaPresentationView(
                     btManager = manager,
-                    onClose = {},
-                    launchMode = InputMode.MEDIA_PRESENTATION.id,
-                    onModeChange = {},
+                    chrome = previewChrome(InputMode.MEDIA_PRESENTATION),
                     sharedPrefs = preferences,
-                    isConnected = false,
                     postureOverride = MultimediaPosture.PORTRAIT_HELD,
                 )
             }
@@ -86,9 +80,7 @@ class MediaPresentationScreenshotTest {
             MyApplicationTheme {
                 TouchpadView(
                     btManager = manager,
-                    onClose = {},
-                    launchMode = InputMode.TOUCHPAD.id,
-                    onModeChange = {},
+                    chrome = previewChrome(InputMode.TOUCHPAD),
                     sharedPrefs = preferences,
                     caseBrush = SolidColor(Color(0xFF1E1E20)),
                 )

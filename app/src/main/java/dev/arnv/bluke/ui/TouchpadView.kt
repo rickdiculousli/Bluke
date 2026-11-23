@@ -68,13 +68,15 @@ enum class TrackpadButtonMode(val displayName: String) {
 @Composable
 fun TouchpadView(
     btManager: BluetoothKeyboardManager,
-    onClose: () -> Unit,
-    launchMode: Int,
-    onModeChange: (Int) -> Unit,
+    chrome: SurfaceChrome,
     sharedPrefs: SharedPreferences,
     caseBrush: Brush,
     modifierStyle: KeyboardModifierStyle = KeyboardModifierStyle.PC,
 ) {
+    // Shim until this surface adopts SurfaceToolbar: the old toolbar's inputs, from the chrome.
+    val onClose = chrome.onClose
+    val launchMode = chrome.mode.id
+    val onModeChange: (Int) -> Unit = { chrome.onNextMode() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     

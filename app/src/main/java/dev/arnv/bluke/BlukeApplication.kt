@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.Activity
 import android.os.Bundle
 import dev.arnv.bluke.bluetooth.BluetoothKeyboardManager
+import dev.arnv.bluke.ui.migrateSurfacePreferences
 import dev.arnv.bluke.utils.DeveloperLogManager
 
 class BlukeApplication : Application() {
@@ -15,6 +16,7 @@ class BlukeApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         DeveloperLogManager.init(applicationContext)
+        migrateSurfacePreferences(getSharedPreferences("app_prefs", MODE_PRIVATE))
         // Visibility belongs to the whole app, not just MainActivity (settings are activities too).
         registerActivityLifecycleCallbacks(object : ActivityLifecycleCallbacks {
             private var startedActivities = 0

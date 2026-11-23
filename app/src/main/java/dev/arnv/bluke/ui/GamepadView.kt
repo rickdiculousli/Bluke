@@ -138,12 +138,14 @@ private val CONSOLES = listOf(
 @Composable
 fun GamepadView(
     btManager: BluetoothKeyboardManager,
-    onClose: () -> Unit,
-    launchMode: Int,
-    onModeChange: (Int) -> Unit,
+    chrome: SurfaceChrome,
     sharedPrefs: SharedPreferences,
     @Suppress("UNUSED_PARAMETER") caseBrush: Brush
 ) {
+    // Shim until this surface adopts SurfaceToolbar: the old toolbar's inputs, from the chrome.
+    val onClose = chrome.onClose
+    val launchMode = chrome.mode.id
+    val onModeChange: (Int) -> Unit = { chrome.onNextMode() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val layoutRepository = remember(context) { LayoutRepository(context) }

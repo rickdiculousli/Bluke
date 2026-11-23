@@ -13,6 +13,9 @@ import dev.arnv.bluke.bluetooth.BluetoothKeyboardManager
 import dev.arnv.bluke.ui.InputMode
 import dev.arnv.bluke.ui.MediaPresentationView
 import dev.arnv.bluke.ui.MultimediaPosture
+import dev.arnv.bluke.ui.SurfaceChrome
+import dev.arnv.bluke.ui.SurfaceHost
+import dev.arnv.bluke.ui.SurfaceHostStatus
 import android.graphics.Bitmap
 import org.junit.After
 import org.junit.Assert.assertEquals
@@ -50,11 +53,8 @@ class ScreenshotMatrixTest {
         ) {
             MediaPresentationView(
                 btManager = manager,
-                onClose = {},
-                launchMode = InputMode.MEDIA_PRESENTATION.id,
-                onModeChange = {},
+                chrome = SurfaceChrome(InputMode.MEDIA_PRESENTATION, SurfaceHost(SurfaceHostStatus.Offline, null), {}, {}),
                 sharedPrefs = preferences,
-                isConnected = false,
                 postureOverride = MultimediaPosture.LANDSCAPE,
             )
         }
