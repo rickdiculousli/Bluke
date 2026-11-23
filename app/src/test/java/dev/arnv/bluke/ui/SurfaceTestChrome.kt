@@ -7,3 +7,11 @@ internal fun previewChrome(
     onClose: () -> Unit = {},
     onNextMode: () -> Unit = {},
 ): SurfaceChrome = SurfaceChrome(mode = mode, host = host, onClose = onClose, onNextMode = onNextMode)
+
+/** Counts the haptics a surface plays; provide it through [LocalHapticPerformer]. */
+internal class RecordingHapticPerformer : HapticPerformer {
+    val events = mutableListOf<HapticEvent>()
+    override fun perform(event: HapticEvent) {
+        events += event
+    }
+}
