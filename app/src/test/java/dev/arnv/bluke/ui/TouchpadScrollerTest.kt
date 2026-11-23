@@ -29,6 +29,25 @@ class TouchpadScrollerTest {
 
         fun liftAll() = take(scroller.liftAll(time))
 
+        /** Fingers swing (dx, dy) dp one way and back, [cycles] times, [millis] per swing; reports total steps sent. */
+        fun wiggle(dx: Float, dy: Float, millis: Long, cycles: Int, drift: Float = 0f): Int {
+            var sent = 0
+            scroller.begin(500f, 500f, time)
+            val steps = (millis / 8).toInt()
+            var n = 0
+            repeat(cycles * 2) { swing ->
+                for (i in 1..steps) {
+                    time += 8
+                    n++
+                    val f = if (swing % 2 == 0) i.toFloat() / steps else 1f - i.toFloat() / steps
+                    scroller.move(500f + dx * f + drift * n / (cycles * 2 * steps), 500f + dy * f, time)?.let {
+                        take(it); sent += kotlin.math.abs(it.wheel) + kotlin.math.abs(it.pan)
+                    }
+                }
+            }
+            return sent
+        }
+
         fun tickUntilIdle(maxMillis: Long = 10_000) {
             val end = time + maxMillis
             while (scroller.isActive && time < end) { time += 8; take(scroller.tick(time)) }
@@ -72,6 +91,16 @@ class TouchpadScrollerTest {
         assertEquals(steps(3000f), drift.wheel)
         val diagonal = run(still).apply { swipe(1000f, 1000f, 200); liftAll() }
         assertTrue(diagonal.wheel > 0 && diagonal.pan < 0)
+    }
+
+    @Test fun aQuickBackAndForthScrollsTheWholeWayEachWay() {
+        // Four 1.5 cm swings each way, 120 ms per swing, the fingers drifting 2 mm sideways meanwhile.
+        val swing = 15f * 160f / 25.4f
+        val wiggle = run(still)
+        val sent = wiggle.wiggle(0f, swing, 120, cycles = 4, drift = 2f * 160f / 25.4f)
+        assertEquals(0, wiggle.pan)
+        val travelled = swing * 8 * TouchpadScroller.UNITS_PER_DP // ~20.4 steps of finger travel
+        assertTrue("sent $sent for $travelled", sent >= travelled.toInt() - 1)
     }
 
     @Test fun aFlickGlidesOnThenStops() {

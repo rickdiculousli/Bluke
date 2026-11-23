@@ -116,6 +116,38 @@ class RigReceiver : BroadcastReceiver() {
                 }.start()
                 result.put("ok", true)
             }
+            "wiggle" -> {
+                // Two fingers swinging dy dp one way and back through the real scroll engine, ms per swing,
+                // for swings half-swings; logs the steps sent ("BlukeRig: wiggle sent <n>").
+                val dy = intent.getFloatExtra("dy", 90f)
+                val millis = intent.getIntExtra("ms", 120).toLong()
+                val swings = intent.getIntExtra("swings", 8)
+                val prefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+                val scroller = TouchpadScroller(TouchpadScrollSettings.from(prefs).copy(momentum = false))
+                Thread {
+                    var time = android.os.SystemClock.uptimeMillis()
+                    var sent = 0
+                    manager.holdLinkAwake()
+                    Thread.sleep(150)
+                    scroller.begin(500f, 500f, time)
+                    val steps = (millis / 8).toInt().coerceAtLeast(1)
+                    var y = 500f
+                    repeat(swings) { swing ->
+                        val direction = if (swing % 2 == 0) 1 else -1
+                        for (i in 1..steps) {
+                            Thread.sleep(8); time += 8
+                            y += direction * dy / steps
+                            scroller.move(500f, y, time)?.let {
+                                sent += kotlin.math.abs(it.wheel)
+                                manager.sendMouseReport(0, 0, 0, it.wheel.toByte(), it.pan.toByte())
+                            }
+                        }
+                    }
+                    scroller.liftAll(time)?.let { sent += kotlin.math.abs(it.wheel); manager.sendMouseReport(0, 0, 0, it.wheel.toByte(), it.pan.toByte()) }
+                    android.util.Log.i("BlukeRig", "wiggle sent $sent")
+                }.start()
+                result.put("ok", true)
+            }
             "flick" -> {
                 // A scripted two-finger flick through the real scroll engine and the saved scroll settings:
                 // fingers travel dy dp over ms, lift, and the engine plays out at its frame rate.

@@ -38,6 +38,7 @@ Release builds sign from the `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_ALIAS` and 
 - Hosts may ask for a report's current state (GET_REPORT); macOS does. Bluke answers from the last report it sent, mouse movement zeroed.
 - macOS sees one device whose main role is keyboard, so an app reads the gamepad only with Input Monitoring permission (System Settings > Privacy & Security). On first pairing it runs the Keyboard Setup Assistant. "Modifier keys: Mac" in keyboard settings puts Cmd and Opt beside the space bar.
 - macOS treats the touchpad as a mouse: it accelerates wheel steps and adds no momentum. Two-finger scrolling therefore sends wheel steps by physical finger distance, follows the faster finger, and plays its own short glide after a flick, timed after a Mac trackpad's.
+- macOS scrolls a wheel report by how soon it follows the last one, not by its size: a lone report moves a page 1 px whatever it carries, a fast run up to ~90 px each, and a reversal starts over. Short back-and-forth two-finger scrolls therefore move little on a Mac. Turning off macOS wheel acceleration (`defaults write -g com.apple.scrollwheel.scaling -1`) would fix it; Bluke leaves that to the user.
 
 ## License and credits
 
