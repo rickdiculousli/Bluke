@@ -4,7 +4,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 
 /** Commands and callbacks are serialized on the Bluetooth callback executor. */
-internal class HidRegistrationAttempt(val mode: GamepadDpadOutputMode) {
+internal class HidRegistrationAttempt {
     enum class State { PENDING, WAITING, REGISTERED, UNREGISTERING, UNREGISTERED, REJECTED }
     private val mutableState = MutableStateFlow(State.PENDING)
     val state: StateFlow<State> = mutableState
