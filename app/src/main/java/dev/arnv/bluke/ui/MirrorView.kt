@@ -5,6 +5,7 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
+import android.view.MotionEvent
 import android.view.View
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
@@ -45,6 +46,7 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.ScrollState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
@@ -53,6 +55,7 @@ import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowRight
+import androidx.compose.material.icons.automirrored.filled.ScreenShare
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.ErrorOutline
@@ -89,14 +92,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
 import androidx.compose.ui.graphics.FilterQuality
 import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.graphics.drawscope.rotate
 import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.graphics.vector.ImageVector
-import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.ExperimentalComposeUiApi
+import androidx.compose.ui.input.pointer.pointerInteropFilter
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
@@ -130,15 +140,18 @@ import dev.arnv.bluke.mirror.MirrorFit
 import dev.arnv.bluke.mirror.MirrorNotice
 import dev.arnv.bluke.mirror.MirrorPhase
 import dev.arnv.bluke.mirror.MirrorRotation
+import dev.arnv.bluke.mirror.MirrorTouchEvent
 import dev.arnv.bluke.mirror.MirrorTouchFrame
 import dev.arnv.bluke.mirror.MirrorTouchMode
 import dev.arnv.bluke.mirror.MirrorTouchPoint
+import dev.arnv.bluke.mirror.MirrorTouchUpdate
 import dev.arnv.bluke.mirror.MirrorUiState
 import dev.arnv.bluke.mirror.fitMirror
 import dev.arnv.bluke.mirror.isLive
-import dev.arnv.bluke.mirror.toNormalized
+import dev.arnv.bluke.mirror.pairingRequest
+import dev.arnv.bluke.mirror.pictureStale
+import dev.arnv.bluke.mirror.readout
 import kotlinx.coroutines.delay
-import kotlin.math.hypot
 
 /**
  * Where the surface gets its picture. [frameSeq] changes once per decoded frame and is read only
@@ -216,6 +229,7 @@ fun MirrorView(
             if (frame.points.any { it.down && !it.wasDown }) btManager.holdLinkAwake()
             controller.onTouch(frame)
         },
+        onDeclinePairing = controller::declinePairing,
         onImagePlaced = { controller.imageBoundsInWindow = it },
         hapticsEnabled = hapticsEnabled,
         forgetPending = forgetPending,
@@ -237,12 +251,13 @@ fun MirrorSurface(
     onTouchModeChange: (MirrorTouchMode) -> Unit,
     onForgetCompanion: () -> Unit,
     onNoticeShown: () -> Unit,
-    onTouch: (MirrorTouchFrame) -> Unit,
+    onTouch: (MirrorTouchFrame) -> MirrorTouchUpdate,
     modifier: Modifier = Modifier,
     onImagePlaced: (FloatArray) -> Unit = {},
     hapticsEnabled: Boolean = false,
     forgetPending: Boolean = false,
     onUndoForget: () -> Unit = {},
+    onDeclinePairing: () -> Unit = {},
 ) {
     val haptics = rememberMirrorHaptics(hapticsEnabled)
     LaunchedEffect(state.notice) {
@@ -283,7 +298,7 @@ fun MirrorSurface(
             MirrorImage(
                 frames = frames,
                 live = state.phase.isLive,
-                touchMode = state.touchMode,
+                stale = state.pictureStale,
                 haptics = haptics,
                 onTouch = onTouch,
                 onImagePlaced = onImagePlaced,
@@ -301,9 +316,11 @@ fun MirrorSurface(
                     onShown = onNoticeShown,
                     onUndoForget = onUndoForget,
                 )
+                QuietLinkChip(state)
                 MirrorOverlay(
                     state = state,
                     hasStaleFrame = frames.currentFrame() != null,
+                    onDeclinePairing = onDeclinePairing,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
             }
@@ -481,7 +498,8 @@ private fun MirrorRail(
 /**
  * The current mode, Mirror, as a button that moves to the next one: an outlined "Mirror ▸" so it
  * reads as a step forward, not as a third option beside Direct and Hover. When the word doesn't fit
- * the rail (large font scales), a screen glyph stands in for it.
+ * the rail (large font scales), Mirror's own screen-share glyph stands in for it (not the desktop
+ * glyph that heads "Pair a computer").
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
@@ -526,7 +544,7 @@ private fun NextModeButton(railWidth: Dp, onClick: () -> Unit, onLongClick: () -
                 Text(MIRROR_WORD, style = style, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
             } else {
                 Icon(
-                    Icons.Filled.DesktopWindows,
+                    Icons.AutoMirrored.Filled.ScreenShare,
                     contentDescription = null,
                     tint = MaterialTheme.colorScheme.onSurfaceVariant,
                     modifier = Modifier.size(20.dp),
@@ -608,34 +626,25 @@ private fun TouchModeOption(
  */
 @Composable
 private fun LinkReadout(state: MirrorUiState, largeFps: Boolean, showName: Boolean) {
-    val phase = state.phase
-    val connected = phase as? MirrorPhase.Connected
-    // No rate until there's a picture to have a rate.
-    val fps = if (phase.isLive) "${state.fps} fps" else "– fps"
-    val latency = state.latencyMs?.takeIf { connected != null }?.let { "$it ms" } ?: "– ms"
+    val connected = state.phase as? MirrorPhase.Connected
+    val readout = state.readout()
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 2.dp)
-            .clearAndSetSemantics {
-                contentDescription = when {
-                    connected == null -> "Not streaming"
-                    phase.isLive -> "Streaming from ${connected.companionName}, $fps, link latency $latency"
-                    else -> "Connected to ${connected.companionName}, waiting for the first picture"
-                }
-            }
+            .clearAndSetSemantics { contentDescription = readout.description }
             .testTag("mirror_link_readout"),
     ) {
         Text(
-            fps,
+            readout.rate,
             style = if (largeFps) MaterialTheme.typography.labelLarge else MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
         Text(
-            latency,
+            readout.latency,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
             maxLines = 1,
@@ -654,7 +663,7 @@ private fun LinkReadout(state: MirrorUiState, largeFps: Boolean, showName: Boole
     }
 }
 
-/** ⋮: which computer this is, then Forget, which touches only Mirror's pairing. */
+/** ⋮: which computer this is, then Forget it, which touches only Mirror's pairing. */
 @Composable
 private fun MirrorMenu(state: MirrorUiState, onForgetCompanion: () -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -686,7 +695,7 @@ private fun MirrorMenu(state: MirrorUiState, onForgetCompanion: () -> Unit) {
                 text = {
                     if (paired != null) {
                         Column(Modifier.widthIn(max = 256.dp)) {
-                            Text("Forget for Mirror")
+                            Text("Forget $paired", maxLines = 2, overflow = TextOverflow.Ellipsis)
                             Text(
                                 "Bluetooth pairing isn't touched",
                                 style = MaterialTheme.typography.bodySmall,
@@ -712,19 +721,26 @@ private data class TouchMark(val x: Float, val y: Float, val held: Boolean)
 
 /**
  * The mirrored picture and the touch layer over it; both use the same [MirrorFit]. A ring marks
- * each finger in the same frame it lands, before the computer's next picture can: filled while
- * Direct holds the button, hollow in Hover and while two fingers scroll. It's wider than a fingertip
- * so it shows around a resting finger, and fades briefly after the lift so a quick tap still shows.
+ * each finger the touch policy is acting on, in the same frame it lands, before the computer's next
+ * picture can: filled while Direct holds the button, hollow in Hover and while two fingers scroll.
+ * It's wider than a fingertip so it shows around a resting finger, and fades briefly after the lift
+ * so a quick tap still shows. A [stale] picture (the link went quiet) dims lightly.
+ *
+ * Touches arrive as raw MotionEvents: a down asks Android for unbuffered dispatch, so moves reach
+ * the computer as they happen instead of batched to the next frame, and a system cancel is told
+ * apart from a lift.
  */
+@OptIn(ExperimentalComposeUiApi::class)
 @Composable
 private fun MirrorImage(
     frames: MirrorFrameSource,
     live: Boolean,
-    touchMode: MirrorTouchMode,
+    stale: Boolean,
     haptics: MirrorHaptics,
-    onTouch: (MirrorTouchFrame) -> Unit,
+    onTouch: (MirrorTouchFrame) -> MirrorTouchUpdate,
     onImagePlaced: (FloatArray) -> Unit,
 ) {
+    val view = LocalView.current
     var surfaceSize by remember { mutableStateOf(IntSize.Zero) }
     var origin by remember { mutableStateOf(Offset.Zero) }
     // Frame size changes rarely (a new display), so reading it here recomposes only then.
@@ -734,7 +750,6 @@ private fun MirrorImage(
     }
     val currentFit by rememberUpdatedState(fit)
     val currentLive by rememberUpdatedState(live)
-    val currentMode by rememberUpdatedState(touchMode)
     val currentHaptics by rememberUpdatedState(haptics)
     val currentOnTouch by rememberUpdatedState(onTouch)
     // Read only while drawing, so a moving finger redraws the image without recomposing it.
@@ -748,8 +763,17 @@ private fun MirrorImage(
         liftAlpha.snapTo(1f)
         liftAlpha.animateTo(0f, FastEffectsSpring)
     }
-    // The stale picture dims as the status card fades in over it, and clears as it fades out.
-    val dimAlpha = animateFloatAsState(if (live) 0f else DIM_ALPHA, EffectsSpring, label = "mirrorDim")
+    // The stale picture dims as the status card fades in over it, and clears as it fades out; a
+    // live picture whose link went quiet dims lightly, since it may be frozen.
+    val dimAlpha = animateFloatAsState(
+        when {
+            !live -> DIM_ALPHA
+            stale -> STALE_DIM_ALPHA
+            else -> 0f
+        },
+        EffectsSpring,
+        label = "mirrorDim",
+    )
     LaunchedEffect(fit, origin) {
         fit?.let { onImagePlaced(floatArrayOf(origin.x + it.left, origin.y + it.top, origin.x + it.left + it.width, origin.y + it.top + it.height)) }
     }
@@ -801,86 +825,113 @@ private fun MirrorImage(
                 }
                 frames.onFrameDrawn(seq)
             }
-            .pointerInput(Unit) {
-                // The phone's own record of the gesture, for the ring and haptics only; what reaches
-                // the computer is MirrorTouchPolicy's call, and the tap rule here matches its defaults.
-                val tapSlop = 12.dp.toPx()
-                var active = false
-                var startedInside = false
-                var multi = false
-                var downAt = 0L
-                var downPosition = Offset.Zero
-                var leftSlop = false
-                awaitPointerEventScope {
-                    while (true) {
-                        val event = awaitPointerEvent()
-                        val fitNow = currentFit
-                        if (fitNow == null || !currentLive) {
-                            active = false
-                            marks.value = emptyList()
-                            continue
-                        }
-                        currentOnTouch(
-                            MirrorTouchFrame(
-                                points = event.changes.map {
-                                    MirrorTouchPoint(it.id.value, it.position.x, it.position.y, it.pressed, it.previousPressed)
-                                },
-                                uptimeMillis = event.changes.firstOrNull()?.uptimeMillis ?: SystemClock.uptimeMillis(),
-                                fit = fitNow,
-                            ),
-                        )
-                        event.changes.forEach { it.consume() }
-
-                        val pressed = event.changes.filter { it.pressed }
-                        if (!active && pressed.isNotEmpty()) {
-                            val first = pressed.first()
-                            active = true
-                            multi = pressed.size > 1
-                            // Two fingers at once scroll wherever they land; one finger counts only inside the image.
-                            startedInside = multi || fitNow.toNormalized(first.position.x, first.position.y) != null
-                            downAt = first.uptimeMillis
-                            downPosition = first.position
-                            leftSlop = false
-                            if (startedInside && !multi && currentMode == MirrorTouchMode.DIRECT) currentHaptics.press()
-                        } else if (active && pressed.isNotEmpty()) {
-                            if (pressed.size > 1) multi = true
-                            if (hypot(pressed.first().position.x - downPosition.x, pressed.first().position.y - downPosition.y) >= tapSlop) {
-                                leftSlop = true
-                            }
-                        } else if (active) {
-                            active = false
-                            val upAt = event.changes.firstOrNull()?.uptimeMillis ?: downAt
-                            val tapped = startedInside && !multi && !leftSlop && upAt - downAt < HOVER_TAP_TIMEOUT_MILLIS
-                            if (tapped && currentMode == MirrorTouchMode.HOVER) currentHaptics.press()
-                        }
-                        val next = if (active && startedInside) {
-                            pressed.map {
-                                TouchMark(it.position.x, it.position.y, held = !multi && currentMode == MirrorTouchMode.DIRECT)
-                            }
-                        } else {
-                            emptyList()
-                        }
-                        if (next.isEmpty() && marks.value.isNotEmpty()) {
-                            lifted.value = marks.value
-                            lifts.intValue++
-                        }
-                        marks.value = next
-                    }
+            .pointerInteropFilter { event ->
+                val action = event.actionMasked
+                // Moves as they arrive, not batched to the next frame: the computer sees them sooner.
+                if (action == MotionEvent.ACTION_DOWN) view.requestUnbufferedDispatch(event)
+                val fitNow = currentFit
+                if (fitNow == null || !currentLive) {
+                    marks.value = emptyList()
+                    return@pointerInteropFilter true
                 }
+                // What the computer gets, the ring and the haptics all come from the touch policy's one record.
+                val update = currentOnTouch(event.toMirrorTouchFrame(fitNow))
+                update.events.forEach {
+                    if (it == MirrorTouchEvent.PRESSED || it == MirrorTouchEvent.TAPPED) currentHaptics.press()
+                }
+                val next = update.rings.map { TouchMark(it.x, it.y, update.held) }
+                if (next.isEmpty() && marks.value.isNotEmpty()) {
+                    lifted.value = marks.value
+                    lifts.intValue++
+                }
+                marks.value = next
+                true
             }
             .semantics { contentDescription = "Mirrored computer screen" }
             .testTag("mirror_image"),
     )
 }
 
-/** Everything the surface says when there's no live picture to touch. */
+/** Every pointer of [this] event, in the image layer's pixels; a lifting pointer reads as up. */
+private fun MotionEvent.toMirrorTouchFrame(fit: MirrorFit): MirrorTouchFrame {
+    val action = actionMasked
+    val changing = actionIndex
+    val lifting = action == MotionEvent.ACTION_UP || action == MotionEvent.ACTION_POINTER_UP
+    val landing = action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN
+    val cancelled = action == MotionEvent.ACTION_CANCEL
+    return MirrorTouchFrame(
+        points = (0 until pointerCount).map { i ->
+            MirrorTouchPoint(
+                id = getPointerId(i).toLong(),
+                x = getX(i),
+                y = getY(i),
+                down = !cancelled && !(lifting && i == changing),
+                wasDown = !(landing && i == changing),
+            )
+        },
+        uptimeMillis = eventTime,
+        fit = fit,
+        cancelled = cancelled,
+        eventNanos = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) eventTimeNanos else eventTime * 1_000_000,
+    )
+}
+
+/**
+ * While a live picture's link is quiet (no reply for a couple of seconds), a chip over it says so:
+ * the picture may be frozen, and the session ends on its own if the link doesn't come back.
+ */
 @Composable
-private fun MirrorOverlay(state: MirrorUiState, hasStaleFrame: Boolean, modifier: Modifier = Modifier) {
+private fun QuietLinkChip(state: MirrorUiState) {
+    val name = (state.phase as? MirrorPhase.Connected)?.companionName
+    AnimatedVisibility(
+        visible = state.pictureStale,
+        enter = fadeIn(EffectsSpring) + expandVertically(SpatialSizeSpring),
+        exit = fadeOut(EffectsSpring) + shrinkVertically(SpatialSizeSpring),
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(bottom = 8.dp)
+                .clip(MaterialTheme.shapes.extraLarge)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .heightIn(min = 40.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .semantics { liveRegion = LiveRegionMode.Polite }
+                .testTag("mirror_quiet_link"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            Text(
+                "${name ?: "The computer"} isn't answering",
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/**
+ * Everything the surface says when there's no live picture to touch, and a pairing code that
+ * arrives while one is streaming (shown over the picture, so the request is never hidden).
+ */
+@Composable
+private fun MirrorOverlay(
+    state: MirrorUiState,
+    hasStaleFrame: Boolean,
+    onDeclinePairing: () -> Unit,
+    modifier: Modifier = Modifier,
+) {
     val phase = state.phase
     // Wider with larger text, so a big font scale wraps less instead of scrolling.
     val maxCardWidth = 440.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
     AnimatedVisibility(
-        visible = !phase.isLive,
+        visible = !phase.isLive || phase.pairingRequest != null,
         enter = fadeIn(EffectsSpring),
         exit = fadeOut(EffectsSpring),
         modifier = modifier,
@@ -907,13 +958,15 @@ private fun MirrorOverlay(state: MirrorUiState, hasStaleFrame: Boolean, modifier
                     contentAlignment = Alignment.Center,
                     label = "mirrorStatus",
                 ) { shown ->
+                    val scroll = rememberScrollState()
                     Column(
                         modifier = Modifier
-                            .verticalScroll(rememberScrollState())
+                            .scrollEdgeFade(scroll)
+                            .verticalScroll(scroll)
                             .padding(horizontal = 24.dp, vertical = 20.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        StatusContent(shown.state, shown.hasStaleFrame)
+                        StatusContent(shown.state, shown.hasStaleFrame, onDeclinePairing)
                     }
                 }
             }
@@ -924,7 +977,7 @@ private fun MirrorOverlay(state: MirrorUiState, hasStaleFrame: Boolean, modifier
 /** What the card shows; [key] changes only when the card says something different. */
 private data class StatusShown(val state: MirrorUiState, val hasStaleFrame: Boolean) {
     val key: Any
-        get() = when (val phase = state.phase) {
+        get() = when (val phase = state.phase.pairingRequest ?: state.phase) {
             is MirrorPhase.Waiting -> when {
                 phase.pairedName == null -> "unpaired"
                 hasStaleFrame -> "lost ${phase.pairedName}"
@@ -937,8 +990,8 @@ private data class StatusShown(val state: MirrorUiState, val hasStaleFrame: Bool
 }
 
 @Composable
-private fun StatusContent(state: MirrorUiState, hasStaleFrame: Boolean) {
-    when (val phase = state.phase) {
+private fun StatusContent(state: MirrorUiState, hasStaleFrame: Boolean, onDeclinePairing: () -> Unit) {
+    when (val phase = state.phase.pairingRequest ?: state.phase) {
         MirrorPhase.Off -> StatusHeader(icon = null, title = "Starting Mirror", busy = true)
         MirrorPhase.NoWifi -> {
             StatusHeader(Icons.Filled.WifiOff, "Connect to Wi-Fi")
@@ -949,7 +1002,7 @@ private fun StatusContent(state: MirrorUiState, hasStaleFrame: Boolean) {
                 StatusHeader(Icons.Filled.DesktopWindows, "Pair a computer")
                 Body("On the computer, in a terminal, run:")
                 Command("bluke-mirror pair")
-                PhoneAddressHint(state)
+                PhoneAddressHint(state, "bluke-mirror pair")
                 Body("No bluke-mirror yet? It's in the companion folder of Bluke's source; its README says how to build it.", muted = true)
             }
             // A picture from earlier this session means the link dropped, not that it never came.
@@ -960,12 +1013,12 @@ private fun StatusContent(state: MirrorUiState, hasStaleFrame: Boolean) {
             else -> {
                 StatusHeader(icon = null, title = "Waiting for ${phase.pairedName}", busy = true)
                 Body("Run bluke-mirror on ${phase.pairedName}. It finds this phone on the network.")
-                PhoneAddressHint(state)
+                PhoneAddressHint(state, "bluke-mirror")
             }
         }
         is MirrorPhase.Pairing -> {
-            StatusHeader(Icons.Filled.Key, "Pair with ${phase.companionName}")
-            Body("Type this code into bluke-mirror:")
+            StatusHeader(Icons.Filled.Key, "${phase.companionName} wants to pair")
+            Body("If you started this, type the code into bluke-mirror there:")
             Text(
                 text = phase.code.chunked(3).joinToString(" "),
                 style = MaterialTheme.typography.displayMedium,
@@ -977,10 +1030,18 @@ private fun StatusContent(state: MirrorUiState, hasStaleFrame: Boolean) {
                     .testTag("mirror_pairing_code"),
                 textAlign = TextAlign.Center,
             )
-            Body(
-                if (phase.attemptsLeft == 1) "Last try this session." else "${phase.attemptsLeft} tries left this session.",
-                muted = true,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.fillMaxWidth()) {
+                Text(
+                    if (phase.attemptsLeft == 1) "Last try this session." else "${phase.attemptsLeft} tries left this session.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f),
+                )
+                // Not yours? Turning it down costs no try, so a stranger on the network can't use them up.
+                TextButton(onClick = onDeclinePairing, modifier = Modifier.testTag("mirror_pairing_decline")) {
+                    Text("Decline")
+                }
+            }
         }
         MirrorPhase.PairingLocked -> {
             StatusHeader(Icons.Filled.Lock, "Too many wrong codes")
@@ -1045,12 +1106,31 @@ private fun Command(text: String) {
     }
 }
 
+/** The whole command with this phone's address, for when [command] alone doesn't find the phone. */
 @Composable
-private fun PhoneAddressHint(state: MirrorUiState) {
+private fun PhoneAddressHint(state: MirrorUiState, command: String) {
     val argument = state.phoneArgument ?: return
-    Body("If it doesn't find this phone, give it the address:", muted = true)
-    Command("--phone $argument")
+    Body("If it doesn't find this phone, run this instead:", muted = true)
+    Command("$command --phone $argument")
 }
+
+/**
+ * Fades the edges [scroll] can still move toward, so content that runs past a card's edge
+ * (large text on a short screen) shows there's more.
+ */
+private fun Modifier.scrollEdgeFade(scroll: ScrollState): Modifier = this
+    .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+    .drawWithContent {
+        drawContent()
+        val edge = (SCROLL_FADE.toPx() / size.height).coerceAtMost(0.5f)
+        val top = if (scroll.canScrollBackward) Color.Transparent else Color.Black
+        val bottom = if (scroll.canScrollForward) Color.Transparent else Color.Black
+        if (top == Color.Black && bottom == Color.Black) return@drawWithContent
+        drawRect(
+            Brush.verticalGradient(0f to top, edge to Color.Black, 1f - edge to Color.Black, 1f to bottom),
+            blendMode = BlendMode.DstIn,
+        )
+    }
 
 /**
  * A one-line confirmation ("Paired with …", "Wrong code"), shown for a few seconds, or "Mirror
@@ -1127,6 +1207,7 @@ private fun MirrorNotice.text(): String = when (this) {
         else -> "Wrong code. $attemptsLeft tries left."
     }
     MirrorNotice.Forgotten -> FORGOTTEN_TEXT
+    is MirrorNotice.Declined -> "Declined $companionName"
 }
 
 private const val FORGOTTEN_TEXT = "Mirror pairing removed"
@@ -1143,9 +1224,6 @@ private fun noticeMillis(withAction: Boolean): Long =
 
 private const val NOTICE_MILLIS = 3_000L
 
-/** MirrorTouchPolicy's default tap timeout: a Hover tap shorter than this clicks. */
-private const val HOVER_TAP_TIMEOUT_MILLIS = 400L
-
 // Springs from M3's standard motion scheme: effects for fades, spatial for size. Compose scales
 // them by the system animator scale and snaps them when animations are off.
 private val EffectsSpring: FiniteAnimationSpec<Float> = spring(dampingRatio = 1f, stiffness = 1600f)
@@ -1154,6 +1232,7 @@ private val SpatialSizeSpring: FiniteAnimationSpec<IntSize> =
     spring(dampingRatio = 0.9f, stiffness = 700f, visibilityThreshold = IntSize.VisibilityThreshold)
 
 private const val DIM_ALPHA = 0.6f
+private const val STALE_DIM_ALPHA = 0.3f
 private const val MIRROR_WORD = "Mirror"
 private const val WIDEST_LATENCY = "999 ms"
 
@@ -1165,3 +1244,4 @@ private val NEXT_PILL_START = 12.dp
 private val NEXT_PILL_END = 4.dp
 private val NEXT_ARROW = 18.dp
 private val TOUCH_RING_RADIUS = 35.dp
+private val SCROLL_FADE = 24.dp

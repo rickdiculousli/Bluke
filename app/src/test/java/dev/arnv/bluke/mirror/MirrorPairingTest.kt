@@ -136,6 +136,29 @@ class MirrorPairingTest {
   }
 
   @Test
+  fun declineDropsTheRequestWithoutAStrike() {
+    assertNull(pairing.decline())
+    pairing.onMessage("c1", MirrorMessage.PairRequest("Stranger"), phoneFp, companionFp)
+    assertEquals("c1", pairing.decline())
+    assertEquals(PhonePairingState.Idle, pairing.state)
+    // Its close afterwards is not a strike either, even after a share.
+    pairing.onClosed("c1")
+    assertEquals(3, pairing.attemptsLeft)
+    // A declined request mid-exchange (share received) still costs nothing.
+    pairing.onMessage("c2", MirrorMessage.PairRequest("Stranger"), phoneFp, companionFp)
+    val party = Spake2Party(Spake2Role.A, companionFp, phoneFp, Spake2.codeToW("000000"), Spake2.AAD, Spake2.randomScalar())
+    pairing.onMessage("c2", MirrorMessage.PakeShare(party.share), phoneFp, companionFp)
+    assertEquals("c2", pairing.decline())
+    pairing.onClosed("c2")
+    assertEquals(3, pairing.attemptsLeft)
+    // The next request is served at once.
+    assertEquals(
+        MirrorMessage.PairCode(3),
+        pairing.onMessage("c3", MirrorMessage.PairRequest("Mac"), phoneFp, companionFp).reply,
+    )
+  }
+
+  @Test
   fun aCodeExpiresAfter120sWithoutAStrike() {
     pairing.onMessage("c1", MirrorMessage.PairRequest("Mac"), phoneFp, companionFp)
     clockMs = 119_999

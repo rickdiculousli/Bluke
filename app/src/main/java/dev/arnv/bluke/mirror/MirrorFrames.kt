@@ -60,10 +60,48 @@ class FramePool<B : Any>(private val size: Int = 3, private val create: () -> B)
   fun latest(): B? = published.lastOrNull()
 }
 
-/** The Mirror toolbar's numbers: frames drawn per second and link latency. Thread-safe. */
+/** The largest frame the phone takes, per axis; it tells the companion so in Welcome. */
+const val MIRROR_MAX_WIDTH = 480
+const val MIRROR_MAX_HEIGHT = 480
+
+/**
+ * Whether a Frame's header size is one the phone decodes: 1 to [MIRROR_MAX_WIDTH] by 1 to
+ * [MIRROR_MAX_HEIGHT]. Anything else is dropped before a buffer is made for it (a zero side can't
+ * make a bitmap; a huge one would exhaust memory).
+ */
+fun mirrorFrameSizeAllowed(width: Int, height: Int): Boolean =
+    width in 1..MIRROR_MAX_WIDTH && height in 1..MIRROR_MAX_HEIGHT
+
+/**
+ * The Mirror toolbar's numbers: frames drawn per second, link latency, and whether the link has
+ * gone quiet. Thread-safe. Times are milliseconds on one monotonic clock.
+ */
 class MirrorRates {
   private val drawnAtMs = ArrayDeque<Long>()
   private val roundTripsUs = ArrayDeque<Long>()
+  private var lastHeardMs: Long? = null
+
+  /** A session began at [nowMs]: earlier sessions' numbers are forgotten, and the link counts as heard. */
+  @Synchronized
+  fun reset(nowMs: Long) {
+    drawnAtMs.clear()
+    roundTripsUs.clear()
+    lastHeardMs = nowMs
+  }
+
+  /** A message arrived from the companion at [nowMs]. */
+  @Synchronized
+  fun heard(nowMs: Long) {
+    lastHeardMs = nowMs
+  }
+
+  /**
+   * The liveness rule: the companion answers a Ping every second, so nothing heard for more than
+   * [LINK_QUIET_MS] means at least one answer is overdue and the picture may be frozen. False
+   * before any session.
+   */
+  @Synchronized
+  fun linkQuiet(nowMs: Long): Boolean = lastHeardMs?.let { nowMs - it > LINK_QUIET_MS } ?: false
 
   /** A frame was drawn at [nowMs] (monotonic). */
   @Synchronized
@@ -95,6 +133,10 @@ class MirrorRates {
     if (roundTripsUs.isEmpty()) return null
     val sorted = roundTripsUs.sorted()
     return (sorted[sorted.size / 2] + 500) / 1000
+  }
+
+  companion object {
+    const val LINK_QUIET_MS = 2_000L
   }
 
   private fun prune(nowMs: Long) {

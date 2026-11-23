@@ -15,6 +15,7 @@ import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.core.content.edit
+import dev.arnv.bluke.BuildConfig
 import dev.arnv.bluke.ui.MirrorFrameSource
 import java.io.BufferedInputStream
 import java.io.BufferedOutputStream
@@ -101,10 +102,11 @@ class MirrorController(context: Context) : MirrorFrameSource {
     @Volatile private var lastDrawnSeq = -1L
     private val drawnCount = AtomicLong()
     private val decodedCount = AtomicLong()
-    /** Touch event to Pointer written, in microseconds, for the rig's pipeline numbers. */
-    private val touchToWriteUs = Collections.synchronizedList(ArrayDeque<Long>())
-    /** Ping to Pong round trips, in microseconds, for the rig's one-way share of the link. */
-    private val pingRoundTripUs = Collections.synchronizedList(ArrayDeque<Long>())
+    // The rig's pipeline numbers, in microseconds; debug builds only. MotionEvent time to onTouch
+    // (the input system's share), onTouch to the Pointer's TLS flush (the app's), Ping to Pong.
+    private val eventToTouchUs = RigSamples()
+    private val touchToFlushUs = RigSamples()
+    private val pingRoundTripUs = RigSamples()
 
     override fun currentFrame(): ImageBitmap? = currentImage
 
@@ -170,7 +172,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
     }
 
     fun setTouchMode(mode: MirrorTouchMode) {
-        touchPolicy.cancel().forEach { session?.send(it) }
+        touchPolicy.cancel().messages.forEach { session?.send(it) }
         touchPolicy.mode = mode
         prefs.edit { putString(TOUCH_MODE_PREFERENCE, mode.name) }
         _state.update { it.copy(touchMode = mode) }
@@ -185,12 +187,20 @@ class MirrorController(context: Context) : MirrorFrameSource {
 
     fun clearNotice() = _state.update { it.copy(notice = null) }
 
-    /** Called on the main thread for every touch event on the image. */
-    fun onTouch(frame: MirrorTouchFrame) {
-        val fingers = frame.points.filter { it.down }.map { MirrorFinger(it.id, it.x, it.y) }
-        val messages = touchPolicy.update(frame.fit, fingers, frame.uptimeMillis)
-        val target = session ?: return
-        messages.forEach { target.send(it, touchAtMs = frame.uptimeMillis) }
+    /** The user turned down the pairing request on screen: its connection closes, no attempt used. */
+    fun declinePairing() = synchronized(lock) {
+        val name = (pairing.state as? PhonePairingState.ShowingCode)?.companionName ?: return
+        pairing.decline()?.let { closeQuietly(it as SSLSocket) }
+        publishLocked(notice = MirrorNotice.Declined(name))
+    }
+
+    /** Called on the main thread for every touch event on the image; returns what it did, for the ring and haptics. */
+    fun onTouch(frame: MirrorTouchFrame): MirrorTouchUpdate {
+        val touchedAtNs = System.nanoTime() // the uptime clock MotionEvent times are on
+        eventToTouchUs.add((touchedAtNs - frame.eventNanos) / 1000)
+        val update = touchPolicy.update(frame)
+        session?.let { target -> update.messages.forEach { target.send(it, touchedAtNs = touchedAtNs) } }
+        return update
     }
 
     /** What the rig reads through RigReceiver. */
@@ -210,8 +220,10 @@ class MirrorController(context: Context) : MirrorFrameSource {
             "fps" to ui.fps,
             "latencyMs" to ui.latencyMs,
             "imageBounds" to imageBoundsInWindow?.toList(),
-            "touchToWriteUs" to synchronized(touchToWriteUs) { touchToWriteUs.toList() },
-            "pingRoundTripUs" to synchronized(pingRoundTripUs) { pingRoundTripUs.toList() },
+            "linkQuiet" to ui.linkQuiet,
+            "eventToTouchUs" to eventToTouchUs.toList(),
+            "touchToFlushUs" to touchToFlushUs.toList(),
+            "pingRoundTripUs" to pingRoundTripUs.toList(),
         )
     }
 
@@ -383,16 +395,18 @@ class MirrorController(context: Context) : MirrorFrameSource {
             session = current
             displayName = null
             hasFrame = false
+            rates.reset(SystemClock.uptimeMillis())
             publishLocked()
             old
         }
         replaced?.closeAfterFlush()
-        current.send(MirrorMessage.Welcome(MIRROR_PROTOCOL_VERSION, CODEC_JPEG, MAX_WIDTH, MAX_HEIGHT, FPS_CAP))
+        current.send(MirrorMessage.Welcome(MIRROR_PROTOCOL_VERSION, CODEC_JPEG, MIRROR_MAX_WIDTH, MIRROR_MAX_HEIGHT, FPS_CAP))
         // The companion answers a Ping every second, so 5 s of silence means the link is gone.
         socket.soTimeout = SESSION_SILENCE_MS
         try {
             while (true) {
                 val message = MirrorCodec.read(input)
+                rates.heard(SystemClock.uptimeMillis())
                 when (MirrorConnectionPolicy.sessionAccepts(message)) {
                     SessionVerdict.CLOSE -> return
                     SessionVerdict.SKIP -> continue
@@ -414,10 +428,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
                     is MirrorMessage.Pong -> {
                         val roundTrip = nowUs() - message.tUs
                         rates.roundTrip(roundTrip)
-                        synchronized(pingRoundTripUs) {
-                            pingRoundTripUs.add(roundTrip)
-                            while (pingRoundTripUs.size > 512) pingRoundTripUs.removeAt(0)
-                        }
+                        pingRoundTripUs.add(roundTrip)
                     }
                     else -> Unit
                 }
@@ -438,7 +449,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
 
     private fun decodeNext(from: Session) {
         val frame = slot.take() ?: return
-        if (frame.codec != CODEC_JPEG.toInt()) {
+        if (frame.codec != CODEC_JPEG || !mirrorFrameSizeAllowed(frame.width, frame.height)) {
             from.send(MirrorMessage.FrameAck(frame.seq, MIRROR_FRAME_DROPPED))
             return
         }
@@ -508,17 +519,14 @@ class MirrorController(context: Context) : MirrorFrameSource {
 
     private fun publishLocked(notice: MirrorNotice? = null) {
         val pinned = runCatching { identity.pinnedCompanion() }.getOrNull()
-        val pairingState = pairing.state
-        val phase = when {
-            !running -> MirrorPhase.Off
-            listenError != null -> MirrorPhase.Failed(listenError!!)
-            session != null -> MirrorPhase.Connected(pinned?.name ?: "computer", displayName, hasFrame)
-            pairingState is PhonePairingState.ShowingCode ->
-                MirrorPhase.Pairing(pairingState.code, pairingState.companionName, pairingState.attemptsLeft)
-            pairingState is PhonePairingState.Locked -> MirrorPhase.PairingLocked
-            wifiAddress == null && loopbackPort == null -> MirrorPhase.NoWifi
-            else -> MirrorPhase.Waiting(pinned?.name)
-        }
+        val phase = mirrorPhase(
+            running = running,
+            listenError = listenError,
+            session = session?.let { MirrorSessionFacts(pinned?.name ?: "computer", displayName, hasFrame) },
+            pairing = pairing.state,
+            listening = wifiAddress != null || loopbackPort != null,
+            pinnedName = pinned?.name,
+        )
         val now = SystemClock.uptimeMillis()
         _state.update {
             it.copy(
@@ -528,6 +536,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
                 pairedName = pinned?.name,
                 fps = if (session != null) rates.fps(now) else 0,
                 latencyMs = if (session != null) rates.latencyMs()?.toInt() else null,
+                linkQuiet = session != null && rates.linkQuiet(now),
                 notice = notice ?: it.notice,
             )
         }
@@ -549,18 +558,15 @@ class MirrorController(context: Context) : MirrorFrameSource {
         @Volatile var lastSentAtMs = SystemClock.uptimeMillis()
             private set
 
-        fun send(message: MirrorMessage, touchAtMs: Long? = null) {
+        fun send(message: MirrorMessage, touchedAtNs: Long? = null) {
             try {
                 writer.execute {
                     try {
                         output.write(MirrorCodec.encode(message))
                         output.flush()
                         lastSentAtMs = SystemClock.uptimeMillis()
-                        if (touchAtMs != null && message is MirrorMessage.Pointer) {
-                            synchronized(touchToWriteUs) {
-                                touchToWriteUs.add((SystemClock.uptimeMillis() - touchAtMs) * 1000)
-                                while (touchToWriteUs.size > 512) touchToWriteUs.removeAt(0)
-                            }
+                        if (touchedAtNs != null && message is MirrorMessage.Pointer) {
+                            touchToFlushUs.add((System.nanoTime() - touchedAtNs) / 1000)
                         }
                     } catch (_: IOException) {
                         closeQuietly(socket)
@@ -603,8 +609,21 @@ class MirrorController(context: Context) : MirrorFrameSource {
         const val PING_INTERVAL_MS = 1_000L
         const val TICK_MS = 100L
         const val CODEC_JPEG: Int = 1
-        const val MAX_WIDTH = 480
-        const val MAX_HEIGHT = 480
         const val FPS_CAP = 20
     }
+}
+
+/** The newest 512 of one rig timing, kept only in debug builds (release builds never record). */
+private class RigSamples {
+    private val samples = ArrayDeque<Long>()
+
+    @Synchronized
+    fun add(us: Long) {
+        if (!BuildConfig.DEBUG) return
+        samples.addLast(us)
+        while (samples.size > 512) samples.removeFirst()
+    }
+
+    @Synchronized
+    fun toList(): List<Long> = samples.toList()
 }

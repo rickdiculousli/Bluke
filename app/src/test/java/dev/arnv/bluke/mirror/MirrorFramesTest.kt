@@ -1,6 +1,8 @@
 package dev.arnv.bluke.mirror
 
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Assert.assertNotSame
 import org.junit.Assert.assertNull
 import org.junit.Assert.assertSame
@@ -79,5 +81,40 @@ class MirrorFramesTest {
     rates.roundTrip(300_000)
     // 6, 8, 200, 300, 7.4 → median 8.
     assertEquals(8L, rates.latencyMs())
+  }
+
+  @Test
+  fun onlyFramesWithinTheAdvertisedSizeAreDecoded() {
+    assertTrue(mirrorFrameSizeAllowed(480, 270))
+    assertTrue(mirrorFrameSizeAllowed(1, 1))
+    assertTrue(mirrorFrameSizeAllowed(MIRROR_MAX_WIDTH, MIRROR_MAX_HEIGHT))
+    assertFalse(mirrorFrameSizeAllowed(0, 270))
+    assertFalse(mirrorFrameSizeAllowed(480, 0))
+    assertFalse(mirrorFrameSizeAllowed(-1, 10))
+    assertFalse(mirrorFrameSizeAllowed(481, 270))
+    assertFalse(mirrorFrameSizeAllowed(480, 481))
+    assertFalse(mirrorFrameSizeAllowed(65535, 65535))
+  }
+
+  @Test
+  fun theLinkGoesQuietAfterTwoSecondsWithNothingHeard() {
+    val rates = MirrorRates()
+    assertFalse(rates.linkQuiet(1_000_000))
+    rates.reset(1_000)
+    assertFalse(rates.linkQuiet(3_000))
+    assertTrue(rates.linkQuiet(3_001))
+    rates.heard(3_500)
+    assertFalse(rates.linkQuiet(5_500))
+    assertTrue(rates.linkQuiet(5_501))
+  }
+
+  @Test
+  fun aNewSessionForgetsTheLastOnesNumbers() {
+    val rates = MirrorRates()
+    rates.roundTrip(6_000)
+    rates.frameDrawn(100)
+    rates.reset(200)
+    assertNull(rates.latencyMs())
+    assertEquals(0, rates.fps(200))
   }
 }

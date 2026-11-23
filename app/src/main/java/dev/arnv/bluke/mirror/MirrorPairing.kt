@@ -166,6 +166,16 @@ class PhonePairing(
     return current.connection
   }
 
+  /**
+   * The user declined the request on the phone: its code is discarded without using an attempt,
+   * so a stranger's request can't eat into them. Returns the connection to close, or null.
+   */
+  fun decline(): Any? {
+    val current = attempt ?: return null
+    attempt = null
+    return current.connection
+  }
+
   private fun isExpired(a: Attempt) =
       a.awaitingConfirm == null && now() - a.startedAtMs >= CODE_LIFETIME_MS
 

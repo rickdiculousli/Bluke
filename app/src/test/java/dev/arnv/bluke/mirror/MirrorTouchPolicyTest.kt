@@ -15,7 +15,9 @@ class MirrorTouchPolicyTest {
 
   private fun f(x: Float, y: Float, id: Long = 1) = MirrorFinger(id, x, y)
 
-  private fun touch(timeMs: Long, vararg fingers: MirrorFinger) = policy.update(fit, fingers.toList(), timeMs)
+  private fun touch(timeMs: Long, vararg fingers: MirrorFinger) = policy.update(fit, fingers.toList(), timeMs).messages
+
+  private fun touchUpdate(timeMs: Long, vararg fingers: MirrorFinger) = policy.update(fit, fingers.toList(), timeMs)
 
   @Test
   fun directPressesDragsAndReleasesAtTheLastPoint() {
@@ -30,20 +32,20 @@ class MirrorTouchPolicyTest {
   @Test
   fun aDragThatLeavesTheImageIsClamped() {
     val letterboxed = MirrorFit(0f, 100f, 1000f, 500f, MirrorRotation.NONE)
-    assertEquals(listOf(Pointer(32768, 32768, 1)), policy.update(letterboxed, listOf(f(500f, 350f)), 0))
-    assertEquals(listOf(Pointer(32768, 0, 1)), policy.update(letterboxed, listOf(f(500f, 0f)), 10))
-    assertEquals(listOf(Pointer(32768, 0, 0)), policy.update(letterboxed, emptyList(), 20))
+    assertEquals(listOf(Pointer(32768, 32768, 1)), policy.update(letterboxed, listOf(f(500f, 350f)), 0).messages)
+    assertEquals(listOf(Pointer(32768, 0, 1)), policy.update(letterboxed, listOf(f(500f, 0f)), 10).messages)
+    assertEquals(listOf(Pointer(32768, 0, 0)), policy.update(letterboxed, emptyList(), 20).messages)
   }
 
   @Test
   fun aDownOutsideTheImageDoesNothingUntilEveryFingerLifts() {
     val letterboxed = MirrorFit(0f, 100f, 1000f, 500f, MirrorRotation.NONE)
-    assertEquals(emptyList<MirrorMessage>(), policy.update(letterboxed, listOf(f(500f, 50f)), 0))
-    assertEquals(emptyList<MirrorMessage>(), policy.update(letterboxed, listOf(f(500f, 350f)), 10))
-    assertEquals(emptyList<MirrorMessage>(), policy.update(letterboxed, listOf(f(500f, 350f), f(600f, 350f, 2)), 20))
+    assertEquals(emptyList<MirrorMessage>(), policy.update(letterboxed, listOf(f(500f, 50f)), 0).messages)
+    assertEquals(emptyList<MirrorMessage>(), policy.update(letterboxed, listOf(f(500f, 350f)), 10).messages)
+    assertEquals(emptyList<MirrorMessage>(), policy.update(letterboxed, listOf(f(500f, 350f), f(600f, 350f, 2)), 20).messages)
     assertFalse(policy.buttonHeld)
-    assertEquals(emptyList<MirrorMessage>(), policy.update(letterboxed, emptyList(), 30))
-    assertEquals(listOf(Pointer(32768, 32768, 1)), policy.update(letterboxed, listOf(f(500f, 350f)), 40))
+    assertEquals(emptyList<MirrorMessage>(), policy.update(letterboxed, emptyList(), 30).messages)
+    assertEquals(listOf(Pointer(32768, 32768, 1)), policy.update(letterboxed, listOf(f(500f, 350f)), 40).messages)
   }
 
   @Test
@@ -107,9 +109,9 @@ class MirrorTouchPolicyTest {
   fun cancelReleasesAHeldButton() {
     touch(0, f(100f, 200f))
     touch(10, f(110f, 200f))
-    assertEquals(listOf(Pointer(110, 200, 0)), policy.cancel())
+    assertEquals(listOf(Pointer(110, 200, 0)), policy.cancel().messages)
     assertFalse(policy.buttonHeld)
-    assertEquals(emptyList<MirrorMessage>(), policy.cancel())
+    assertEquals(emptyList<MirrorMessage>(), policy.cancel().messages)
   }
 
   @Test
@@ -133,6 +135,80 @@ class MirrorTouchPolicyTest {
   @Test
   fun rotatedFitMapsTouchesThroughTheRotation() {
     val rotated = MirrorFit(0f, 0f, 65535f, 65535f, MirrorRotation.CLOCKWISE)
-    assertEquals(listOf(Pointer(0, 0, 1)), policy.update(rotated, listOf(f(65535f, 0f)), 0))
+    assertEquals(listOf(Pointer(0, 0, 1)), policy.update(rotated, listOf(f(65535f, 0f)), 0).messages)
+  }
+
+  @Test
+  fun aCancelledHoverTapNeverClicks() {
+    policy.mode = MirrorTouchMode.HOVER
+    touch(0, f(100f, 100f))
+    val cancelled = policy.cancel()
+    assertEquals(emptyList<MirrorMessage>(), cancelled.messages)
+    assertEquals(emptyList<MirrorTouchEvent>(), cancelled.events)
+    // The next touch starts afresh.
+    assertEquals(listOf(Pointer(50, 50, 0)), touch(20, f(50f, 50f)))
+  }
+
+  @Test
+  fun aCancelledFrameGoesThroughCancel() {
+    touch(0, f(100f, 200f))
+    val frame = MirrorTouchFrame(
+        points = listOf(MirrorTouchPoint(1, 100f, 200f, down = false, wasDown = true)),
+        uptimeMillis = 10,
+        fit = fit,
+        cancelled = true,
+    )
+    val update = policy.update(frame)
+    assertEquals(listOf(Pointer(100, 200, 0)), update.messages)
+    assertEquals(listOf(MirrorTouchEvent.RELEASED), update.events)
+  }
+
+  @Test
+  fun aSecondFingerOutsideTheImageIsIgnoredMidDrag() {
+    val letterboxed = MirrorFit(0f, 100f, 1000f, 500f, MirrorRotation.NONE)
+    fun at(t: Long, vararg fs: MirrorFinger) = policy.update(letterboxed, fs.toList(), t)
+    assertEquals(listOf(Pointer(32768, 32768, 1)), at(0, f(500f, 350f)).messages)
+    // A thumb lands on the bar above the image: the drag goes on, the button stays held.
+    val thumb = f(900f, 20f, id = 2)
+    assertEquals(emptyList<MirrorMessage>(), at(10, f(500f, 350f), thumb).messages)
+    assertTrue(policy.buttonHeld)
+    assertEquals(listOf(Pointer(32768, 0, 1)), at(20, f(500f, 100f), thumb).messages)
+    // Even when the thumb slides onto the image it stays ignored.
+    assertEquals(emptyList<MirrorMessage>(), at(30, f(500f, 100f), f(900f, 300f, id = 2)).messages)
+    assertTrue(policy.buttonHeld)
+    // The drag lifts and releases; the thumb still down sends nothing until it lifts too.
+    assertEquals(listOf(Pointer(32768, 0, 0)), at(40, f(900f, 300f, id = 2)).messages)
+    assertEquals(emptyList<MirrorMessage>(), at(50, f(910f, 300f, id = 2)).messages)
+    assertEquals(emptyList<MirrorMessage>(), at(60).messages)
+  }
+
+  @Test
+  fun theUpdateReportsWhatHappenedForRingsAndHaptics() {
+    val press = touchUpdate(0, f(100f, 200f))
+    assertEquals(listOf(MirrorTouchEvent.PRESSED), press.events)
+    assertEquals(listOf(f(100f, 200f)), press.rings)
+    assertTrue(press.held)
+    val scroll = touchUpdate(10, f(100f, 200f), f(300f, 200f, 2))
+    assertEquals(listOf(MirrorTouchEvent.RELEASED, MirrorTouchEvent.SCROLLING), scroll.events)
+    assertEquals(2, scroll.rings.size)
+    assertFalse(scroll.held)
+    val lift = touchUpdate(20)
+    assertEquals(emptyList<MirrorTouchEvent>(), lift.events)
+    assertEquals(emptyList<MirrorFinger>(), lift.rings)
+
+    policy.mode = MirrorTouchMode.HOVER
+    val hover = touchUpdate(100, f(50f, 50f))
+    assertEquals(emptyList<MirrorTouchEvent>(), hover.events)
+    assertEquals(listOf(f(50f, 50f)), hover.rings)
+    assertFalse(hover.held)
+    assertEquals(listOf(MirrorTouchEvent.TAPPED), touchUpdate(150).events)
+  }
+
+  @Test
+  fun aFingerOutsideTheImageGetsNoRing() {
+    val letterboxed = MirrorFit(0f, 100f, 1000f, 500f, MirrorRotation.NONE)
+    val update = policy.update(letterboxed, listOf(f(500f, 50f)), 0)
+    assertEquals(emptyList<MirrorFinger>(), update.rings)
+    assertEquals(emptyList<MirrorTouchEvent>(), update.events)
   }
 }

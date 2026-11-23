@@ -30,7 +30,9 @@ import com.github.takahirom.roborazzi.captureRoboImage
 import dev.arnv.bluke.mirror.MirrorNotice
 import dev.arnv.bluke.mirror.MirrorPhase
 import dev.arnv.bluke.mirror.MirrorTouchMode
+import dev.arnv.bluke.mirror.MirrorTouchPolicy
 import dev.arnv.bluke.mirror.MirrorUiState
+import dev.arnv.bluke.mirror.update
 import dev.arnv.bluke.ui.theme.MyApplicationTheme
 import org.junit.Before
 import org.junit.Rule
@@ -91,6 +93,35 @@ class MirrorScreenshotTest {
             touchMode = MirrorTouchMode.HOVER,
             notice = MirrorNotice.Paired("Rick's MacBook Pro"),
         ),
+        "streaming-idle" to address.copy(
+            phase = MirrorPhase.Connected("Rick's MacBook Pro", "Built-in Retina Display", hasFrame = true),
+            pairedName = "Rick's MacBook Pro",
+            fps = 0,
+            latencyMs = 6,
+        ),
+        "stale-link" to address.copy(
+            phase = MirrorPhase.Connected("Rick's MacBook Pro", "Built-in Retina Display", hasFrame = true),
+            pairedName = "Rick's MacBook Pro",
+            fps = 0,
+            latencyMs = 6,
+            linkQuiet = true,
+        ),
+        "pairing-while-streaming" to address.copy(
+            phase = MirrorPhase.Connected(
+                "Rick's MacBook Pro",
+                "Built-in Retina Display",
+                hasFrame = true,
+                pairing = MirrorPhase.Pairing("590317", "Studio iMac", attemptsLeft = 3),
+            ),
+            pairedName = "Rick's MacBook Pro",
+            fps = 18,
+            latencyMs = 7,
+        ),
+        "declined" to address.copy(
+            phase = MirrorPhase.Waiting("Rick's MacBook Pro"),
+            pairedName = "Rick's MacBook Pro",
+            notice = MirrorNotice.Declined("Studio iMac"),
+        ),
         "forget-pending" to address.copy(
             phase = MirrorPhase.Connected("Rick's MacBook Pro", "Built-in Retina Display", hasFrame = true),
             pairedName = "Rick's MacBook Pro",
@@ -127,6 +158,7 @@ class MirrorScreenshotTest {
     )
 
     private companion object {
+        const val SPINNER_SETTLE_MS = 400L
         const val LONG_NAME = "Rick's MacBook Pro (Work) in the upstairs office"
         const val EMOJI_NAME = "🎮 Gaming PC 🖥️"
     }
@@ -161,6 +193,8 @@ class MirrorScreenshotTest {
         shots.forEach { shot ->
             current.value = shot
             composeTestRule.waitForIdle()
+            // Past the spinners' first frame, so they show the arc a person sees.
+            composeTestRule.mainClock.advanceTimeBy(SPINNER_SETTLE_MS)
             val scale = if (shot.fontScale == 1f) "1" else if (shot.fontScale == 2f) "2" else shot.fontScale.toString()
             composeTestRule.onRoot().captureRoboImage(
                 filePath = "src/test/screenshots/mirror/mirror-${shot.name}-dark-fs$scale-land.png",
@@ -194,6 +228,8 @@ class MirrorScreenshotTest {
 
     @Composable
     private fun Surface(name: String, state: MirrorUiState) {
+        // The real touch policy, so the ring the press draws is the one the app would.
+        val policy = androidx.compose.runtime.remember(state.touchMode) { MirrorTouchPolicy(mode = state.touchMode, tapSlopPx = 24f) }
         MirrorSurface(
             state = state,
             frames = if (state.phase is MirrorPhase.Connected || name == "link-lost") withPicture else withoutPicture,
@@ -203,7 +239,7 @@ class MirrorScreenshotTest {
             onTouchModeChange = {},
             onForgetCompanion = {},
             onNoticeShown = {},
-            onTouch = {},
+            onTouch = { policy.update(it) },
             forgetPending = name.startsWith("forget-pending"),
         )
     }
