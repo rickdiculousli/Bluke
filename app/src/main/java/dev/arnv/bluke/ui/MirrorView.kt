@@ -6,13 +6,19 @@ import android.os.Build
 import android.os.SystemClock
 import android.view.HapticFeedbackConstants
 import android.view.View
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.FiniteAnimationSpec
+import androidx.compose.animation.core.VisibilityThreshold
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.expandVertically
-import androidx.compose.animation.shrinkVertically
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -42,6 +48,7 @@ import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.selection.selectableGroup
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.foundation.text.selection.SelectionContainer
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -73,6 +80,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -105,6 +113,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
@@ -182,7 +191,7 @@ fun MirrorView(
         delay(undoWindowMillis)
         forgetPending = false
         controller.forgetCompanion()
-        // The notice with the Undo already said "Computer forgotten"; don't say it twice.
+        // The notice with the Undo already said Mirror forgot it; don't say it twice.
         controller.clearNotice()
     }
     DisposableEffect(controller) {
@@ -216,7 +225,7 @@ fun MirrorView(
 
 /**
  * The whole surface, drawn from [state] alone. [hapticsEnabled] is the app's haptics preference;
- * [forgetPending] shows "Computer forgotten" with an Undo while the forget waits out its window.
+ * [forgetPending] shows "Mirror forgot …" with an Undo while the forget waits out its window.
  */
 @Composable
 fun MirrorSurface(
@@ -237,7 +246,18 @@ fun MirrorSurface(
 ) {
     val haptics = rememberMirrorHaptics(hapticsEnabled)
     LaunchedEffect(state.notice) {
-        if (state.notice is MirrorNotice.WrongCode) haptics.reject()
+        when (state.notice) {
+            is MirrorNotice.WrongCode -> haptics.reject()
+            is MirrorNotice.Paired -> haptics.confirm()
+            else -> Unit
+        }
+    }
+    // The status card that spoke for each phase leaves when the picture arrives; say so once.
+    val view = LocalView.current
+    val liveFrom = (state.phase as? MirrorPhase.Connected)?.takeIf { it.hasFrame }?.companionName
+    LaunchedEffect(liveFrom) {
+        @Suppress("DEPRECATION") // No live region fits a one-off message about a card that just left.
+        if (liveFrom != null) view.announceForAccessibility("Streaming from $liveFrom")
     }
     Row(
         modifier = modifier
@@ -277,6 +297,7 @@ fun MirrorSurface(
                 MirrorNoticePill(
                     notice = state.notice,
                     forgetPending = forgetPending,
+                    pairedName = state.pairedName,
                     onShown = onNoticeShown,
                     onUndoForget = onUndoForget,
                 )
@@ -301,6 +322,12 @@ private class MirrorHaptics(private val view: View, private val enabled: Boolean
         else HapticFeedbackConstants.CLOCK_TICK,
     )
 
+    /** Pairing succeeded. */
+    fun confirm() = perform(
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) HapticFeedbackConstants.CONFIRM
+        else HapticFeedbackConstants.VIRTUAL_KEY,
+    )
+
     /** The computer sent a wrong pairing code. */
     fun reject() = perform(
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) HapticFeedbackConstants.REJECT
@@ -318,29 +345,35 @@ private fun rememberMirrorHaptics(enabled: Boolean): MirrorHaptics {
     return remember(view, enabled) { MirrorHaptics(view, enabled) }
 }
 
+/** Which Direct/Hover labels the rail has room for. The semantics carry both names either way. */
+private enum class ModeLabels { BOTH, SELECTED, NONE }
+
 /**
- * How the rail fits the height it has. Labelled shows the touch-mode labels; Compact drops them
- * (their semantics still carry the names) so every 48dp target fits a short landscape phone at
- * large font scales. [showName] adds the streaming computer's name under the readout when there's room.
+ * How the rail fits the height it has: the richest of these that fits, so the current mode's word
+ * and the streaming computer's name stay on screen at font scales 1.0 and 1.3 on a 360dp-high phone.
+ * [largeFps] sets the frame rate in labelLarge when there's room for it.
  */
-private data class RailLayout(val labelled: Boolean, val showName: Boolean, val edge: Dp)
+private data class RailLayout(val modeLabels: ModeLabels, val showName: Boolean, val largeFps: Boolean)
 
 @Composable
 private fun railLayout(available: Dp): RailLayout {
     val type = MaterialTheme.typography
     return with(LocalDensity.current) {
         val label = type.labelMedium.lineHeight.toDp()
-        val readoutTop = type.labelLarge.lineHeight.toDp()
+        val large = type.labelLarge.lineHeight.toDp()
         val name = type.labelSmall.lineHeight.toDp()
-        val targets = RAIL_TARGET * 3 // close, next mode, menu
-        // Labelled: 8dp edges, a divider, two labelled items, a two-line readout, 6 gaps.
-        val labelled = RAIL_EDGE * 2 + targets + 1.dp + (RAIL_ITEM_PILL + 8.dp + label) * 2 + readoutTop + label + RAIL_GAP * 6
-        // Compact: 4dp edges, no divider, two 48dp items, a smaller readout, 5 gaps.
-        val compact = RAIL_EDGE + targets + RAIL_TARGET * 2 + label * 2 + RAIL_GAP * 5
-        when {
-            available >= labelled -> RailLayout(labelled = true, showName = available >= labelled + name, edge = RAIL_EDGE)
-            else -> RailLayout(labelled = false, showName = available >= compact + name, edge = RAIL_EDGE / 2)
-        }
+        val labelledItem = RAIL_ITEM_PILL + 8.dp + label
+        // Close, next mode and the menu, three gaps in the top group, one each side of the readout.
+        val fixed = RAIL_TARGET * 3 + RAIL_GAP * 5
+        listOf(
+            RailLayout(ModeLabels.BOTH, showName = true, largeFps = true) to
+                fixed + labelledItem * 2 + large + label + name,
+            RailLayout(ModeLabels.SELECTED, showName = true, largeFps = false) to
+                fixed + labelledItem + RAIL_TARGET + label * 2 + name,
+            RailLayout(ModeLabels.SELECTED, showName = false, largeFps = false) to
+                fixed + labelledItem + RAIL_TARGET + label * 2,
+        ).firstOrNull { (_, height) -> height <= available }?.first
+            ?: RailLayout(ModeLabels.NONE, showName = false, largeFps = false)
     }
 }
 
@@ -355,10 +388,18 @@ private fun MirrorRail(
     onTouchModeChange: (MirrorTouchMode) -> Unit,
     onForgetCompanion: () -> Unit,
 ) {
+    // 88dp, wider only when large text needs it for a three-digit latency.
+    val measurer = rememberTextMeasurer()
+    val readoutStyle = MaterialTheme.typography.labelMedium
+    val density = LocalDensity.current
+    val railWidth = remember(measurer, readoutStyle, density) {
+        val widest = with(density) { measurer.measure(WIDEST_LATENCY, readoutStyle).size.width.toDp() }
+        maxOf(RAIL_WIDTH, widest + 16.dp)
+    }
     Surface(
         color = MaterialTheme.colorScheme.surfaceContainer,
         contentColor = MaterialTheme.colorScheme.onSurface,
-        modifier = Modifier.fillMaxHeight().width(88.dp),
+        modifier = Modifier.fillMaxHeight().width(railWidth),
     ) {
         BoxWithConstraints(
             Modifier
@@ -375,8 +416,7 @@ private fun MirrorRail(
                 modifier = Modifier
                     .fillMaxWidth()
                     .verticalScroll(rememberScrollState())
-                    .heightIn(min = maxHeight)
-                    .padding(vertical = layout.edge),
+                    .heightIn(min = maxHeight),
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.SpaceBetween,
             ) {
@@ -388,18 +428,13 @@ private fun MirrorRail(
                         Icon(Icons.Default.Close, contentDescription = "Close Mirror")
                     }
                     NextModeButton(
+                        railWidth = railWidth,
                         onClick = {
                             haptics.tick()
                             onNextMode()
                         },
                         onLongClick = onConfigureModes,
                     )
-                    if (layout.labelled) {
-                        HorizontalDivider(
-                            modifier = Modifier.width(48.dp),
-                            color = MaterialTheme.colorScheme.outlineVariant,
-                        )
-                    }
                     Column(
                         modifier = Modifier.selectableGroup(),
                         horizontalAlignment = Alignment.CenterHorizontally,
@@ -409,24 +444,25 @@ private fun MirrorRail(
                             if (mode != state.touchMode) haptics.tick()
                             onTouchModeChange(mode)
                         }
-                        TouchModeOption(
-                            mode = MirrorTouchMode.DIRECT,
-                            icon = Icons.Filled.TouchApp,
-                            label = "Direct",
-                            description = "Direct: touch presses, drag drags",
-                            selected = state.touchMode == MirrorTouchMode.DIRECT,
-                            labelled = layout.labelled,
-                            onSelect = onSelect,
-                        )
-                        TouchModeOption(
-                            mode = MirrorTouchMode.HOVER,
-                            icon = Icons.Filled.Mouse,
-                            label = "Hover",
-                            description = "Hover: touch moves the pointer, tap clicks",
-                            selected = state.touchMode == MirrorTouchMode.HOVER,
-                            labelled = layout.labelled,
-                            onSelect = onSelect,
-                        )
+                        listOf(
+                            Triple(MirrorTouchMode.DIRECT, Icons.Filled.TouchApp, "Direct" to "Direct: touch presses, drag drags"),
+                            Triple(MirrorTouchMode.HOVER, Icons.Filled.Mouse, "Hover" to "Hover: touch moves the pointer, tap clicks"),
+                        ).forEach { (mode, icon, words) ->
+                            val selected = state.touchMode == mode
+                            TouchModeOption(
+                                mode = mode,
+                                icon = icon,
+                                label = words.first,
+                                description = words.second,
+                                selected = selected,
+                                labelled = when (layout.modeLabels) {
+                                    ModeLabels.BOTH -> true
+                                    ModeLabels.SELECTED -> selected
+                                    ModeLabels.NONE -> false
+                                },
+                                onSelect = onSelect,
+                            )
+                        }
                     }
                 }
                 Column(
@@ -434,7 +470,7 @@ private fun MirrorRail(
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.spacedBy(RAIL_GAP),
                 ) {
-                    LinkReadout(state, compact = !layout.labelled, showName = layout.showName)
+                    LinkReadout(state, largeFps = layout.largeFps, showName = layout.showName)
                     MirrorMenu(state, onForgetCompanion)
                 }
             }
@@ -443,16 +479,25 @@ private fun MirrorRail(
 }
 
 /**
- * The current mode, Mirror, as a button that moves to the next one: outlined with a "▸" so it
- * reads as a step forward, not as a third option beside Direct and Hover.
+ * The current mode, Mirror, as a button that moves to the next one: an outlined "Mirror ▸" so it
+ * reads as a step forward, not as a third option beside Direct and Hover. When the word doesn't fit
+ * the rail (large font scales), a screen glyph stands in for it.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun NextModeButton(onClick: () -> Unit, onLongClick: () -> Unit) {
+private fun NextModeButton(railWidth: Dp, onClick: () -> Unit, onLongClick: () -> Unit) {
     val interaction = remember { MutableInteractionSource() }
+    val style = MaterialTheme.typography.labelMedium
+    val measurer = rememberTextMeasurer()
+    val density = LocalDensity.current
+    val wordFits = remember(measurer, style, density, railWidth) {
+        val word = with(density) { measurer.measure(MIRROR_WORD, style).size.width.toDp() }
+        NEXT_PILL_START + word + NEXT_ARROW + NEXT_PILL_END <= railWidth - 16.dp
+    }
     Box(
         modifier = Modifier
-            .size(width = RAIL_ITEM_WIDTH, height = RAIL_TARGET)
+            .fillMaxWidth()
+            .heightIn(min = RAIL_TARGET)
             .combinedClickable(
                 interactionSource = interaction,
                 indication = null,
@@ -462,30 +507,36 @@ private fun NextModeButton(onClick: () -> Unit, onLongClick: () -> Unit) {
                 onClick = onClick,
                 onLongClick = onLongClick,
             )
-            .semantics { contentDescription = "Mirror" }
+            .semantics { contentDescription = MIRROR_WORD }
             .testTag("mirror_mode_cycle_btn"),
         contentAlignment = Alignment.Center,
     ) {
         Row(
             modifier = Modifier
-                .size(width = 56.dp, height = RAIL_ITEM_PILL)
+                .heightIn(min = RAIL_ITEM_PILL)
+                .widthIn(min = 56.dp)
                 .clip(MaterialTheme.shapes.large)
                 .border(1.dp, MaterialTheme.colorScheme.outline, MaterialTheme.shapes.large)
-                .indication(interaction, ripple()),
+                .indication(interaction, ripple())
+                .padding(start = if (wordFits) NEXT_PILL_START else 12.dp, end = NEXT_PILL_END),
             horizontalArrangement = Arrangement.Center,
             verticalAlignment = Alignment.CenterVertically,
         ) {
-            Icon(
-                Icons.Filled.DesktopWindows,
-                contentDescription = null,
-                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(20.dp),
-            )
+            if (wordFits) {
+                Text(MIRROR_WORD, style = style, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1)
+            } else {
+                Icon(
+                    Icons.Filled.DesktopWindows,
+                    contentDescription = null,
+                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.size(20.dp),
+                )
+            }
             Icon(
                 Icons.AutoMirrored.Filled.ArrowRight,
                 contentDescription = null,
                 tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.size(18.dp),
+                modifier = Modifier.size(NEXT_ARROW),
             )
         }
     }
@@ -493,7 +544,7 @@ private fun NextModeButton(onClick: () -> Unit, onLongClick: () -> Unit) {
 
 /**
  * Direct or Hover, as a navigation-rail item: the ripple is clipped to the pill indicator, and the
- * label sits under it only when [labelled].
+ * label sits under it while [labelled], growing in when the selection brings it.
  */
 @Composable
 private fun TouchModeOption(
@@ -510,7 +561,7 @@ private fun TouchModeOption(
     val content = if (selected) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant
     Column(
         modifier = Modifier
-            .width(RAIL_ITEM_WIDTH)
+            .fillMaxWidth()
             .heightIn(min = RAIL_TARGET)
             .selectable(
                 selected = selected,
@@ -534,7 +585,11 @@ private fun TouchModeOption(
         ) {
             Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(24.dp))
         }
-        if (labelled) {
+        AnimatedVisibility(
+            visible = labelled,
+            enter = fadeIn(EffectsSpring) + expandVertically(SpatialSizeSpring),
+            exit = fadeOut(EffectsSpring) + shrinkVertically(SpatialSizeSpring),
+        ) {
             Text(
                 text = label,
                 style = MaterialTheme.typography.labelMedium,
@@ -552,27 +607,29 @@ private fun TouchModeOption(
  * (with [showName]) which computer it comes from. TalkBack reads it once, as one sentence.
  */
 @Composable
-private fun LinkReadout(state: MirrorUiState, compact: Boolean, showName: Boolean) {
+private fun LinkReadout(state: MirrorUiState, largeFps: Boolean, showName: Boolean) {
     val phase = state.phase
     val connected = phase as? MirrorPhase.Connected
-    val fps = if (connected != null) "${state.fps} fps" else "– fps"
+    // No rate until there's a picture to have a rate.
+    val fps = if (phase.isLive) "${state.fps} fps" else "– fps"
     val latency = state.latencyMs?.takeIf { connected != null }?.let { "$it ms" } ?: "– ms"
     Column(
         horizontalAlignment = Alignment.CenterHorizontally,
         modifier = Modifier
-            .width(80.dp)
+            .fillMaxWidth()
+            .padding(horizontal = 2.dp)
             .clearAndSetSemantics {
-                contentDescription = if (connected != null) {
-                    "Streaming from ${connected.companionName}, $fps, link latency $latency"
-                } else {
-                    "Not streaming"
+                contentDescription = when {
+                    connected == null -> "Not streaming"
+                    phase.isLive -> "Streaming from ${connected.companionName}, $fps, link latency $latency"
+                    else -> "Connected to ${connected.companionName}, waiting for the first picture"
                 }
             }
             .testTag("mirror_link_readout"),
     ) {
         Text(
             fps,
-            style = if (compact) MaterialTheme.typography.labelMedium else MaterialTheme.typography.labelLarge,
+            style = if (largeFps) MaterialTheme.typography.labelLarge else MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurface,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
@@ -591,13 +648,13 @@ private fun LinkReadout(state: MirrorUiState, compact: Boolean, showName: Boolea
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.testTag("mirror_readout_name"),
+                modifier = Modifier.padding(horizontal = 4.dp).testTag("mirror_readout_name"),
             )
         }
     }
 }
 
-/** ⋮: which computer this is, then Forget. */
+/** ⋮: which computer this is, then Forget, which touches only Mirror's pairing. */
 @Composable
 private fun MirrorMenu(state: MirrorUiState, onForgetCompanion: () -> Unit) {
     var menuOpen by remember { mutableStateOf(false) }
@@ -609,8 +666,8 @@ private fun MirrorMenu(state: MirrorUiState, onForgetCompanion: () -> Unit) {
             val paired = state.pairedName
             val connectedTo = (state.phase as? MirrorPhase.Connected)?.companionName
             val status = when {
-                connectedTo != null -> "Connected to $connectedTo"
-                paired != null -> "Paired with $paired, not connected"
+                connectedTo != null -> "Mirror is connected to $connectedTo"
+                paired != null -> "Mirror is paired with $paired, not connected"
                 else -> null
             }
             if (status != null) {
@@ -626,7 +683,20 @@ private fun MirrorMenu(state: MirrorUiState, onForgetCompanion: () -> Unit) {
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             }
             DropdownMenuItem(
-                text = { Text(if (paired != null) "Forget $paired" else "No computer paired") },
+                text = {
+                    if (paired != null) {
+                        Column(Modifier.widthIn(max = 256.dp)) {
+                            Text("Forget for Mirror")
+                            Text(
+                                "Bluetooth pairing isn't touched",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                        }
+                    } else {
+                        Text("No computer paired")
+                    }
+                },
                 enabled = paired != null,
                 onClick = {
                     menuOpen = false
@@ -643,7 +713,8 @@ private data class TouchMark(val x: Float, val y: Float, val held: Boolean)
 /**
  * The mirrored picture and the touch layer over it; both use the same [MirrorFit]. A ring marks
  * each finger in the same frame it lands, before the computer's next picture can: filled while
- * Direct holds the button, hollow in Hover and while two fingers scroll.
+ * Direct holds the button, hollow in Hover and while two fingers scroll. It's wider than a fingertip
+ * so it shows around a resting finger, and fades briefly after the lift so a quick tap still shows.
  */
 @Composable
 private fun MirrorImage(
@@ -668,10 +739,21 @@ private fun MirrorImage(
     val currentOnTouch by rememberUpdatedState(onTouch)
     // Read only while drawing, so a moving finger redraws the image without recomposing it.
     val marks = remember { mutableStateOf(emptyList<TouchMark>()) }
+    // The marks a lift left behind, fading; a new touch replaces them at once.
+    val lifted = remember { mutableStateOf(emptyList<TouchMark>()) }
+    val liftAlpha = remember { Animatable(0f) }
+    val lifts = remember { mutableIntStateOf(0) }
+    LaunchedEffect(lifts.intValue) {
+        if (lifts.intValue == 0) return@LaunchedEffect
+        liftAlpha.snapTo(1f)
+        liftAlpha.animateTo(0f, FastEffectsSpring)
+    }
+    // The stale picture dims as the status card fades in over it, and clears as it fades out.
+    val dimAlpha = animateFloatAsState(if (live) 0f else DIM_ALPHA, EffectsSpring, label = "mirrorDim")
     LaunchedEffect(fit, origin) {
         fit?.let { onImagePlaced(floatArrayOf(origin.x + it.left, origin.y + it.top, origin.x + it.left + it.width, origin.y + it.top + it.height)) }
     }
-    val dim = MaterialTheme.colorScheme.scrim.copy(alpha = 0.6f)
+    val scrim = MaterialTheme.colorScheme.scrim
     val ring = MaterialTheme.colorScheme.onSurface
     val ringFill = ring.copy(alpha = 0.35f)
     val halo = MaterialTheme.colorScheme.scrim.copy(alpha = 0.5f)
@@ -680,6 +762,8 @@ private fun MirrorImage(
             .fillMaxSize()
             .onSizeChanged { surfaceSize = it }
             .onGloballyPositioned { origin = it.positionInWindow() }
+            // A drag that reaches the screen's edge moves the picture's pointer, not Back.
+            .then(if (live) Modifier.systemGestureExclusion() else Modifier)
             .drawBehind {
                 val seq = frames.frameSeq.value
                 val image = frames.currentFrame() ?: return@drawBehind
@@ -700,16 +784,19 @@ private fun MirrorImage(
                         )
                     }
                 }
-                if (!currentLive) {
-                    drawRect(dim)
-                } else {
+                dimAlpha.value.takeIf { it > 0f }?.let { drawRect(scrim.copy(alpha = it)) }
+                if (currentLive) {
                     val radius = TOUCH_RING_RADIUS.toPx()
-                    marks.value.forEach { mark ->
-                        val center = Offset(mark.x, mark.y)
-                        // The halo keeps the ring readable on a light picture as well as a dark one.
-                        drawCircle(halo, radius, center, style = Stroke(4.dp.toPx()))
-                        if (mark.held) drawCircle(ringFill, radius, center)
-                        drawCircle(ring, radius, center, style = Stroke(2.dp.toPx()))
+                    val (shown, alpha) = marks.value.takeIf { it.isNotEmpty() }?.let { it to 1f }
+                        ?: (lifted.value to liftAlpha.value)
+                    if (alpha > 0f) {
+                        shown.forEach { mark ->
+                            val center = Offset(mark.x, mark.y)
+                            // The halo keeps the ring readable on a light picture as well as a dark one.
+                            drawCircle(halo, radius, center, alpha = alpha, style = Stroke(4.dp.toPx()))
+                            if (mark.held) drawCircle(ringFill, radius, center, alpha = alpha)
+                            drawCircle(ring, radius, center, alpha = alpha, style = Stroke(2.dp.toPx()))
+                        }
                     }
                 }
                 frames.onFrameDrawn(seq)
@@ -766,13 +853,18 @@ private fun MirrorImage(
                             val tapped = startedInside && !multi && !leftSlop && upAt - downAt < HOVER_TAP_TIMEOUT_MILLIS
                             if (tapped && currentMode == MirrorTouchMode.HOVER) currentHaptics.press()
                         }
-                        marks.value = if (active && startedInside) {
+                        val next = if (active && startedInside) {
                             pressed.map {
                                 TouchMark(it.position.x, it.position.y, held = !multi && currentMode == MirrorTouchMode.DIRECT)
                             }
                         } else {
                             emptyList()
                         }
+                        if (next.isEmpty() && marks.value.isNotEmpty()) {
+                            lifted.value = marks.value
+                            lifts.intValue++
+                        }
+                        marks.value = next
                     }
                 }
             }
@@ -789,8 +881,8 @@ private fun MirrorOverlay(state: MirrorUiState, hasStaleFrame: Boolean, modifier
     val maxCardWidth = 440.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
     AnimatedVisibility(
         visible = !phase.isLive,
-        enter = fadeIn(tween(FADE_IN_MILLIS)),
-        exit = fadeOut(tween(FADE_OUT_MILLIS)),
+        enter = fadeIn(EffectsSpring),
+        exit = fadeOut(EffectsSpring),
         modifier = modifier,
     ) {
         BoxWithConstraints(Modifier.fillMaxSize().padding(vertical = 4.dp), contentAlignment = Alignment.Center) {
@@ -801,21 +893,47 @@ private fun MirrorOverlay(state: MirrorUiState, hasStaleFrame: Boolean, modifier
                 modifier = Modifier
                     .widthIn(max = maxCardWidth)
                     .heightIn(max = maxHeight)
-                    .animateContentSize(tween(RESIZE_MILLIS))
                     .semantics { liveRegion = LiveRegionMode.Polite }
                     .testTag("mirror_status_card"),
             ) {
-                Column(
-                    modifier = Modifier
-                        .verticalScroll(rememberScrollState())
-                        .padding(horizontal = 24.dp, vertical = 20.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    StatusContent(state, hasStaleFrame)
+                // The card resizes on a spring while the old words fade out and the new ones in.
+                AnimatedContent(
+                    targetState = StatusShown(state, hasStaleFrame),
+                    contentKey = { it.key },
+                    transitionSpec = {
+                        (fadeIn(EffectsSpring) togetherWith fadeOut(EffectsSpring))
+                            .using(SizeTransform(clip = true) { _, _ -> SpatialSizeSpring })
+                    },
+                    contentAlignment = Alignment.Center,
+                    label = "mirrorStatus",
+                ) { shown ->
+                    Column(
+                        modifier = Modifier
+                            .verticalScroll(rememberScrollState())
+                            .padding(horizontal = 24.dp, vertical = 20.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        StatusContent(shown.state, shown.hasStaleFrame)
+                    }
                 }
             }
         }
     }
+}
+
+/** What the card shows; [key] changes only when the card says something different. */
+private data class StatusShown(val state: MirrorUiState, val hasStaleFrame: Boolean) {
+    val key: Any
+        get() = when (val phase = state.phase) {
+            is MirrorPhase.Waiting -> when {
+                phase.pairedName == null -> "unpaired"
+                hasStaleFrame -> "lost ${phase.pairedName}"
+                else -> "waiting ${phase.pairedName}"
+            }
+            is MirrorPhase.Pairing -> "pairing ${phase.code}"
+            is MirrorPhase.Connected -> "connected ${phase.companionName}"
+            else -> phase
+        }
 }
 
 @Composable
@@ -832,6 +950,7 @@ private fun StatusContent(state: MirrorUiState, hasStaleFrame: Boolean) {
                 Body("On the computer, in a terminal, run:")
                 Command("bluke-mirror pair")
                 PhoneAddressHint(state)
+                Body("No bluke-mirror yet? It's in the companion folder of Bluke's source; its README says how to build it.", muted = true)
             }
             // A picture from earlier this session means the link dropped, not that it never came.
             hasStaleFrame -> {
@@ -872,8 +991,9 @@ private fun StatusContent(state: MirrorUiState, hasStaleFrame: Boolean) {
             Body("Waiting for the first picture.", muted = true)
         }
         is MirrorPhase.Failed -> {
-            StatusHeader(Icons.Filled.ErrorOutline, "Mirror can't listen")
-            Body(phase.reason)
+            StatusHeader(Icons.Filled.ErrorOutline, "Mirror couldn't start")
+            Body("Close Mirror and open it again. If it keeps happening, restart the phone.")
+            Body(phase.reason, muted = true)
         }
     }
 }
@@ -933,14 +1053,15 @@ private fun PhoneAddressHint(state: MirrorUiState) {
 }
 
 /**
- * A one-line confirmation ("Paired with …", "Wrong code"), shown for a few seconds, or "Computer
- * forgotten" with an Undo while [forgetPending]. Touches pass through it to the picture, except on
+ * A one-line confirmation ("Paired with …", "Wrong code"), shown for a few seconds, or "Mirror
+ * forgot [pairedName]" with an Undo while [forgetPending]. Touches pass through it to the picture, except on
  * the Undo button.
  */
 @Composable
 private fun MirrorNoticePill(
     notice: MirrorNotice?,
     forgetPending: Boolean,
+    pairedName: String?,
     onShown: () -> Unit,
     onUndoForget: () -> Unit,
 ) {
@@ -953,7 +1074,7 @@ private fun MirrorNoticePill(
         }
     }
     val text = when {
-        forgetPending -> "Computer forgotten"
+        forgetPending -> pairedName?.let { "Mirror forgot $it" } ?: FORGOTTEN_TEXT
         notice != null -> notice.text()
         else -> null
     }
@@ -963,8 +1084,8 @@ private fun MirrorNoticePill(
     // Expanding as it fades lets the status card below glide to its new place instead of jumping.
     AnimatedVisibility(
         visible = text != null,
-        enter = fadeIn(tween(FADE_IN_MILLIS)) + expandVertically(tween(FADE_IN_MILLIS)),
-        exit = fadeOut(tween(FADE_OUT_MILLIS)) + shrinkVertically(tween(FADE_OUT_MILLIS)),
+        enter = fadeIn(EffectsSpring) + expandVertically(SpatialSizeSpring),
+        exit = fadeOut(EffectsSpring) + shrinkVertically(SpatialSizeSpring),
     ) {
         val (shownText, withUndo) = last[0] ?: return@AnimatedVisibility
         Row(
@@ -981,7 +1102,9 @@ private fun MirrorNoticePill(
                 shownText,
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.inverseOnSurface,
-                modifier = Modifier.padding(start = 16.dp, end = if (withUndo) 4.dp else 16.dp, top = 10.dp, bottom = 10.dp),
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false).padding(start = 16.dp, end = if (withUndo) 4.dp else 16.dp, top = 10.dp, bottom = 10.dp),
             )
             if (withUndo) {
                 TextButton(
@@ -1003,8 +1126,10 @@ private fun MirrorNotice.text(): String = when (this) {
         1 -> "Wrong code. 1 try left."
         else -> "Wrong code. $attemptsLeft tries left."
     }
-    MirrorNotice.Forgotten -> "Computer forgotten"
+    MirrorNotice.Forgotten -> FORGOTTEN_TEXT
 }
+
+private const val FORGOTTEN_TEXT = "Mirror pairing removed"
 
 /** How long a notice stays: 3 s, longer when accessibility services ask for more time to act. */
 @Composable
@@ -1021,14 +1146,22 @@ private const val NOTICE_MILLIS = 3_000L
 /** MirrorTouchPolicy's default tap timeout: a Hover tap shorter than this clicks. */
 private const val HOVER_TAP_TIMEOUT_MILLIS = 400L
 
-// Fades for the status card and the notice; Compose scales them by the system animator scale.
-private const val FADE_IN_MILLIS = 180
-private const val FADE_OUT_MILLIS = 150
-private const val RESIZE_MILLIS = 200
+// Springs from M3's standard motion scheme: effects for fades, spatial for size. Compose scales
+// them by the system animator scale and snaps them when animations are off.
+private val EffectsSpring: FiniteAnimationSpec<Float> = spring(dampingRatio = 1f, stiffness = 1600f)
+private val FastEffectsSpring: FiniteAnimationSpec<Float> = spring(dampingRatio = 1f, stiffness = 3800f)
+private val SpatialSizeSpring: FiniteAnimationSpec<IntSize> =
+    spring(dampingRatio = 0.9f, stiffness = 700f, visibilityThreshold = IntSize.VisibilityThreshold)
 
+private const val DIM_ALPHA = 0.6f
+private const val MIRROR_WORD = "Mirror"
+private const val WIDEST_LATENCY = "999 ms"
+
+private val RAIL_WIDTH = 88.dp
 private val RAIL_TARGET = 48.dp
-private val RAIL_ITEM_WIDTH = 64.dp
 private val RAIL_ITEM_PILL = 32.dp
 private val RAIL_GAP = 8.dp
-private val RAIL_EDGE = 8.dp
-private val TOUCH_RING_RADIUS = 22.dp
+private val NEXT_PILL_START = 12.dp
+private val NEXT_PILL_END = 4.dp
+private val NEXT_ARROW = 18.dp
+private val TOUCH_RING_RADIUS = 35.dp
