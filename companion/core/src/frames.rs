@@ -21,11 +21,15 @@ pub struct Scaled {
     pub hash: u64,
 }
 
-/// A screen source. Implementations report their display's rect in global coordinates;
-/// the captured image may be larger (Retina pixels) and is scaled to fit.
+/// A screen source. Implementations report their display's rect in global coordinates.
 pub trait Capture {
     fn display(&self) -> Display;
-    fn grab(&mut self) -> Result<Image, String>;
+    /// One picture of the display. A source that can scale (on the GPU) returns it already
+    /// fitting `fit_in`; any other returns its full size (Retina pixels). Either way it is then
+    /// [`downscale`]d to fit.
+    fn grab(&mut self, fit_in: (u16, u16)) -> Result<Image, String>;
+    /// Which capture path grabs now, for the status line; it can change after a fallback.
+    fn backend(&self) -> &'static str;
 }
 
 /// The output size that fits `w`×`h` inside `max_w`×`max_h`, keeping the aspect ratio,

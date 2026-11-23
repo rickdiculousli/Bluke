@@ -40,7 +40,7 @@ impl Capture for Synthetic {
         Display { id: 1, x: -1920.0, y: 0.0, width: f64::from(WIDTH), height: f64::from(HEIGHT), name: "Synthetic".into() }
     }
 
-    fn grab(&mut self) -> Result<Image, String> {
+    fn grab(&mut self, _fit_in: (u16, u16)) -> Result<Image, String> {
         let g = self.generation();
         self.grabs += 1;
         let (w, h) = (WIDTH as usize, HEIGHT as usize);
@@ -58,5 +58,9 @@ impl Capture for Synthetic {
             }
         }
         Ok(Image { width: WIDTH, height: HEIGHT, stride: w * 4, rgba })
+    }
+
+    fn backend(&self) -> &'static str {
+        "synthetic"
     }
 }

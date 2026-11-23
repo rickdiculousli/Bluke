@@ -18,7 +18,7 @@ pub const LINK_SILENCE: Duration = Duration::from_secs(3);
 /// release or a status line is noticed. Phone bytes, finished captures and the next capture
 /// time all wake it sooner.
 const MAX_WAIT_US: u64 = 50_000;
-/// How often the status line prints frames per second.
+/// How often the status line prints frames per second and grab times.
 const STATUS_EVERY_US: u64 = 5_000_000;
 
 pub struct Options<'a> {
@@ -82,12 +82,30 @@ impl Injector for Counting<'_> {
     }
 }
 
-type Captured = Result<(Prepared, Display), String>;
+/// One capture's outcome, with how long the grab alone took and which path took it.
+struct Captured {
+    result: Result<(Prepared, Display), String>,
+    grab_us: u64,
+    backend: &'static str,
+}
 
 /// What wakes the session.
 enum Event {
     Net(Received),
     Captured(Captured),
+}
+
+/// The periodic status line: the frame rate since the last line, frames sent in all, and the
+/// capture path with its grab times since the last line (`grab_us` is sorted in place).
+pub fn status_line(fps: f64, sent: u64, backend: &str, grab_us: &mut [u64]) -> String {
+    let head = format!("{fps:.1} frames/s, {sent} sent");
+    if grab_us.is_empty() {
+        return format!("{head}; {backend}: no grabs");
+    }
+    grab_us.sort_unstable();
+    let ms = |us: u64| us as f64 / 1000.0;
+    let (median, max) = (grab_us[grab_us.len() / 2], grab_us[grab_us.len() - 1]);
+    format!("{head}; {backend} grab {:.1} ms median, {:.1} ms max", ms(median), ms(max))
 }
 
 impl From<Received> for Event {
@@ -114,11 +132,14 @@ fn spawn_capture(
         .spawn(move || {
             for r in req_rx {
                 let t = now_us();
-                let got = capture.grab().map(|img| {
+                let grabbed = capture.grab(r.max);
+                let grab_us = now_us().saturating_sub(t);
+                let backend = capture.backend();
+                let result = grabbed.map(|img| {
                     let scaled = downscale(&img, r.max.0, r.max.1);
                     (Prepared::prepare(&scaled, t, r.unchanged_from, encoder.as_mut()), capture.display())
                 });
-                if events.send(Event::Captured(got)).is_err() {
+                if events.send(Event::Captured(Captured { result, grab_us, backend })).is_err() {
                     break;
                 }
             }
@@ -151,6 +172,8 @@ pub fn run(
     let mut last_rx = now_us();
     let mut status_at = (now_us(), 0u64);
     let mut capture_pending = false;
+    let mut backend = capture.backend();
+    let mut grab_us: Vec<u64> = Vec::new();
     let end = 'session: {
         if let Err(e) = link.send(&hello).and_then(|()| link.spawn_reader(events_tx.clone())) {
             break 'session End::Io(e);
@@ -198,19 +221,22 @@ pub fn run(
                         }
                     }
                 }
-                Ok(Event::Captured(Ok((frame, display)))) => {
+                Ok(Event::Captured(c)) => {
                     capture_pending = false;
-                    let mut out: Vec<Message> = session.set_display(display).into_iter().collect();
-                    out.extend(session.offer_frame(now_us(), frame));
-                    for o in out {
-                        if let Err(e) = link.send(&o) {
-                            break 'session End::Io(e);
+                    backend = c.backend;
+                    grab_us.push(c.grab_us);
+                    match c.result {
+                        Ok((frame, display)) => {
+                            let mut out: Vec<Message> = session.set_display(display).into_iter().collect();
+                            out.extend(session.offer_frame(now_us(), frame));
+                            for o in out {
+                                if let Err(e) = link.send(&o) {
+                                    break 'session End::Io(e);
+                                }
+                            }
                         }
+                        Err(e) => status(&format!("capture failed ({backend}): {e}")),
                     }
-                }
-                Ok(Event::Captured(Err(e))) => {
-                    capture_pending = false;
-                    status(&format!("capture failed: {e}"));
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}
                 Err(mpsc::RecvTimeoutError::Disconnected) => {
@@ -229,7 +255,8 @@ pub fn run(
             if now - status_at.0 >= STATUS_EVERY_US {
                 let sent = session.stats.frames_sent;
                 let fps = (sent - status_at.1) as f64 * 1e6 / (now - status_at.0) as f64;
-                status(&format!("{fps:.1} frames/s, {sent} sent"));
+                status(&status_line(fps, sent, backend, &mut grab_us));
+                grab_us.clear();
                 status_at = (now, sent);
             }
         }

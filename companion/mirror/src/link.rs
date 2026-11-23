@@ -67,7 +67,13 @@ impl Link {
             .and_then(|c| c.first())
             .ok_or_else(|| io::Error::new(io::ErrorKind::PermissionDenied, "peer presented no certificate"))?;
         let peer = fingerprint(cert);
-        Ok(Link { tls, sock, plain: Vec::new(), pending: VecDeque::new(), peer })
+        let mut link = Link { tls, sock, plain: Vec::new(), pending: VecDeque::new(), peer };
+        // The peer's first message can arrive in the same read as its last handshake flight;
+        // the handshake loop then left it inside rustls, where a socket read would never see it.
+        let mut early = Vec::new();
+        link.absorb(&mut early)?;
+        link.pending.extend(early);
+        Ok(link)
     }
 
     /// The fingerprint of the certificate the peer presented in this session.
@@ -151,9 +157,10 @@ impl Link {
         Ok(())
     }
 
-    /// Feeds bytes the reader thread read and returns every whole message they complete.
+    /// Feeds bytes the reader thread read and returns every whole message they complete,
+    /// after any that arrived with the handshake.
     pub fn ingest(&mut self, mut bytes: &[u8]) -> io::Result<Vec<Message>> {
-        let mut out = Vec::new();
+        let mut out: Vec<Message> = self.pending.drain(..).collect();
         while !bytes.is_empty() {
             self.tls.read_tls(&mut bytes)?;
             self.absorb(&mut out)?;

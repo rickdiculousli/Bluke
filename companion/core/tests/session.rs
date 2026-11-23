@@ -58,7 +58,7 @@ fn unpinned_or_mismatched_peer_gets_nothing() {
 fn nothing_is_sent_or_injected_before_welcome() {
     let (mut s, _) = Session::start("Mac", display(), Some(PHONE), PHONE, 0).expect("pinned");
     let mut cap = Synthetic::new(Schedule::Every(1));
-    let frame = downscale(&cap.grab().expect("grab"), 480, 480);
+    let frame = downscale(&cap.grab((480, 480)).expect("grab"), 480, 480);
     assert!(!s.wants_frame(0));
     assert_eq!(offer(&mut s, 0, &frame), None);
     let mut rec = Vec::new();
@@ -188,7 +188,7 @@ fn frame_acks_alone_dont_keep_a_held_button() {
     let mut cap = Synthetic::new(Schedule::Every(1));
     let mut acked_at = t0;
     for t in (t0 + 50_000..t0 + SILENCE_RELEASE_US).step_by(50_000) {
-        let f = downscale(&cap.grab().expect("grab"), 480, 480);
+        let f = downscale(&cap.grab((480, 480)).expect("grab"), 480, 480);
         if let Some(Message::Frame { seq, .. }) = offer(&mut s, t, &f) {
             s.on_message(t + 10_000, Message::FrameAck { seq, decode_us: 3_000 }, &mut rec).expect("ack");
             acked_at = t + 10_000;
@@ -204,9 +204,10 @@ fn frame_acks_alone_dont_keep_a_held_button() {
 
 #[test]
 fn each_main_thread_message_keeps_a_held_button() {
-    for (i, live) in [Message::Pointer { x: 9, y: 9, buttons: 1 }, Message::Wheel { dx: 0, dy: 1 }, Message::Heartbeat, Message::Ping { t_us: 5 }]
-        .into_iter()
-        .enumerate()
+    for (i, live) in
+        [Message::Pointer { x: 9, y: 9, buttons: 1 }, Message::Wheel { dx: 0, dy: 1 }, Message::Heartbeat, Message::Ping { t_us: 5 }]
+            .into_iter()
+            .enumerate()
     {
         let mut s = started(0);
         let mut rec = Vec::new();
@@ -238,7 +239,7 @@ fn unchanged_frames_send_nothing() {
     let mut sent = 0;
     let mut t = 0;
     for _ in 0..10 {
-        let f = downscale(&cap.grab().expect("grab"), 480, 480);
+        let f = downscale(&cap.grab((480, 480)).expect("grab"), 480, 480);
         if let Some(Message::Frame { seq, .. }) = offer(&mut s, t, &f) {
             sent += 1;
             s.on_message(t, Message::FrameAck { seq, decode_us: 1 }, &mut Vec::new()).expect("ack");
@@ -255,7 +256,7 @@ fn changing_frames_send_on_their_schedule() {
     let mut cap = Synthetic::new(Schedule::Every(3));
     let mut seqs = Vec::new();
     for i in 0..9u64 {
-        let f = downscale(&cap.grab().expect("grab"), 480, 480);
+        let f = downscale(&cap.grab((480, 480)).expect("grab"), 480, 480);
         assert_eq!((f.width, f.height), (480, 270));
         if let Some(Message::Frame { seq, width, height, sent_us, .. }) = offer(&mut s, i * 50_000, &f) {
             assert_eq!((width, height, sent_us), (480, 270, i * 50_000));
@@ -274,7 +275,7 @@ fn credit_never_exceeds_two_and_acks_are_cumulative() {
     let mut t = 0;
     let mut sent = Vec::new();
     for _ in 0..6 {
-        let f = downscale(&cap.grab().expect("grab"), 480, 480);
+        let f = downscale(&cap.grab((480, 480)).expect("grab"), 480, 480);
         if let Some(Message::Frame { seq, .. }) = offer(&mut s, t, &f) {
             sent.push(seq);
         }
@@ -289,7 +290,7 @@ fn credit_never_exceeds_two_and_acks_are_cumulative() {
     assert_eq!(s.in_flight(), 0);
     assert_eq!(s.stats.frames_acked, 2);
     assert!(s.wants_frame(t));
-    let f = downscale(&cap.grab().expect("grab"), 480, 480);
+    let f = downscale(&cap.grab((480, 480)).expect("grab"), 480, 480);
     assert!(matches!(offer(&mut s, t, &f), Some(Message::Frame { seq: 2, .. })));
 
     // The credit counter alone: acks for unknown frames change nothing.
@@ -303,7 +304,7 @@ fn credit_never_exceeds_two_and_acks_are_cumulative() {
 fn frame_cap_paces_captures() {
     let mut s = started(0);
     let mut cap = Synthetic::new(Schedule::Every(1));
-    let f = downscale(&cap.grab().expect("grab"), 480, 480);
+    let f = downscale(&cap.grab((480, 480)).expect("grab"), 480, 480);
     assert!(s.wants_frame(0));
     let Some(Message::Frame { seq, .. }) = offer(&mut s, 0, &f) else { panic!("frame") };
     s.on_message(0, Message::FrameAck { seq, decode_us: 1 }, &mut Vec::new()).expect("ack");
@@ -315,7 +316,7 @@ fn frame_cap_paces_captures() {
 fn display_change_is_announced_and_resends_the_frame() {
     let mut s = started(0);
     let mut cap = Synthetic::new(Schedule::Static);
-    let f = downscale(&cap.grab().expect("grab"), 480, 480);
+    let f = downscale(&cap.grab((480, 480)).expect("grab"), 480, 480);
     let Some(Message::Frame { seq, .. }) = offer(&mut s, 0, &f) else { panic!("frame") };
     s.on_message(0, Message::FrameAck { seq, decode_us: 1 }, &mut Vec::new()).expect("ack");
     assert_eq!(s.set_display(display()), None, "same display, nothing to say");
@@ -392,7 +393,7 @@ fn an_unchanged_capture_is_not_encoded_and_sent_frames_time_capture_to_send() {
     let mut s = started(0);
     let mut cap = Synthetic::new(Schedule::Static);
     let mut enc = CountingJpeg::default();
-    let f = downscale(&cap.grab().expect("grab"), 480, 480);
+    let f = downscale(&cap.grab((480, 480)).expect("grab"), 480, 480);
     // Grabbed at 1000, sent at 4500: 3.5 ms from capture start to sent.
     let p = Prepared::prepare(&f, 1_000, s.last_sent_hash(), &mut enc);
     let Some(Message::Frame { seq, .. }) = s.offer_frame(4_500, p) else { panic!("frame") };
@@ -410,7 +411,7 @@ fn an_unchanged_capture_is_not_encoded_and_sent_frames_time_capture_to_send() {
 fn an_unencoded_capture_overtaken_by_a_display_change_is_retaken_at_once() {
     let mut s = started(0);
     let mut cap = Synthetic::new(Schedule::Static);
-    let f = downscale(&cap.grab().expect("grab"), 480, 480);
+    let f = downscale(&cap.grab((480, 480)).expect("grab"), 480, 480);
     let Some(Message::Frame { seq, .. }) = offer(&mut s, 0, &f) else { panic!("frame") };
     s.on_message(0, Message::FrameAck { seq, decode_us: 1 }, &mut Vec::new()).expect("ack");
     // Requested while the hash still matched, so the capture thread didn't encode it...
