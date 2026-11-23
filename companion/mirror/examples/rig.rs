@@ -26,8 +26,9 @@ Usage:
   --seconds      how long to stream (default 10)
   --stop-on-eof  also stop, and print the summary, when stdin closes (after the code, with --pair)
 
-At exit prints one JSON line: frames sent and acked, frame send-to-ack and pointer
-read-to-inject latencies in ms (count, p50, p95, max).
+At exit prints one JSON line: frames sent and acked, and in ms (count, p50, p95, max) frame
+send-to-ack (frame_ack_ms), pointer read-to-inject (inject_ms) and frame capture-start-to-sent
+(capture_to_sent_ms: grab, downscale, encode and the wait for the session to send it).
 ";
 
 const RETRY: Duration = Duration::from_millis(500);
@@ -169,7 +170,7 @@ fn main() -> ExitCode {
     }
     let stop = &STOP;
     let (mut sent, mut acked, mut sessions) = (0u64, 0u64, 0u32);
-    let (mut ack_us, mut inject_us) = (Vec::new(), Vec::new());
+    let (mut ack_us, mut inject_us, mut capture_us) = (Vec::new(), Vec::new(), Vec::new());
     let mut last_end = String::from("never connected");
     while now_us() < deadline && !stop.load(Ordering::Relaxed) {
         let link = match Link::connect(args.phone, &id) {
@@ -183,11 +184,13 @@ fn main() -> ExitCode {
         sessions += 1;
         let opts = session::Options { name: "bluke-mirror rig".into(), stop, until_us: Some(deadline) };
         let capture = Box::new(Synthetic::new(Schedule::Every(1)));
-        let report =
-            session::run(link, Some(pinned), capture, injector.as_mut(), &mut jpeg::Jpeg::default(), &opts, &mut |s| eprintln!("rig: {s}"));
+        let report = session::run(link, Some(pinned), capture, injector.as_mut(), Box::new(jpeg::Jpeg::default()), &opts, &mut |s| {
+            eprintln!("rig: {s}")
+        });
         sent += report.stats.frames_sent;
         acked += report.stats.frames_acked;
         ack_us.extend(report.stats.ack_latency_us);
+        capture_us.extend(report.stats.capture_to_sent_us);
         inject_us.extend(report.inject_latency_us);
         last_end = report.end.to_string();
         eprintln!("rig: session ended: {last_end}");
@@ -196,9 +199,10 @@ fn main() -> ExitCode {
         }
     }
     println!(
-        "{{\"sessions\": {sessions}, \"frames_sent\": {sent}, \"frames_acked\": {acked}, \"frame_ack_ms\": {}, \"inject_ms\": {}, \"end\": {}}}",
+        "{{\"sessions\": {sessions}, \"frames_sent\": {sent}, \"frames_acked\": {acked}, \"frame_ack_ms\": {}, \"inject_ms\": {}, \"capture_to_sent_ms\": {}, \"end\": {}}}",
         summary(&mut ack_us),
         summary(&mut inject_us),
+        summary(&mut capture_us),
         json_str(&last_end)
     );
     if sessions == 0 { ExitCode::FAILURE } else { ExitCode::SUCCESS }

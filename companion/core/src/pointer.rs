@@ -117,7 +117,9 @@ impl Buttons {
             }
             (true, true) => inj.inject(InputEvent::Drag { x, y }),
             (true, false) => {
-                inj.inject(InputEvent::Drag { x, y });
+                if self.last != Some((x, y)) {
+                    inj.inject(InputEvent::Drag { x, y });
+                }
                 inj.inject(InputEvent::Up { x, y });
             }
         }

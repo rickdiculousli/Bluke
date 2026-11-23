@@ -146,3 +146,24 @@ pub trait FrameEncoder {
     fn codec(&self) -> u8;
     fn encode(&mut self, frame: &Scaled) -> Vec<u8>;
 }
+
+/// One capture made ready to offer, off the session's thread: downscaled, hashed, and
+/// encoded unless it matched the frame last sent.
+#[derive(Clone, Debug)]
+pub struct Prepared {
+    pub width: u16,
+    pub height: u16,
+    pub hash: u64,
+    /// When the grab started, on the session's clock (µs).
+    pub captured_us: u64,
+    /// `(codec, bytes)`, or `None` when the hash matched `unchanged_from` and nothing was encoded.
+    pub encoded: Option<(u8, Vec<u8>)>,
+}
+
+impl Prepared {
+    /// Encodes `frame` unless its hash is `unchanged_from` (pass [`crate::session::Session::last_sent_hash`]).
+    pub fn prepare(frame: &Scaled, captured_us: u64, unchanged_from: Option<u64>, enc: &mut dyn FrameEncoder) -> Prepared {
+        let encoded = (unchanged_from != Some(frame.hash)).then(|| (enc.codec(), enc.encode(frame)));
+        Prepared { width: frame.width, height: frame.height, hash: frame.hash, captured_us, encoded }
+    }
+}

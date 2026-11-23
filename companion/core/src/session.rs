@@ -2,7 +2,7 @@
 //! downscaled frames; it returns the messages to send and drives the injector.
 
 use crate::codec::{CODEC_JPEG, Message, VERSION, clip_str};
-use crate::frames::{FrameCredit, FrameEncoder, Scaled};
+use crate::frames::{FrameCredit, Prepared};
 use crate::pairing::Fingerprint;
 use crate::pointer::{Buttons, Display, Injector};
 
@@ -61,6 +61,8 @@ pub struct Stats {
     pub skipped_no_credit: u64,
     /// Send-to-ack time of every acknowledged frame, µs.
     pub ack_latency_us: Vec<u64>,
+    /// Capture-start-to-sent time of every frame sent (grab, downscale, encode, wait), µs.
+    pub capture_to_sent_us: Vec<u64>,
 }
 
 pub struct Session {
@@ -172,31 +174,49 @@ impl Session {
         }
     }
 
-    /// True when a capture now could be sent: welcomed, at the frame cap, with credit.
-    pub fn wants_frame(&self, now_us: u64) -> bool {
-        self.welcome.is_some() && now_us >= self.next_capture_us && self.credit.can_send()
+    /// When a capture could next be sent, if one could at all now: welcomed and with credit.
+    /// Without credit it waits for a `FrameAck`, not for time.
+    pub fn next_frame_at(&self) -> Option<u64> {
+        (self.welcome.is_some() && self.credit.can_send()).then_some(self.next_capture_us)
     }
 
-    /// Offers one downscaled capture. Returns the `Frame` to send, or `None` when there is no
+    /// True when a capture now could be sent: welcomed, at the frame cap, with credit.
+    pub fn wants_frame(&self, now_us: u64) -> bool {
+        self.next_frame_at().is_some_and(|t| now_us >= t)
+    }
+
+    /// The hash of the last frame sent, which a capture matching it needn't be encoded for.
+    pub fn last_sent_hash(&self) -> Option<u64> {
+        self.last_sent_hash
+    }
+
+    /// Offers one prepared capture. Returns the `Frame` to send, or `None` when there is no
     /// `Welcome` yet, no credit (the capture is skipped, never queued), or nothing changed.
-    pub fn offer_frame(&mut self, now_us: u64, frame: &Scaled, enc: &mut dyn FrameEncoder) -> Option<Message> {
+    /// A capture left unencoded that no longer matches the last frame sent (the display changed
+    /// meanwhile) is not counted against the frame cap, so the caller can capture again at once.
+    pub fn offer_frame(&mut self, now_us: u64, frame: Prepared) -> Option<Message> {
         let welcome = self.welcome?;
+        let changed = self.last_sent_hash != Some(frame.hash);
+        let Some((codec, data)) = frame.encoded.filter(|_| changed) else {
+            if changed {
+                return None;
+            }
+            self.next_capture_us = now_us + welcome.interval_us();
+            self.stats.skipped_unchanged += 1;
+            return None;
+        };
         self.next_capture_us = now_us + welcome.interval_us();
         if !self.credit.can_send() {
             self.stats.skipped_no_credit += 1;
             return None;
         }
-        if self.last_sent_hash == Some(frame.hash) {
-            self.stats.skipped_unchanged += 1;
-            return None;
-        }
-        let data = enc.encode(frame);
         let seq = self.next_seq;
         self.next_seq = self.next_seq.wrapping_add(1);
         self.credit.sent(seq, now_us);
         self.last_sent_hash = Some(frame.hash);
         self.stats.frames_sent += 1;
-        Some(Message::Frame { seq, codec: enc.codec(), width: frame.width, height: frame.height, sent_us: now_us, data })
+        self.stats.capture_to_sent_us.push(now_us.saturating_sub(frame.captured_us));
+        Some(Message::Frame { seq, codec, width: frame.width, height: frame.height, sent_us: now_us, data })
     }
 
     /// The mirrored display changed (size, place or identity). Returns the `Display` to send,
