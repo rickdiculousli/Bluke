@@ -907,7 +907,7 @@ class BluetoothKeyboardManager(private val context: Context) {
                     val hid = ensureHidReady()
                     val isCurrent = capabilityCheckGeneration.get() == generation
                     if (isCurrent) {
-            synchronized(capabilityCheckLock) {
+                        synchronized(capabilityCheckLock) {
                             if (capabilityCheckJob === coroutineContext[Job]) {
                                 capabilityCheckJob = null
                             }
