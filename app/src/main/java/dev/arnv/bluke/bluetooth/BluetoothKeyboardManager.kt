@@ -107,8 +107,11 @@ class BluetoothKeyboardManager(private val context: Context) {
             reportExecutor.submit {
                 if (closed || epoch != connectionEpoch.get() || hid !== hidDeviceProfile ||
                     _connectedDevice.value?.address != dev.address) return@submit
-                // Android reconnects to deliver a report, so a keepalive would reopen a link being closed.
-                if (isKeepAlive && (_hasPendingConnection.value || switchingGamepadDescriptor)) return@submit
+                // Android holds a report sent to a dropped host and reconnects to deliver it, so a keepalive
+                // must never outlive the link: not while it is changing, nor once the host has left but
+                // our callback hasn't arrived yet.
+                if (isKeepAlive && (_hasPendingConnection.value || switchingGamepadDescriptor ||
+                        hid.getConnectionState(dev) != BluetoothProfile.STATE_CONNECTED)) return@submit
                 try {
                     val accepted = hid.sendReport(dev, reportId, report)
                     if (DeveloperLogManager.isEnabled) {
@@ -1701,8 +1704,8 @@ class BluetoothKeyboardManager(private val context: Context) {
 
     private fun sendKeepAlive() {
         val dev = _connectedDevice.value ?: return
-        val report = synchronized(activeKeys) { keyboardReportLocked() }
-        submitReport(dev, KEYBOARD_REPORT_ID, report, isKeepAlive = true)
+        // Queued under the key lock, so a keepalive never lands after a newer key report with older state.
+        synchronized(activeKeys) { submitReport(dev, KEYBOARD_REPORT_ID, keyboardReportLocked(), isKeepAlive = true) }
     }
 
     private fun startKeepAlive() = synchronized(keepAliveLock) {
@@ -1790,11 +1793,13 @@ class BluetoothKeyboardManager(private val context: Context) {
     fun releaseAllInputs() {
         connectionEpoch.incrementAndGet() // Discard held-input reports that have not been sent yet.
         resetKeyboardState()
-        val device = _connectedDevice.value ?: return
-        submitReport(device, KEYBOARD_REPORT_ID, ByteArray(KEYBOARD_REPORT_SIZE))
-        sendMouseReport(0, 0, 0, 0)
-        sendGamepadReport(0, 0, 0f, 0f, 0f, 0f)
-        sendConsumerControl(null)
+        _connectedDevice.value?.let { device ->
+            submitReport(device, KEYBOARD_REPORT_ID, ByteArray(KEYBOARD_REPORT_SIZE))
+            sendMouseReport(0, 0, 0, 0)
+            sendGamepadReport(0, 0, 0f, 0f, 0f, 0f)
+            sendConsumerControl(null)
+        }
+        lastInputAt = Long.MIN_VALUE / 2 // Bluke is going out of use: let the link sleep.
     }
 
     @SuppressLint("MissingPermission")

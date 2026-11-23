@@ -33,6 +33,7 @@ HOST_NAME = "BlukeRigHost"
 TIMEOUT = 20.0
 
 DATA_INPUT = 0xA1  # HIDP DATA | INPUT report header
+KEYBOARD_IDLE = bytes([DATA_INPUT, 1]) + bytes(8)
 DATA_OUTPUT = 0xA2  # HIDP DATA | OUTPUT report header
 
 
@@ -107,7 +108,7 @@ class Host:
         self.device = device
         self.hid = hid.Host(device)
         self.reports: asyncio.Queue[bytes] = asyncio.Queue()
-        self.last_keyboard: bytes | None = None
+        self.last_keyboard = KEYBOARD_IDLE
         self.hid.on(hid.HID.EVENT_INTERRUPT_DATA, self.on_report)
 
     def on_report(self, pdu: bytes) -> None:
@@ -130,6 +131,8 @@ class Host:
             await asyncio.sleep(0.2)
 
     def drain(self) -> None:
+        # Called as a session starts, when a host sees every key up.
+        self.last_keyboard = KEYBOARD_IDLE
         while not self.reports.empty():
             self.reports.get_nowait()
 
