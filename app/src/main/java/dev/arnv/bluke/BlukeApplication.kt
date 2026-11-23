@@ -4,6 +4,7 @@ import android.app.Application
 import android.app.Activity
 import android.os.Bundle
 import dev.arnv.bluke.bluetooth.BluetoothKeyboardManager
+import dev.arnv.bluke.mirror.MirrorController
 import dev.arnv.bluke.utils.DeveloperLogManager
 
 class BlukeApplication : Application() {
@@ -11,6 +12,9 @@ class BlukeApplication : Application() {
         BluetoothKeyboardManager(applicationContext)
     }
     val bluetoothKeyboardManager: BluetoothKeyboardManager by bluetoothKeyboardManagerDelegate
+
+    /** Mirror's link to the bluke-mirror companion; it listens only while the Mirror surface is on screen. */
+    val mirrorController: MirrorController by lazy { MirrorController(applicationContext) }
 
     override fun onCreate() {
         super.onCreate()

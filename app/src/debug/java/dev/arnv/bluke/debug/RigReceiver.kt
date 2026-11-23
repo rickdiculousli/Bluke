@@ -13,7 +13,9 @@ import dev.arnv.bluke.bluetooth.ConsumerControl
 import dev.arnv.bluke.bluetooth.HID_DESCRIPTOR_REVISION_PREFERENCE
 import dev.arnv.bluke.bluetooth.GamepadDpadOutputMode
 import dev.arnv.bluke.bluetooth.numpadStroke
+import dev.arnv.bluke.ui.InputMode
 import dev.arnv.bluke.ui.TouchpadScroller
+import dev.arnv.bluke.ui.defaultInputModeKeys
 import dev.arnv.bluke.ui.TouchpadScrollSettings
 import org.json.JSONObject
 
@@ -195,6 +197,29 @@ class RigReceiver : BroadcastReceiver() {
                 result.put("ok", mode != null && manager.changeGamepadMode(mode))
             }
             "release" -> { manager.releaseAllInputs(); result.put("ok", true) }
+            "mirror" -> {
+                // tools/mirror-rig: open Mirror without taps through Settings, reach it over adb forward,
+                // and read what it shows (the pairing code, frames drawn, where the image sits).
+                val mirror = (context.applicationContext as BlukeApplication).mirrorController
+                when (intent.getStringExtra("action") ?: "state") {
+                    "setup" -> context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE).edit {
+                        putInt("launch_mode", InputMode.MIRROR.id)
+                        putStringSet("cycle_connection_modes", defaultInputModeKeys + InputMode.MIRROR.preferenceKey)
+                        putString("mirror_touch_mode", intent.getStringExtra("touch") ?: "DIRECT")
+                    }
+                    "loopback" -> mirror.setRigLoopback(true)
+                    "forget" -> mirror.forgetCompanion()
+                    else -> Unit
+                }
+                mirror.rigSnapshot().forEach { (key, value) ->
+                    result.put(key, when (value) {
+                        null -> JSONObject.NULL
+                        is List<*> -> org.json.JSONArray(value)
+                        else -> value
+                    })
+                }
+                result.put("ok", true)
+            }
             else -> result.put("ok", false).put("error", "unknown cmd")
         }
         setResultData(result.toString())

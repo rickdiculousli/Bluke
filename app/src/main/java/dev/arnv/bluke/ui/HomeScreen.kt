@@ -620,7 +620,7 @@ fun HomeScreen(
             }
 
             when (launchMode) {
-                1, 2, 4 -> {
+                1, 2, 4, 5 -> {
                     val darkScheme = darkColorScheme(
                         primary = MaterialTheme.colorScheme.primary,
                         background = Color(0xFF141218),
@@ -667,6 +667,15 @@ fun HomeScreen(
                                     },
                                     sharedPrefs = sharedPrefs,
                                     isConnected = isConnected,
+                                )
+                            }
+                            5 -> {
+                                MirrorView(
+                                    btManager = btManager,
+                                    onClose = { isKeyboardActive = false },
+                                    launchMode = launchMode,
+                                    onModeChange = { newMode -> switchInputMode(newMode) },
+                                    sharedPrefs = sharedPrefs,
                                 )
                             }
                         }
@@ -1279,6 +1288,7 @@ fun HomeScreen(
                                     1 -> Icons.Default.Mouse
                                     2 -> Icons.Default.SportsEsports
                                     4 -> Icons.Filled.SmartDisplay
+                                    5 -> Icons.Filled.DesktopWindows
                                     else -> Icons.Default.Keyboard
                                 }
                                 Icon(
@@ -1311,6 +1321,7 @@ fun HomeScreen(
                                     1 -> "Launch Touchpad"
                                     2 -> "Launch Gamepad"
                                     4 -> "Launch Multimedia"
+                                    5 -> "Launch Mirror"
                                     else -> "Launch Keyboard"
                                 }
                                 Icon(

@@ -1,6 +1,6 @@
 # Bluke
 
-Android app that registers the phone as a Bluetooth HID device (keyboard, touchpad, gamepad, multimedia remote) so a host uses it with no companion software. Personal fork of `arnav-kr/Bluke`; nothing goes upstream.
+Android app that registers the phone as a Bluetooth HID device (keyboard, touchpad, gamepad, multimedia remote) so a host uses it with no companion software. The one exception is Mirror (below), which needs a small companion on the computer. Personal fork of `arnav-kr/Bluke`; nothing goes upstream.
 
 ## Requirements
 
@@ -24,6 +24,18 @@ Release builds sign from the `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_ALIAS` and 
 - Developer options: tap the logo in Settings > About five times. Developer Logs there shows the in-app log, with Clear and Export.
 - Live logs over ADB: `adb logcat -s BlukeHID BlukeLifecycle`.
 - Logs carry the Bluetooth MAC address and raw keycodes.
+
+## Mirror
+
+Mirror shows a low-resolution live copy of the computer's screen on the phone. A finger on the image presses, drags and releases at that spot on the computer, which is how cards are dragged in a game like Slay the Spire. Direct mode presses on touch; Hover mode moves the pointer without pressing, so tooltips show, and a tap clicks.
+
+- It needs `bluke-mirror`, the companion in `companion/` (Rust). This version runs on macOS. Build it with `cargo build --release -p bluke-mirror` in `companion/` and run `bluke-mirror pair` once, then `bluke-mirror`. It needs Screen Recording and Accessibility (System Settings > Privacy & Security), granted to the terminal it runs in. A rebuilt unsigned binary can lose them, and it says which pane to open.
+- Frames and touches go over Wi-Fi, not Bluetooth. This is Bluke's only network access (the `INTERNET`, `ACCESS_NETWORK_STATE` and `WAKE_LOCK` permissions). The phone listens on its Wi-Fi address, on port 47800, only while Mirror is on screen, and holds a low-latency Wi-Fi lock for that time. The companion finds it over mDNS (`_bluke-mirror._tcp`) or `--phone <address>`, which Mirror shows.
+- Both devices must be on the same network. Guest Wi-Fi and access-point isolation block the link.
+- The link is TLS 1.3 between keys each side pinned at pairing. Pairing is a PAKE (SPAKE2) on a six-digit code the phone shows and you type into the companion. A new code is drawn per attempt, and three wrong codes close pairing until Mirror is reopened. Nothing but pairing messages is exchanged until each side has checked the other's pinned key.
+- The companion injects only pointer moves, the left button and the wheel, inside the mirrored display, never keys. It releases the button when the link drops, goes quiet for a second, or Mirror leaves the screen.
+- To forget a paired phone, delete `paired-phone` in the companion's config directory (`~/Library/Application Support/bluke-mirror/` on macOS, `~/.config/bluke-mirror/` elsewhere). To forget the computer on the phone, use Forget in Mirror's menu.
+- The protocol is `companion/PROTOCOL.md`. `cargo test -p bluke-mirror-core` in `companion/` tests the companion's core, and `tools/mirror-rig/run.sh` runs the companion's synthetic source against the app on the emulator.
 
 ## Host behavior that shapes the code
 
