@@ -78,4 +78,21 @@ class MirrorUiStateTest {
         MirrorUiState(phase = MirrorPhase.Waiting("Mac"), fps = 3, latencyMs = 5).readout(),
     )
   }
+
+  @Test
+  fun noPictureFiveSecondsAfterConnectingSaysToLookAtTheComputer() {
+    val justConnected = MirrorSessionFacts("Mac", null, hasFrame = false, connectedForMs = FIRST_PICTURE_WAIT_MS - 1)
+    assertEquals(false, (phase(session = justConnected) as MirrorPhase.Connected).pictureOverdue)
+    val overdue = phase(session = justConnected.copy(connectedForMs = FIRST_PICTURE_WAIT_MS))
+    assertEquals(true, (overdue as MirrorPhase.Connected).pictureOverdue)
+    assertFalse(overdue.isLive)
+    assertEquals(
+        MirrorReadout("– fps", "4 ms", "Connected to Mac, no picture yet"),
+        MirrorUiState(phase = overdue, latencyMs = 4).readout(),
+    )
+    // A picture that came, however late, is never overdue.
+    val late = phase(session = justConnected.copy(hasFrame = true, connectedForMs = 60_000))
+    assertEquals(false, (late as MirrorPhase.Connected).pictureOverdue)
+    assertTrue(late.isLive)
+  }
 }

@@ -18,14 +18,17 @@ sealed interface MirrorPhase {
     data object PairingLocked : MirrorPhase
 
     /**
-     * A pinned companion is connected; [hasFrame] once a frame has been decoded. [pairing] is a
-     * pairing request that arrived meanwhile, whose code shows over the picture.
+     * A pinned companion is connected; [hasFrame] once a frame has been decoded. [displayName] is
+     * the computer's display it streams, once it has said. [pictureOverdue] when it has been
+     * connected [FIRST_PICTURE_WAIT_MS] with no picture: its capture failed, and its terminal says
+     * why. [pairing] is a pairing request that arrived meanwhile, whose code shows over the picture.
      */
     data class Connected(
         val companionName: String,
         val displayName: String?,
         val hasFrame: Boolean,
         val pairing: Pairing? = null,
+        val pictureOverdue: Boolean = false,
     ) : MirrorPhase
 
     /** Listening failed, with the reason in plain words. */
@@ -36,8 +39,22 @@ sealed interface MirrorPhase {
 val MirrorPhase.isLive: Boolean
     get() = this is MirrorPhase.Connected && hasFrame
 
-/** What the session knows about the connected companion, for [mirrorPhase]. */
-data class MirrorSessionFacts(val companionName: String, val displayName: String?, val hasFrame: Boolean)
+/**
+ * What the session knows about the connected companion, for [mirrorPhase]; [connectedForMs] is how
+ * long it has been connected.
+ */
+data class MirrorSessionFacts(
+    val companionName: String,
+    val displayName: String?,
+    val hasFrame: Boolean,
+    val connectedForMs: Long = 0,
+)
+
+/**
+ * How long a connected companion may take to send its first picture. It sends one as soon as it
+ * has captured the screen, so this long without one means its capture is failing.
+ */
+const val FIRST_PICTURE_WAIT_MS = 5_000L
 
 /**
  * The phase rule: stopped, then a listening failure, then a connected session (carrying any
@@ -58,7 +75,13 @@ fun mirrorPhase(
     return when {
         !running -> MirrorPhase.Off
         listenError != null -> MirrorPhase.Failed(listenError)
-        session != null -> MirrorPhase.Connected(session.companionName, session.displayName, session.hasFrame, code)
+        session != null -> MirrorPhase.Connected(
+            companionName = session.companionName,
+            displayName = session.displayName,
+            hasFrame = session.hasFrame,
+            pairing = code,
+            pictureOverdue = !session.hasFrame && session.connectedForMs >= FIRST_PICTURE_WAIT_MS,
+        )
         code != null -> code
         pairing is PhonePairingState.Locked -> MirrorPhase.PairingLocked
         !listening -> MirrorPhase.NoWifi
@@ -76,6 +99,8 @@ sealed interface MirrorNotice {
     data class WrongCode(val attemptsLeft: Int) : MirrorNotice
     data object Forgotten : MirrorNotice
     data class Declined(val companionName: String) : MirrorNotice
+    /** The first picture of a session arrived; the rail has room for only part of a long name. */
+    data class Streaming(val companionName: String) : MirrorNotice
 }
 
 data class MirrorUiState(
@@ -114,6 +139,11 @@ fun MirrorUiState.readout(): MirrorReadout {
     val name = connected.companionName
     return when {
         linkQuiet -> MirrorReadout("– fps", "– ms", "$name isn't answering")
+        connected.pictureOverdue -> MirrorReadout(
+            "– fps",
+            latencyMs?.let { "$it ms" } ?: "– ms",
+            "Connected to $name, no picture yet",
+        )
         !connected.hasFrame -> MirrorReadout(
             "– fps",
             latencyMs?.let { "$it ms" } ?: "– ms",

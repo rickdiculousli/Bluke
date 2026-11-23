@@ -65,6 +65,8 @@ class PhonePairing(
   ) {
     /** Set once a PakeShare arrived: from then on, any end but PairResult(0) is a strike. */
     var awaitingConfirm: Spake2Confirmation? = null
+    /** When the PakeShare arrived, for [CONFIRM_LIFETIME_MS]. */
+    var sharedAtMs = 0L
     var companionFingerprint: ByteArray? = null
   }
 
@@ -127,6 +129,7 @@ class PhonePairing(
               return fail(strike = true, reply = false)
             }
         current.awaitingConfirm = finished
+        current.sharedAtMs = now()
         current.companionFingerprint = companionFingerprint.copyOf()
         PairingStep(MirrorMessage.PakeReply(party.share, finished.ownMac))
       }
@@ -156,23 +159,31 @@ class PhonePairing(
   }
 
   /**
-   * Discards a code that got no PakeShare within 120 s, without using an attempt. Returns the
-   * connection to close, or null.
+   * Discards a code that got no PakeShare within [CODE_LIFETIME_MS], without using an attempt, and
+   * ends an attempt whose PakeConfirm hasn't come [CONFIRM_LIFETIME_MS] after its PakeShare, using
+   * one (a held confirm would otherwise keep the one pairing slot, and its guess, forever). Returns
+   * the connection to close, or null.
    */
   fun expire(): Any? {
     val current = attempt ?: return null
-    if (!isExpired(current)) return null
-    attempt = null
+    when {
+      isExpired(current) -> attempt = null
+      current.awaitingConfirm != null && now() - current.sharedAtMs >= CONFIRM_LIFETIME_MS ->
+          fail(strike = true, reply = false)
+      else -> return null
+    }
     return current.connection
   }
 
   /**
-   * The user declined the request on the phone: its code is discarded without using an attempt,
-   * so a stranger's request can't eat into them. Returns the connection to close, or null.
+   * The user declined the request on the phone. Before a PakeShare its code is discarded without
+   * using an attempt, so a stranger's request can't eat into them; after one it uses an attempt
+   * like any other end but pairing, since the PakeReply already let the sender check its guess.
+   * Returns the connection to close, or null.
    */
   fun decline(): Any? {
     val current = attempt ?: return null
-    attempt = null
+    fail(strike = current.awaitingConfirm != null, reply = false)
     return current.connection
   }
 
@@ -189,6 +200,8 @@ class PhonePairing(
 
   companion object {
     const val CODE_LIFETIME_MS = 120_000L
+    /** How long after its PakeShare the companion has to send PakeConfirm. */
+    const val CONFIRM_LIFETIME_MS = 15_000L
   }
 }
 
@@ -202,6 +215,17 @@ sealed interface MirrorRoute {
 
   /** Send [reply] if any, then close. */
   data class Close(val reply: MirrorMessage?) : MirrorRoute
+}
+
+/** What the listener does with a new connection (see [MirrorConnectionPolicy.admit]). */
+sealed interface MirrorAdmission<out T> {
+  data object Admit : MirrorAdmission<Nothing>
+
+  /** Close [oldest] (a connection that never said who it is), then admit the new one. */
+  data class Evict<T>(val oldest: T) : MirrorAdmission<T>
+
+  /** Every open connection is routed (a session, a pairing): close the new one. */
+  data object Refuse : MirrorAdmission<Nothing>
 }
 
 /** What a verified session does with a message it read. */
@@ -237,6 +261,29 @@ object MirrorConnectionPolicy {
             }
         else -> MirrorRoute.Close(null)
       }
+
+  /**
+   * Admits a new connection while fewer than [max] are open. At the cap, the oldest connection that
+   * hasn't sent its first message yet ([unroutedOldestFirst]) makes way, so idle connections
+   * (a scanner, a stuck handshake) can't lock the companion out; routed ones are never displaced.
+   */
+  fun <T> admit(open: Int, unroutedOldestFirst: List<T>, max: Int): MirrorAdmission<T> =
+      when {
+        open < max -> MirrorAdmission.Admit
+        unroutedOldestFirst.isNotEmpty() -> MirrorAdmission.Evict(unroutedOldestFirst.first())
+        else -> MirrorAdmission.Refuse
+      }
+
+  /**
+   * The connections to close because they haven't finished the TLS handshake and sent their first
+   * message within [FIRST_MESSAGE_DEADLINE_MS] of being accepted ([acceptedAtMs] by connection).
+   * One deadline for both, so trickling bytes can't hold a connection slot by keeping each read
+   * under its own timeout.
+   */
+  fun <T> pastFirstMessageDeadline(acceptedAtMs: Map<T, Long>, nowMs: Long): List<T> =
+      acceptedAtMs.filterValues { nowMs - it >= FIRST_MESSAGE_DEADLINE_MS }.keys.toList()
+
+  const val FIRST_MESSAGE_DEADLINE_MS = 10_000L
 
   /** A verified session handles the companion's session traffic, skips Unknown, and closes on anything else. */
   fun sessionAccepts(message: MirrorMessage): SessionVerdict =

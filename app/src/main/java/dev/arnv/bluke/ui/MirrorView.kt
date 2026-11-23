@@ -4,6 +4,7 @@ import android.content.Intent
 import android.content.SharedPreferences
 import android.os.Build
 import android.os.SystemClock
+import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
@@ -222,6 +223,12 @@ fun MirrorView(
             onModeChange(enabled[(index + 1) % enabled.size])
         },
         onConfigureModes = { context.startActivity(Intent(context, QuickCycleActivity::class.java)) },
+        onOpenWifiSettings = {
+            // The panel joins a network without leaving Bluke; before Android 10, the full settings page.
+            val action = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) Settings.Panel.ACTION_WIFI
+            else Settings.ACTION_WIFI_SETTINGS
+            context.startActivity(Intent(action))
+        },
         onTouchModeChange = controller::setTouchMode,
         onForgetCompanion = { forgetPending = true },
         onNoticeShown = controller::clearNotice,
@@ -259,6 +266,7 @@ fun MirrorSurface(
     forgetPending: Boolean = false,
     onUndoForget: () -> Unit = {},
     onDeclinePairing: () -> Unit = {},
+    onOpenWifiSettings: () -> Unit = {},
 ) {
     val haptics = rememberMirrorHaptics(hapticsEnabled)
     LaunchedEffect(state.notice) {
@@ -267,13 +275,6 @@ fun MirrorSurface(
             is MirrorNotice.Paired -> haptics.confirm()
             else -> Unit
         }
-    }
-    // The status card that spoke for each phase leaves when the picture arrives; say so once.
-    val view = LocalView.current
-    val liveFrom = (state.phase as? MirrorPhase.Connected)?.takeIf { it.hasFrame }?.companionName
-    LaunchedEffect(liveFrom) {
-        @Suppress("DEPRECATION") // No live region fits a one-off message about a card that just left.
-        if (liveFrom != null) view.announceForAccessibility("Streaming from $liveFrom")
     }
     Row(
         modifier = modifier
@@ -322,6 +323,7 @@ fun MirrorSurface(
                     state = state,
                     hasStaleFrame = frames.currentFrame() != null,
                     onDeclinePairing = onDeclinePairing,
+                    onOpenWifiSettings = onOpenWifiSettings,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
             }
@@ -589,8 +591,9 @@ private fun TouchModeOption(
                 role = Role.RadioButton,
                 onClick = { onSelect(mode) },
             )
-            .semantics { contentDescription = description }
-            .testTag("mirror_mode_${mode.name.lowercase()}"),
+            .testTag("mirror_mode_${mode.name.lowercase()}")
+            // One description for TalkBack; the visible label under the pill would repeat its first word.
+            .clearAndSetSemantics { contentDescription = description },
         horizontalAlignment = Alignment.CenterHorizontally,
         verticalArrangement = Arrangement.Center,
     ) {
@@ -674,9 +677,11 @@ private fun MirrorMenu(state: MirrorUiState, onForgetCompanion: () -> Unit) {
         }
         DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
             val paired = state.pairedName
-            val connectedTo = (state.phase as? MirrorPhase.Connected)?.companionName
+            val connected = state.phase as? MirrorPhase.Connected
             val status = when {
-                connectedTo != null -> "Mirror is connected to $connectedTo"
+                connected?.displayName != null ->
+                    "Mirror is connected to ${connected.companionName}, showing ${connected.displayName}"
+                connected != null -> "Mirror is connected to ${connected.companionName}"
                 paired != null -> "Mirror is paired with $paired, not connected"
                 else -> null
             }
@@ -927,6 +932,7 @@ private fun MirrorOverlay(
     state: MirrorUiState,
     hasStaleFrame: Boolean,
     onDeclinePairing: () -> Unit,
+    onOpenWifiSettings: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
     val phase = state.phase
@@ -968,7 +974,7 @@ private fun MirrorOverlay(
                             .padding(horizontal = 24.dp, vertical = 20.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
                     ) {
-                        StatusContent(shown.state, shown.hasStaleFrame, onDeclinePairing)
+                        StatusContent(shown.state, shown.hasStaleFrame, onDeclinePairing, onOpenWifiSettings)
                     }
                 }
             }
@@ -986,18 +992,32 @@ private data class StatusShown(val state: MirrorUiState, val hasStaleFrame: Bool
                 else -> "waiting ${phase.pairedName}"
             }
             is MirrorPhase.Pairing -> "pairing ${phase.code}"
-            is MirrorPhase.Connected -> "connected ${phase.companionName}"
+            is MirrorPhase.Connected -> "connected ${phase.companionName} ${phase.pictureOverdue}"
             else -> phase
         }
 }
 
 @Composable
-private fun StatusContent(state: MirrorUiState, hasStaleFrame: Boolean, onDeclinePairing: () -> Unit) {
+private fun StatusContent(
+    state: MirrorUiState,
+    hasStaleFrame: Boolean,
+    onDeclinePairing: () -> Unit,
+    onOpenWifiSettings: () -> Unit,
+) {
     when (val phase = state.phase.pairingRequest ?: state.phase) {
         MirrorPhase.Off -> StatusHeader(icon = null, title = "Starting Mirror", busy = true)
         MirrorPhase.NoWifi -> {
             StatusHeader(Icons.Filled.WifiOff, "Connect to Wi-Fi")
             Body("Mirror reaches your computer over the local network. Join the Wi-Fi your computer is on.")
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
+                TextButton(
+                    onClick = onOpenWifiSettings,
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.primary),
+                    modifier = Modifier.testTag("mirror_wifi_settings"),
+                ) {
+                    Text("Wi-Fi settings")
+                }
+            }
         }
         is MirrorPhase.Waiting -> when {
             phase.pairedName == null -> {
@@ -1005,7 +1025,7 @@ private fun StatusContent(state: MirrorUiState, hasStaleFrame: Boolean, onDeclin
                 Body("On the computer, in a terminal, run:")
                 Command("bluke-mirror pair")
                 PhoneAddressHint(state, "bluke-mirror pair")
-                Body("No bluke-mirror yet? It's in the companion folder of Bluke's source; its README says how to build it.", muted = true)
+                Body("No bluke-mirror yet? The Mirror section of Bluke's README says how to get it.", muted = true)
             }
             // A picture from earlier this session means the link dropped, not that it never came.
             hasStaleFrame -> {
@@ -1053,7 +1073,11 @@ private fun StatusContent(state: MirrorUiState, hasStaleFrame: Boolean, onDeclin
             StatusHeader(Icons.Filled.Lock, "Too many wrong codes")
             Body("Pairing is closed for now. Close Mirror and open it again for a new code.")
         }
-        is MirrorPhase.Connected -> {
+        is MirrorPhase.Connected -> if (phase.pictureOverdue) {
+            // Capture failing is only ever explained on the computer; send the person there.
+            StatusHeader(Icons.Filled.DesktopWindows, "Connected to ${phase.companionName}")
+            Body("No picture yet. The bluke-mirror terminal on ${phase.companionName} says why.")
+        } else {
             StatusHeader(icon = null, title = "Connected to ${phase.companionName}", busy = true)
             Body("Waiting for the first picture.", muted = true)
         }
@@ -1105,7 +1129,7 @@ private fun Command(text: String) {
             color = MaterialTheme.colorScheme.onSurface,
             modifier = Modifier
                 .fillMaxWidth()
-                .clip(MaterialTheme.shapes.small)
+                .clip(MaterialTheme.shapes.extraSmall)
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         )
@@ -1208,7 +1232,7 @@ private fun MirrorNoticePill(
             if (withUndo) {
                 TextButton(
                     onClick = onUndoForget,
-                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.inversePrimary),
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.inverseOnSurface),
                     modifier = Modifier.padding(end = 4.dp).testTag("mirror_undo_forget"),
                 ) {
                     Text("Undo")
@@ -1227,6 +1251,7 @@ private fun MirrorNotice.text(): String = when (this) {
     }
     MirrorNotice.Forgotten -> FORGOTTEN_TEXT
     is MirrorNotice.Declined -> "Declined $companionName"
+    is MirrorNotice.Streaming -> "Streaming from $companionName"
 }
 
 private const val FORGOTTEN_TEXT = "Mirror pairing removed"

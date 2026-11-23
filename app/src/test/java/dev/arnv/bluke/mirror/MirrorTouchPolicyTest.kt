@@ -160,7 +160,7 @@ class MirrorTouchPolicyTest {
     )
     val update = policy.update(frame)
     assertEquals(listOf(Pointer(100, 200, 0)), update.messages)
-    assertEquals(listOf(MirrorTouchEvent.RELEASED), update.events)
+    assertEquals(emptyList<MirrorTouchEvent>(), update.events)
   }
 
   @Test
@@ -189,7 +189,8 @@ class MirrorTouchPolicyTest {
     assertEquals(listOf(f(100f, 200f)), press.rings)
     assertTrue(press.held)
     val scroll = touchUpdate(10, f(100f, 200f), f(300f, 200f, 2))
-    assertEquals(listOf(MirrorTouchEvent.RELEASED, MirrorTouchEvent.SCROLLING), scroll.events)
+    assertEquals(emptyList<MirrorTouchEvent>(), scroll.events)
+    assertEquals(listOf(Pointer(100, 200, 0)), scroll.messages)
     assertEquals(2, scroll.rings.size)
     assertFalse(scroll.held)
     val lift = touchUpdate(20)
@@ -210,5 +211,64 @@ class MirrorTouchPolicyTest {
     val update = policy.update(letterboxed, listOf(f(500f, 50f)), 0)
     assertEquals(emptyList<MirrorFinger>(), update.rings)
     assertEquals(emptyList<MirrorTouchEvent>(), update.events)
+  }
+
+  private fun point(id: Long, x: Float, y: Float, down: Boolean, wasDown: Boolean) =
+      MirrorTouchPoint(id, x, y, down = down, wasDown = wasDown)
+
+  private fun frame(t: Long, vararg points: MirrorTouchPoint) = MirrorTouchFrame(points.toList(), t, fit)
+
+  @Test
+  fun directReleasesWhereTheFingerLeftTheGlass() {
+    policy.update(frame(0, point(1, 100f, 200f, down = true, wasDown = false)))
+    policy.update(frame(10, point(1, 300f, 400f, down = true, wasDown = true)))
+    // The up event's own point is past the last move: drag there, then let go there.
+    val up = policy.update(frame(20, point(1, 310f, 405f, down = false, wasDown = true)))
+    assertEquals(listOf(Pointer(310, 405, 1), Pointer(310, 405, 0)), up.messages)
+    assertFalse(policy.buttonHeld)
+  }
+
+  @Test
+  fun aLiftAtTheLastMovesPointReleasesWithoutADrag() {
+    policy.update(frame(0, point(1, 100f, 200f, down = true, wasDown = false)))
+    policy.update(frame(10, point(1, 300f, 400f, down = true, wasDown = true)))
+    val up = policy.update(frame(20, point(1, 300f, 400f, down = false, wasDown = true)))
+    assertEquals(listOf(Pointer(300, 400, 0)), up.messages)
+  }
+
+  @Test
+  fun afterTheLinkDropsTheRestOfTheTouchSendsNothing() {
+    touch(0, f(100f, 200f))
+    policy.abandon()
+    assertFalse(policy.buttonHeld)
+    // A new session starts while the finger is still down: its moves don't press again.
+    assertEquals(emptyList<MirrorMessage>(), touch(10, f(120f, 200f)))
+    assertEquals(emptyList<MirrorFinger>(), touchUpdate(20, f(130f, 200f)).rings)
+    assertEquals(emptyList<MirrorMessage>(), touch(30))
+    // Once every finger lifted, the next touch presses as usual.
+    assertEquals(listOf(Pointer(50, 50, 1)), touch(40, f(50f, 50f)))
+  }
+
+  @Test
+  fun aFirstFingerLandingStartsAfreshEvenIfTheLiftWasMissed() {
+    // The link dropped mid-touch and the lift happened while the picture was away, unseen.
+    touch(0, f(100f, 200f))
+    policy.abandon()
+    val down = policy.update(frame(10, point(5, 50f, 60f, down = true, wasDown = false)))
+    assertEquals(listOf(Pointer(50, 60, 1)), down.messages)
+    assertEquals(listOf(MirrorTouchEvent.PRESSED), down.events)
+  }
+
+  @Test
+  fun aMissedLiftOfAHeldButtonIsReleasedBeforeTheNextPress() {
+    touch(0, f(100f, 200f))
+    val down = policy.update(frame(10, point(5, 50f, 60f, down = true, wasDown = false)))
+    assertEquals(listOf(Pointer(100, 200, 0), Pointer(50, 60, 1)), down.messages)
+  }
+
+  @Test
+  fun abandonWithNoTouchLeavesTheNextOneAlone() {
+    policy.abandon()
+    assertEquals(listOf(Pointer(10, 20, 1)), touch(0, f(10f, 20f)))
   }
 }
