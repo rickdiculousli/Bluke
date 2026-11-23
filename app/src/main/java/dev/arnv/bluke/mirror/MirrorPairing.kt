@@ -68,7 +68,9 @@ class PhonePairing(
     var companionFingerprint: ByteArray? = null
   }
 
-  private var attemptsLeft = maxAttempts
+  /** Attempts this Mirror session still allows. */
+  var attemptsLeft = maxAttempts
+    private set
   private var attempt: Attempt? = null
 
   /** What the UI shows now. A code past its 120 s already reads as [PhonePairingState.Idle]. */

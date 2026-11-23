@@ -22,8 +22,6 @@ import javax.security.auth.x500.X500Principal
 fun certificateFingerprint(certificate: Certificate): ByteArray =
     MessageDigest.getInstance("SHA-256").digest(certificate.encoded)
 
-fun ByteArray.toHex(): String = joinToString("") { "%02x".format(it) }
-
 fun String.hexToBytes(): ByteArray? {
     if (length % 2 != 0) return null
     return ByteArray(length / 2) { i ->
