@@ -13,6 +13,7 @@ import androidx.compose.runtime.State
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.ImageBitmap
@@ -158,7 +159,7 @@ class MirrorScreenshotTest {
     )
 
     private companion object {
-        const val SPINNER_SETTLE_MS = 400L
+        const val SETTLE_MS = 1_000L
         const val LONG_NAME = "Rick's MacBook Pro (Work) in the upstairs office"
         const val EMOJI_NAME = "🎮 Gaming PC 🖥️"
     }
@@ -184,6 +185,9 @@ class MirrorScreenshotTest {
     /** One composition per test (the rule allows one setContent), switched shot by shot. */
     private fun captureAll(shots: List<Shot>) {
         val current = mutableStateOf(shots.first())
+        // The test rule cancels infinite animations (the spinners) while its clock runs on its own;
+        // stepping it by hand lets them run, so each shot shows the arc a person sees, not frame 0.
+        composeTestRule.mainClock.autoAdvance = false
         composeTestRule.setContent {
             val shot = current.value
             HostSurfaceTheme(shot.fontScale) {
@@ -192,9 +196,11 @@ class MirrorScreenshotTest {
         }
         shots.forEach { shot ->
             current.value = shot
+            // With the clock stepped by hand, the change must be announced before the next frame reads it.
+            Snapshot.sendApplyNotifications()
+            // Long enough for the cards' springs to settle and the spinners to open their arc.
+            composeTestRule.mainClock.advanceTimeBy(SETTLE_MS)
             composeTestRule.waitForIdle()
-            // Past the spinners' first frame, so they show the arc a person sees.
-            composeTestRule.mainClock.advanceTimeBy(SPINNER_SETTLE_MS)
             val scale = if (shot.fontScale == 1f) "1" else if (shot.fontScale == 2f) "2" else shot.fontScale.toString()
             composeTestRule.onRoot().captureRoboImage(
                 filePath = "src/test/screenshots/mirror/mirror-${shot.name}-dark-fs$scale-land.png",

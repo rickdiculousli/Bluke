@@ -59,6 +59,7 @@ import androidx.compose.material.icons.automirrored.filled.ScreenShare
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.MoreVert
@@ -900,10 +901,11 @@ private fun QuietLinkChip(state: MirrorUiState) {
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
-            CircularProgressIndicator(
-                modifier = Modifier.size(16.dp),
-                strokeWidth = 2.dp,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            Icon(
+                Icons.Filled.HourglassTop,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
             )
             Text(
                 "${name ?: "The computer"} isn't answering",
@@ -929,7 +931,7 @@ private fun MirrorOverlay(
 ) {
     val phase = state.phase
     // Wider with larger text, so a big font scale wraps less instead of scrolling.
-    val maxCardWidth = 440.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
+    val maxCardWidth = 480.dp * LocalDensity.current.fontScale.coerceAtLeast(1f)
     AnimatedVisibility(
         visible = !phase.isLive || phase.pairingRequest != null,
         enter = fadeIn(EffectsSpring),
@@ -961,7 +963,7 @@ private fun MirrorOverlay(
                     val scroll = rememberScrollState()
                     Column(
                         modifier = Modifier
-                            .scrollEdgeFade(scroll)
+                            .scrollCue(scroll, MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f))
                             .verticalScroll(scroll)
                             .padding(horizontal = 24.dp, vertical = 20.dp),
                         verticalArrangement = Arrangement.spacedBy(8.dp),
@@ -1038,7 +1040,11 @@ private fun StatusContent(state: MirrorUiState, hasStaleFrame: Boolean, onDeclin
                     modifier = Modifier.weight(1f),
                 )
                 // Not yours? Turning it down costs no try, so a stranger on the network can't use them up.
-                TextButton(onClick = onDeclinePairing, modifier = Modifier.testTag("mirror_pairing_decline")) {
+                TextButton(
+                    onClick = onDeclinePairing,
+                    colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.onSurface),
+                    modifier = Modifier.testTag("mirror_pairing_decline"),
+                ) {
                     Text("Decline")
                 }
             }
@@ -1115,20 +1121,33 @@ private fun PhoneAddressHint(state: MirrorUiState, command: String) {
 }
 
 /**
- * Fades the edges [scroll] can still move toward, so content that runs past a card's edge
- * (large text on a short screen) shows there's more.
+ * Shows that content runs past a card's edge (large text on a short screen): the edges [scroll]
+ * can still move toward fade out, and a slim thumb at the side says how much more there is, even
+ * when the cut falls between two lines.
  */
-private fun Modifier.scrollEdgeFade(scroll: ScrollState): Modifier = this
+private fun Modifier.scrollCue(scroll: ScrollState, thumbColor: Color): Modifier = this
     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
     .drawWithContent {
         drawContent()
-        val edge = (SCROLL_FADE.toPx() / size.height).coerceAtMost(0.5f)
         val top = if (scroll.canScrollBackward) Color.Transparent else Color.Black
         val bottom = if (scroll.canScrollForward) Color.Transparent else Color.Black
         if (top == Color.Black && bottom == Color.Black) return@drawWithContent
+        val edge = (SCROLL_FADE.toPx() / size.height).coerceAtMost(0.5f)
         drawRect(
             Brush.verticalGradient(0f to top, edge to Color.Black, 1f - edge to Color.Black, 1f to bottom),
             blendMode = BlendMode.DstIn,
+        )
+        val inset = SCROLL_THUMB_INSET.toPx()
+        val track = size.height - inset * 2
+        val content = size.height + scroll.maxValue
+        val thumb = track * size.height / content
+        val thumbTop = inset + track * scroll.value / content
+        val width = SCROLL_THUMB_WIDTH.toPx()
+        drawRoundRect(
+            color = thumbColor,
+            topLeft = Offset(size.width - width - SCROLL_THUMB_END.toPx(), thumbTop),
+            size = androidx.compose.ui.geometry.Size(width, thumb),
+            cornerRadius = androidx.compose.ui.geometry.CornerRadius(width / 2),
         )
     }
 
@@ -1244,4 +1263,7 @@ private val NEXT_PILL_START = 12.dp
 private val NEXT_PILL_END = 4.dp
 private val NEXT_ARROW = 18.dp
 private val TOUCH_RING_RADIUS = 35.dp
-private val SCROLL_FADE = 24.dp
+private val SCROLL_FADE = 32.dp
+private val SCROLL_THUMB_WIDTH = 4.dp
+private val SCROLL_THUMB_END = 8.dp
+private val SCROLL_THUMB_INSET = 24.dp
