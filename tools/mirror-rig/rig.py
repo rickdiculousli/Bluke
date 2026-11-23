@@ -31,33 +31,31 @@ RUNS = int(os.environ.get("RUNS", "100"))
 
 # ---------------------------------------------------------------------------- expectations
 # The synthetic display: 1920x1080 at origin (-1920, 0). Its frames are downscaled to fit the
-# phone's 480x480 cap, so 480x270, and on the portrait emulator screen (1080x2400) the image is
-# turned 90° clockwise to be larger: the box is taller than wide, the image's left edge lies along
-# the box's top and its top edge along the box's right.
+# phone's 480x480 cap, so 480x270. Every input surface runs in landscape, so on the emulator
+# (2400x1080 turned) the image sits upright, letterboxed to a 1920x1080 box: no rotation.
 #
-# A touch at fractions (u, v) of the box (u across, v down) is image point (v, 1 - u), sent as
-# round(f × 65535) per axis, which the companion maps to origin + n/65535 × (size − 1)
-# (PROTOCOL.md, Pointer). Worked out by hand:
+# A touch at fractions (u, v) of the box is sent as n = round(f × 65535) per axis, which the
+# companion maps to origin + n/65535 × (size − 1) (PROTOCOL.md, Pointer). Worked out by hand:
 #
-#   box (0.25, 0.25): image (0.25, 0.75) -> n (16384, 49151)
-#       x = -1920 + 16384/65535 × 1919 = -1440.24, y = 49151/65535 × 1079 = 809.25
-#   box (0.50, 0.50): image (0.50, 0.50) -> n (32768, 32768)
+#   box (0.25, 0.25) -> n (16384, 16384)
+#       x = -1920 + 16384/65535 × 1919 = -1440.24, y = 16384/65535 × 1079 = 269.75
+#   box (0.50, 0.50) -> n (32768, 32768)
 #       x = -1920 + 32768/65535 × 1919 =  -960.49, y = 32768/65535 × 1079 = 539.51
-#   box (0.75, 0.60): image (0.60, 0.25) -> n (39321, 16384)
-#       x = -1920 + 39321/65535 × 1919 =  -768.60, y = 16384/65535 × 1079 = 269.75
-#   box (0.40, 0.30): image (0.30, 0.60) -> n (19660, 39321)
-#       x = -1920 + 19660/65535 × 1919 = -1344.31, y = 39321/65535 × 1079 = 647.40
+#   box (0.75, 0.60) -> n (49151, 39321)
+#       x = -1920 + 49151/65535 × 1919 =  -480.76, y = 39321/65535 × 1079 = 647.40
+#   box (0.40, 0.30) -> n (26214, 19660)
+#       x = -1920 + 26214/65535 × 1919 = -1152.40, y = 19660/65535 × 1079 = 323.69
 #
-# Touches land on whole screen pixels, and the box spans about one screen pixel per display
-# pixel on each axis, so a point can be off by half a display pixel per axis; the tolerance
-# allows that with room for float rounding.
+# Touches land on whole screen pixels, and the box spans one screen pixel per display pixel, so
+# a point can be off by half a display pixel per axis; the tolerance allows that with room for
+# float rounding.
 TOLERANCE = 1.5
 
 P0, P1, P2, P3 = (0.25, 0.25), (0.50, 0.50), (0.75, 0.60), (0.40, 0.30)
-AT_P0 = (-1440.24, 809.25)
+AT_P0 = (-1440.24, 269.75)
 AT_P1 = (-960.49, 539.51)
-AT_P2 = (-768.60, 269.75)
-AT_P3 = (-1344.31, 647.40)
+AT_P2 = (-480.76, 647.40)
+AT_P3 = (-1152.40, 323.69)
 
 # DOWN P0, MOVE P1, MOVE P2, UP P2. Up from a held button: a move then press; held to held: a
 # drag; held to up: a drag to the point, then the release (PROTOCOL.md, Pointer).
@@ -67,12 +65,14 @@ DRAG_EXPECTED = [
     ("drag", AT_P2),
     ("drag", AT_P2), ("up", AT_P2),
 ]
-# DOWN P0, MOVE P3, then Home while held: the surface's ON_STOP sends Release, and the companion
-# releases the held button where it last was.
+# DOWN P0, MOVE P3, then Home while held. Leaving the screen cancels the touch before the
+# surface's ON_STOP, and the phone ends a cancelled touch as a lift at its last point: a drag
+# there, then the up. The Release that ON_STOP sends next finds no button held, so it injects
+# nothing. Either way no button stays down.
 HOME_EXPECTED = [
     ("move", AT_P0), ("down", AT_P0),
     ("drag", AT_P3),
-    ("release", AT_P3),
+    ("drag", AT_P3), ("up", AT_P3),
 ]
 
 
@@ -148,8 +148,11 @@ def at(bounds: list[float], frac: tuple[float, float]) -> tuple[int, int]:
     return round(left + frac[0] * (right - left)), round(top + frac[1] * (bottom - top))
 
 
-def motion(action: str, point: tuple[int, int]) -> str:
-    return f"input motionevent {action} {point[0]} {point[1]}"
+def motions(*steps: tuple[str, tuple[int, int]]) -> str:
+    """One shell line injecting these touch events, 50 ms apart. Android resamples moves that
+    arrive under 20 ms apart, extrapolating a point along the finger's path; spacing them keeps
+    each point where it was put."""
+    return "; sleep 0.05; ".join(f"input motionevent {a} {p[0]} {p[1]}" for a, p in steps)
 
 
 # ---------------------------------------------------------------------------- companion
@@ -268,13 +271,23 @@ def main() -> int:
     try:
         # 1. Open Mirror the way a person would, then let adb forward reach it.
         phone.shell("input keyevent KEYCODE_WAKEUP; wm dismiss-keyguard; svc power stayon true")
+        # Android's one-time "Viewing full screen" prompt would cover the surface and take the
+        # touches; a person dismisses it once, so mark it seen.
+        phone.shell("settings put secure immersive_mode_confirmations confirmed")
         phone.run("shell", "am", "force-stop", PACKAGE)
         phone.cmd("skip-onboarding")
         phone.mirror("setup")
         phone.run("shell", "am", "force-stop", PACKAGE)
         phone.run("shell", "am", "start", "-n", f"{PACKAGE}/.MainActivity")
-        phone.tap_text("Launch Mirror")
-        phone.wait_mirror(lambda s: s["phase"] in ("Waiting", "NoWifi"), "Mirror to start listening")
+        # A tap that lands while the home screen is still settling is lost; tap again, as a person would.
+        for attempt in range(3):
+            phone.tap_text("Launch Mirror")
+            try:
+                phone.wait_mirror(lambda s: s["phase"] in ("Waiting", "NoWifi"), "Mirror to start listening", timeout=8)
+                break
+            except RigFailure:
+                if attempt == 2:
+                    raise
         state = phone.mirror("loopback")
         port = state.get("loopbackPort") or phone.wait_mirror(lambda s: s["loopbackPort"], "a loopback port")["loopbackPort"]
         forwarded = phone.run("forward", "tcp:0", f"tcp:{port}").strip()
@@ -292,26 +305,22 @@ def main() -> int:
         print(f"frame drawn: framesDrawn {state['framesDrawn']}, lastDrawnSeq {state['lastDrawnSeq']}")
         bounds = state["imageBounds"]
         left, top, right, bottom = bounds
-        if not bottom - top > right - left:
-            raise RigFailure(f"expected the 16:9 image turned clockwise into a tall box on the portrait screen; box {bounds}")
+        if abs((right - left) / (bottom - top) - 16 / 9) > 0.01:
+            raise RigFailure(f"expected the 16:9 image upright on the landscape screen; box {bounds}")
         rec = Recording(record)
 
         # 3. A drag, checked against the hand-written coordinates.
         rec.mark()
-        phone.shell("; ".join([motion("DOWN", at(bounds, P0)), motion("MOVE", at(bounds, P1)),
-                               motion("MOVE", at(bounds, P2)), motion("UP", at(bounds, P2))]))
+        drag = [("DOWN", at(bounds, P0)), ("MOVE", at(bounds, P1)), ("MOVE", at(bounds, P2)), ("UP", at(bounds, P2))]
+        phone.shell(motions(*drag))
         check_events("drag", rec.wait(len(DRAG_EXPECTED), "drag"), DRAG_EXPECTED)
 
         # 5 (before 4, which closes Mirror). Timing: RUNS more drags, then read the phone's numbers.
         print(f"timing: {RUNS} drags")
         batch = 10
         for start in range(0, RUNS, batch):
-            script = []
-            for _ in range(min(batch, RUNS - start)):
-                script += [motion("DOWN", at(bounds, P0)), motion("MOVE", at(bounds, P1)),
-                           motion("MOVE", at(bounds, P2)), motion("UP", at(bounds, P2))]
             rec.mark()
-            phone.shell("; ".join(script))
+            phone.shell(motions(*drag * min(batch, RUNS - start)))
             rec.wait(len(DRAG_EXPECTED) * min(batch, RUNS - start), "timing drags")
         # One Ping a second: wait for RUNS round trips so the link's share has as many samples.
         state = phone.wait_mirror(lambda s: len(s["pingRoundTripUs"]) >= RUNS, f"{RUNS} ping round trips",
@@ -321,7 +330,7 @@ def main() -> int:
 
         # 4. A held drag is released when Mirror leaves the screen.
         rec.mark()
-        phone.shell("; ".join([motion("DOWN", at(bounds, P0)), motion("MOVE", at(bounds, P3))]))
+        phone.shell(motions(("DOWN", at(bounds, P0)), ("MOVE", at(bounds, P3))))
         rec.wait(3, "drag before Home")
         phone.shell("input keyevent KEYCODE_HOME")
         check_events("held drag, then Home", rec.wait(len(HOME_EXPECTED), "release on Home"), HOME_EXPECTED)
