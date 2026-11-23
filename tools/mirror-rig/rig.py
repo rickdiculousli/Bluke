@@ -58,21 +58,22 @@ AT_P2 = (-480.76, 647.40)
 AT_P3 = (-1152.40, 323.69)
 
 # DOWN P0, MOVE P1, MOVE P2, UP P2. Up from a held button: a move then press; held to held: a
-# drag; held to up: a drag to the point, then the release (PROTOCOL.md, Pointer).
+# drag; held to up: a drag to the point only if it moved, then the release (PROTOCOL.md,
+# Pointer). The lift is at the last move's point, so the release injects no drag.
 DRAG_EXPECTED = [
     ("move", AT_P0), ("down", AT_P0),
     ("drag", AT_P1),
     ("drag", AT_P2),
-    ("drag", AT_P2), ("up", AT_P2),
+    ("up", AT_P2),
 ]
 # DOWN P0, MOVE P3, then Home while held. Leaving the screen cancels the touch before the
-# surface's ON_STOP, and the phone ends a cancelled touch as a lift at its last point: a drag
-# there, then the up. The Release that ON_STOP sends next finds no button held, so it injects
-# nothing. Either way no button stays down.
+# surface's ON_STOP, and the phone ends a cancelled touch by releasing at its last point (never a
+# click): the up, with no drag since the point didn't move. The Release that ON_STOP sends next
+# finds no button held, so it injects nothing. Either way no button stays down.
 HOME_EXPECTED = [
     ("move", AT_P0), ("down", AT_P0),
     ("drag", AT_P3),
-    ("drag", AT_P3), ("up", AT_P3),
+    ("up", AT_P3),
 ]
 
 
@@ -325,7 +326,8 @@ def main() -> int:
         # One Ping a second: wait for RUNS round trips so the link's share has as many samples.
         state = phone.wait_mirror(lambda s: len(s["pingRoundTripUs"]) >= RUNS, f"{RUNS} ping round trips",
                                   timeout=RUNS * 1.5 + 30)
-        touch_to_write = [us / 1000 for us in state["touchToWriteUs"]]
+        event_to_touch = [us / 1000 for us in state["eventToTouchUs"]]
+        touch_to_flush = [us / 1000 for us in state["touchToFlushUs"]]
         round_trips = [us / 1000 for us in state["pingRoundTripUs"]]
 
         # 4. A held drag is released when Mirror leaves the screen.
@@ -344,14 +346,16 @@ def main() -> int:
         if forwarded:
             subprocess.run(phone.adb + ["forward", "--remove", f"tcp:{forwarded}"], capture_output=True)
 
-    # Composition. The components aren't measured per touch, so touch -> inject adds the three
+    # Composition. The components aren't measured per touch, so touch -> inject adds the four
     # components' own quantiles: its p95 and max are upper bounds on the pipeline's.
-    write = quantiles(touch_to_write)
+    dispatch = quantiles(event_to_touch)
+    flush = quantiles(touch_to_flush)
     one_way = quantiles([rt / 2 for rt in round_trips])
     inject = summary["inject_ms"]
     ack = summary["frame_ack_ms"]
-    touch_total = {k: write[k] + one_way[k] + inject[k] for k in ("p50", "p95", "max")}
-    touch_total["count"] = min(write["count"], one_way["count"], inject["count"])
+    parts = (dispatch, flush, one_way, inject)
+    touch_total = {k: sum(p[k] for p in parts) for k in ("p50", "p95", "max")}
+    touch_total["count"] = min(p["count"] for p in parts)
     # Quantiles don't subtract: the ack's way back is taken off as the link's median one way.
     frame_total = {k: max(ack[k] - one_way["p50"], 0.0) for k in ("p50", "p95", "max")}
     frame_total["count"] = ack["count"]
@@ -360,10 +364,14 @@ def main() -> int:
 
     print()
     print("Mirror pipeline timing on the emulator (loopback through adb forward, not Wi-Fi)")
-    print(f"  phone touch -> Pointer written      {fmt(write)}   (MotionEvent time to TLS write, 1 ms clock)")
+    print(f"  phone event -> onTouch              {fmt(dispatch)}   (MotionEvent time to the app's handler: Android's input dispatch)")
+    print(f"  phone onTouch -> Pointer flushed    {fmt(flush)}   (handler to TLS write and flush: the app's own share)")
     print(f"  link one way (ping RTT / 2)         {fmt(one_way)}")
     print(f"  companion read -> recorded inject   {fmt(inject)}")
-    print(f"  touch -> recorded inject            {fmt(touch_total)}   (sum of the three rows' quantiles; p95, max are upper bounds)")
+    print(f"  touch -> recorded inject            {fmt(touch_total)}   (sum of the four rows' quantiles; p95, max are upper bounds)")
+    capture = summary.get("capture_to_sent_ms")
+    if capture:
+        print(f"  companion capture -> frame sent     {fmt(capture)}   (grab, downscale, encode, wait to send)")
     print(f"  companion frame send -> FrameAck    {fmt(ack)}")
     print(f"  frame sent -> decoded on the phone  {fmt(frame_total)}   (send -> ack minus the median one way)")
     print(f"  frames sent {summary['frames_sent']}, acked {summary['frames_acked']}, sessions {summary['sessions']}")
