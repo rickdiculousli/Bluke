@@ -344,16 +344,17 @@ def main() -> int:
         if forwarded:
             subprocess.run(phone.adb + ["forward", "--remove", f"tcp:{forwarded}"], capture_output=True)
 
-    # Composition. Each sum adds the components' own quantiles, so the p95 and max are upper
-    # bounds on the true pipeline quantiles (the components aren't sampled per touch).
+    # Composition. The components aren't measured per touch, so touch -> inject adds the three
+    # components' own quantiles: its p95 and max are upper bounds on the pipeline's.
     write = quantiles(touch_to_write)
     one_way = quantiles([rt / 2 for rt in round_trips])
     inject = summary["inject_ms"]
     ack = summary["frame_ack_ms"]
     touch_total = {k: write[k] + one_way[k] + inject[k] for k in ("p50", "p95", "max")}
     touch_total["count"] = min(write["count"], one_way["count"], inject["count"])
-    frame_total = {k: max(ack[k] - one_way[k], 0.0) for k in ("p50", "p95", "max")}
-    frame_total["count"] = min(ack["count"], one_way["count"])
+    # Quantiles don't subtract: the ack's way back is taken off as the link's median one way.
+    frame_total = {k: max(ack[k] - one_way["p50"], 0.0) for k in ("p50", "p95", "max")}
+    frame_total["count"] = ack["count"]
     if touch_total["count"] < RUNS or frame_total["count"] < RUNS:
         raise RigFailure(f"fewer than {RUNS} samples: touch {touch_total['count']}, frame {frame_total['count']}")
 
@@ -362,9 +363,9 @@ def main() -> int:
     print(f"  phone touch -> Pointer written      {fmt(write)}   (MotionEvent time to TLS write, 1 ms clock)")
     print(f"  link one way (ping RTT / 2)         {fmt(one_way)}")
     print(f"  companion read -> recorded inject   {fmt(inject)}")
-    print(f"  touch -> recorded inject            {fmt(touch_total)}   (sum of the three rows above)")
+    print(f"  touch -> recorded inject            {fmt(touch_total)}   (sum of the three rows' quantiles; p95, max are upper bounds)")
     print(f"  companion frame send -> FrameAck    {fmt(ack)}")
-    print(f"  frame sent -> decoded on the phone  {fmt(frame_total)}   (send -> ack minus one way)")
+    print(f"  frame sent -> decoded on the phone  {fmt(frame_total)}   (send -> ack minus the median one way)")
     print(f"  frames sent {summary['frames_sent']}, acked {summary['frames_acked']}, sessions {summary['sessions']}")
     print("mirror rig: ok")
     return 0
