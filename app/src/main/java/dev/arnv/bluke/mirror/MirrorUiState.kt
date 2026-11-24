@@ -93,6 +93,19 @@ fun mirrorPhase(
 val MirrorPhase.pairingRequest: MirrorPhase.Pairing?
     get() = this as? MirrorPhase.Pairing ?: (this as? MirrorPhase.Connected)?.pairing
 
+/** How a pairing request shows: not at all, as the status card with its code, or as a chip. */
+enum class PairingPrompt { NONE, CARD, CHIP }
+
+/**
+ * The pairing-prompt rule. A request shows its code on the status card, except over a live
+ * picture: there it's a chip that leaves the picture to touch, until the person asks to see this
+ * request's code ([shownCode] is the code they asked to see, or null).
+ */
+fun MirrorPhase.pairingPrompt(shownCode: String?): PairingPrompt {
+    val request = pairingRequest ?: return PairingPrompt.NONE
+    return if (isLive && request.code != shownCode) PairingPrompt.CHIP else PairingPrompt.CARD
+}
+
 /** A short-lived message the surface shows once, over whatever else is on screen. */
 sealed interface MirrorNotice {
     data class Paired(val companionName: String) : MirrorNotice

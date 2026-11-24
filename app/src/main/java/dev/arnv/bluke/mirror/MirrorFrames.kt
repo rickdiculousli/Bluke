@@ -54,10 +54,6 @@ class FramePool<B : Any>(private val size: Int = 3, private val create: () -> B)
     published.addLast(buffer)
     while (published.size > 2) published.removeFirst()
   }
-
-  /** The newest published buffer, for the renderer; null before the first publish. */
-  @Synchronized
-  fun latest(): B? = published.lastOrNull()
 }
 
 /** The largest frame the phone takes, per axis; it tells the companion so in Welcome. */
