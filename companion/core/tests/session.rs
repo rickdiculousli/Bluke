@@ -4,7 +4,7 @@ use bluke_mirror_core::codec::{CODEC_JPEG, Message};
 use bluke_mirror_core::frames::{Capture, FrameCredit, FrameEncoder, MAX_IN_FLIGHT, Prepared, Scaled, downscale, fit};
 use bluke_mirror_core::pairing::Fingerprint;
 use bluke_mirror_core::pointer::{ClickCounter, Display, InputEvent};
-use bluke_mirror_core::session::{Bound, Close, NotPinned, SILENCE_RELEASE_US, Session};
+use bluke_mirror_core::session::{Bound, Close, MAX_FRAME_DATA, NotPinned, SILENCE_RELEASE_US, Session};
 use bluke_mirror_core::synthetic::{Schedule, Synthetic};
 
 const PHONE: Fingerprint = [0xb0; 32];
@@ -603,4 +603,31 @@ fn quick_presses_in_one_place_count_up_and_others_start_again() {
     assert_eq!(c.press(1_300_000, 100.0, 100.0), 1, "too late");
     assert_eq!(c.press(1_400_000, 130.0, 100.0), 1, "too far");
     assert_eq!(c.press(1_900_000, 130.0, 100.0), 2, "exactly at the interval still counts");
+}
+
+#[test]
+fn a_failing_capture_is_retried_once_an_interval_not_at_once() {
+    let mut s = started(0);
+    assert!(s.wants_frame(0));
+    s.capture_failed(1_000);
+    assert!(!s.wants_frame(1_000), "a failure is paced like a capture");
+    assert!(!s.wants_frame(50_999));
+    assert!(s.wants_frame(51_000), "and retried one interval later");
+    // A touch waiting to be shown doesn't pull a retry of a failing source forward.
+    s.on_message(60_000, Message::Pointer { x: 100, y: 100, buttons: 0 }, &mut Vec::new()).expect("pointer");
+    s.capture_failed(60_000);
+    assert!(!s.wants_frame(60_001));
+    assert!(s.wants_frame(110_000));
+}
+
+#[test]
+fn a_frame_too_big_for_one_message_is_skipped_not_sent() {
+    let mut s = started(0);
+    let big = Prepared { width: 480, height: 270, hash: 1, captured_us: 0, encoded: Some((CODEC_JPEG, vec![0; MAX_FRAME_DATA + 1])) };
+    assert_eq!(s.offer_frame(0, big), None);
+    assert_eq!(s.stats.skipped_oversize, 1);
+    assert_eq!(s.in_flight(), 0);
+    let fits = Prepared { width: 480, height: 270, hash: 2, captured_us: 60_000, encoded: Some((CODEC_JPEG, vec![0; MAX_FRAME_DATA])) };
+    let Some(frame) = s.offer_frame(60_000, fits) else { panic!("a frame at the limit is sent") };
+    assert_eq!(frame.encode().len(), bluke_mirror_core::codec::MAX_LEN as usize + 4, "exactly at the cap");
 }

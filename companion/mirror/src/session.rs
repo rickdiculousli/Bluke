@@ -200,6 +200,7 @@ pub fn run(
     let mut last_rx = now_us();
     let mut status_at = (now_us(), 0u64);
     let mut capture_pending = false;
+    let mut last_capture_error: Option<String> = None;
     let mut backend = capture.backend();
     let mut grab_us: Vec<u64> = Vec::new();
     let end = 'session: {
@@ -255,6 +256,7 @@ pub fn run(
                     grab_us.push(c.grab_us);
                     match c.result {
                         Ok((frame, display)) => {
+                            last_capture_error = None;
                             let mut out: Vec<Message> = session.set_display(display, inj).into_iter().collect();
                             out.extend(session.offer_frame(now_us(), frame));
                             for o in out {
@@ -263,7 +265,14 @@ pub fn run(
                                 }
                             }
                         }
-                        Err(e) => status(&format!("capture failed ({backend}): {e}")),
+                        Err(e) => {
+                            session.capture_failed(now_us());
+                            let line = format!("capture failed ({backend}): {e}");
+                            if last_capture_error.as_deref() != Some(line.as_str()) {
+                                status(&line);
+                                last_capture_error = Some(line);
+                            }
+                        }
                     }
                 }
                 Err(mpsc::RecvTimeoutError::Timeout) => {}

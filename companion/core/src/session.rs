@@ -1,7 +1,7 @@
 //! The companion's side of a session connection, without I/O: feed it messages, time and
 //! downscaled frames; it returns the messages to send and drives the injector.
 
-use crate::codec::{CODEC_JPEG, Message, VERSION, clip_str};
+use crate::codec::{CODEC_JPEG, MAX_LEN, Message, VERSION, clip_str};
 use crate::frames::{FrameCredit, Prepared};
 use crate::pairing::Fingerprint;
 use crate::pointer::{Buttons, Display, Injector};
@@ -10,6 +10,10 @@ use crate::pointer::{Buttons, Display, Injector};
 /// (Pointer, Wheel, Heartbeat, Release, Ping) counts: `FrameAck`s come from its decoder thread,
 /// so they keep flowing while a hung main thread can't lift the finger.
 pub const SILENCE_RELEASE_US: u64 = 1_000_000;
+
+/// The most image bytes one `Frame` can carry: the cap less the type byte and the frame's
+/// fixed fields (seq 4, codec 1, width 2, height 2, sent_us 8).
+pub const MAX_FRAME_DATA: usize = MAX_LEN as usize - 1 - 17;
 
 /// The phone's `Welcome` parameters.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -66,6 +70,8 @@ pub struct Stats {
     pub frames_dropped_by_phone: u64,
     pub skipped_unchanged: u64,
     pub skipped_no_credit: u64,
+    /// Captures whose encoding would not fit in one message under the 256 KiB cap.
+    pub skipped_oversize: u64,
     /// Send-to-ack time of every acknowledged frame, µs.
     pub ack_latency_us: Vec<u64>,
     /// Capture-start-to-sent time of every frame sent (grab, downscale, encode, wait), µs.
@@ -237,6 +243,12 @@ impl Session {
             self.stats.skipped_unchanged += 1;
             return None;
         };
+        if data.len() > MAX_FRAME_DATA {
+            // The phone would refuse a message past the cap and close the link: skip this one.
+            self.captured(now_us, frame.captured_us, welcome, false);
+            self.stats.skipped_oversize += 1;
+            return None;
+        }
         let sendable = self.credit.can_send();
         self.captured(now_us, frame.captured_us, welcome, sendable);
         if !sendable {
@@ -250,6 +262,16 @@ impl Session {
         self.stats.frames_sent += 1;
         self.stats.capture_to_sent_us.push(now_us.saturating_sub(frame.captured_us));
         Some(Message::Frame { seq, codec, width: frame.width, height: frame.height, sent_us: now_us, data })
+    }
+
+    /// A capture failed (say, its display went away). It counts against the frame cap like a
+    /// capture that succeeded, so a source that keeps failing is retried once an interval, not
+    /// in a busy loop; a touch waiting to be shown stays waiting.
+    pub fn capture_failed(&mut self, now_us: u64) {
+        if let Some(welcome) = self.welcome {
+            self.next_capture_us = now_us + welcome.interval_us();
+            self.last_capture_start_us = Some(now_us);
+        }
     }
 
     /// Books a capture that counts against the frame cap, offered at `now_us`. `shown` is true
