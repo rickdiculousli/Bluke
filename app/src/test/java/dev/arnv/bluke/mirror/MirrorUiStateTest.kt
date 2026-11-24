@@ -43,6 +43,20 @@ class MirrorUiStateTest {
     assertEquals(MirrorPhase.Pairing("482913", "Stranger", 3), phase(pairing = showing).pairingRequest)
   }
 
+  @Test
+  fun aRequestOverALivePictureIsAChipUntilItsCodeIsAskedFor() {
+    val live = phase(session = session, pairing = showing)
+    assertEquals(PairingPrompt.CHIP, live.pairingPrompt(shownCode = null))
+    assertEquals(PairingPrompt.CARD, live.pairingPrompt(shownCode = "482913"))
+    // Asking to see an earlier request's code doesn't open a new one.
+    assertEquals(PairingPrompt.CHIP, live.pairingPrompt(shownCode = "111111"))
+    // With no picture to keep touchable, the code shows on the card at once.
+    assertEquals(PairingPrompt.CARD, phase(session = session.copy(hasFrame = false), pairing = showing).pairingPrompt(null))
+    assertEquals(PairingPrompt.CARD, phase(pairing = showing).pairingPrompt(null))
+    assertEquals(PairingPrompt.NONE, phase(session = session).pairingPrompt(null))
+    assertEquals(PairingPrompt.NONE, phase().pairingPrompt("482913"))
+  }
+
   private val streaming = MirrorUiState(phase = MirrorPhase.Connected("Mac", null, hasFrame = true), fps = 20, latencyMs = 6)
 
   @Test

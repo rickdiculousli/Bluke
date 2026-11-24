@@ -145,16 +145,46 @@ class MirrorPairingTest {
     pairing.onClosed("c1")
     assertEquals(3, pairing.attemptsLeft)
     // Declining after a share costs an attempt: the PakeReply already let the sender check its guess.
+    clockMs += PhonePairing.DECLINE_COOLDOWN_MS
     pairing.onMessage("c2", MirrorMessage.PairRequest("Stranger"), phoneFp, companionFp)
     val party = Spake2Party(Spake2Role.A, companionFp, phoneFp, Spake2.codeToW("000000"), Spake2.AAD, Spake2.randomScalar())
     pairing.onMessage("c2", MirrorMessage.PakeShare(party.share), phoneFp, companionFp)
     assertEquals("c2", pairing.decline())
     pairing.onClosed("c2")
     assertEquals(2, pairing.attemptsLeft)
-    // The next request is served at once.
+    clockMs += PhonePairing.DECLINE_COOLDOWN_MS
     assertEquals(
         MirrorMessage.PairCode(2),
         pairing.onMessage("c3", MirrorMessage.PairRequest("Mac"), phoneFp, companionFp).reply,
+    )
+  }
+
+  @Test
+  fun aDeclineRefusesNewRequestsForAMinuteWithoutUsingAttempts() {
+    pairing.onMessage("c1", MirrorMessage.PairRequest("Stranger"), phoneFp, companionFp)
+    clockMs = 1_000
+    pairing.decline()
+    pairing.onClosed("c1")
+    // Raised again at once, and just before the minute is up: refused, nothing shown, no try used.
+    val unavailable = PairingStep(MirrorMessage.PairResult(MirrorMessage.PairResult.UNAVAILABLE), close = true)
+    assertEquals(unavailable, pairing.onMessage("c2", MirrorMessage.PairRequest("Stranger"), phoneFp, companionFp))
+    clockMs = 1_000 + PhonePairing.DECLINE_COOLDOWN_MS - 1
+    assertEquals(unavailable, pairing.onMessage("c3", MirrorMessage.PairRequest("Stranger"), phoneFp, companionFp))
+    assertEquals(PhonePairingState.Idle, pairing.state)
+    assertEquals(3, pairing.attemptsLeft)
+    // A minute on, a request shows its code again.
+    clockMs = 1_000 + PhonePairing.DECLINE_COOLDOWN_MS
+    assertEquals(
+        MirrorMessage.PairCode(3),
+        pairing.onMessage("c4", MirrorMessage.PairRequest("Mac"), phoneFp, companionFp).reply,
+    )
+    // Declining with nothing showing starts no cooldown.
+    pairing.decline()
+    clockMs += PhonePairing.DECLINE_COOLDOWN_MS
+    assertNull(pairing.decline())
+    assertEquals(
+        MirrorMessage.PairCode(3),
+        pairing.onMessage("c5", MirrorMessage.PairRequest("Mac"), phoneFp, companionFp).reply,
     )
   }
 

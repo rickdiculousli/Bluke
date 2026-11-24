@@ -74,6 +74,8 @@ class PhonePairing(
   var attemptsLeft = maxAttempts
     private set
   private var attempt: Attempt? = null
+  /** When the user last declined a request, for [DECLINE_COOLDOWN_MS]. */
+  private var declinedAtMs: Long? = null
 
   /** What the UI shows now. A code past its 120 s already reads as [PhonePairingState.Idle]. */
   val state: PhonePairingState
@@ -101,7 +103,7 @@ class PhonePairing(
       return when {
         message !is MirrorMessage.PairRequest -> PairingStep(close = true)
         attemptsLeft <= 0 -> PairingStep(MirrorMessage.PairResult(MirrorMessage.PairResult.LOCKED), close = true)
-        current != null ->
+        current != null || declinedRecently() ->
             PairingStep(MirrorMessage.PairResult(MirrorMessage.PairResult.UNAVAILABLE), close = true)
         else -> {
           attempt = Attempt(connection, drawCode(), message.name, now())
@@ -179,13 +181,18 @@ class PhonePairing(
    * The user declined the request on the phone. Before a PakeShare its code is discarded without
    * using an attempt, so a stranger's request can't eat into them; after one it uses an attempt
    * like any other end but pairing, since the PakeReply already let the sender check its guess.
-   * Returns the connection to close, or null.
+   * For [DECLINE_COOLDOWN_MS] after, new requests are refused as unavailable, so a peer on the
+   * network can't raise the request again the moment it's turned down. Returns the connection to
+   * close, or null.
    */
   fun decline(): Any? {
     val current = attempt ?: return null
     fail(strike = current.awaitingConfirm != null, reply = false)
+    declinedAtMs = now()
     return current.connection
   }
+
+  private fun declinedRecently() = declinedAtMs?.let { now() - it < DECLINE_COOLDOWN_MS } ?: false
 
   private fun isExpired(a: Attempt) =
       a.awaitingConfirm == null && now() - a.startedAtMs >= CODE_LIFETIME_MS
@@ -202,6 +209,8 @@ class PhonePairing(
     const val CODE_LIFETIME_MS = 120_000L
     /** How long after its PakeShare the companion has to send PakeConfirm. */
     const val CONFIRM_LIFETIME_MS = 15_000L
+    /** How long after a Decline new pairing requests are refused. */
+    const val DECLINE_COOLDOWN_MS = 60_000L
   }
 }
 

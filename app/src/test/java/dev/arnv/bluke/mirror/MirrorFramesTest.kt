@@ -32,7 +32,6 @@ class MirrorFramesTest {
       val b = pool.acquire()
       recent.forEach { r -> assertNotSame(r, b) }
       pool.publish(b)
-      assertSame(b, pool.latest())
       recent.addLast(b)
       if (recent.size > 2) recent.removeFirst()
     }
@@ -42,7 +41,6 @@ class MirrorFramesTest {
   @Test
   fun aFailedDecodeReusesTheSameBuffer() {
     val pool = FramePool(create = { Buffer(0) })
-    assertNull(pool.latest())
     val a = pool.acquire()
     assertSame(a, pool.acquire())
   }

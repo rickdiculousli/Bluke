@@ -58,6 +58,7 @@ class QuickCycleActivity : ComponentActivity() {
                             items = InputMode.entries.map { mode ->
                                 SettingsItemData(
                                     title = mode.displayName,
+                                    subtitle = if (mode == InputMode.MIRROR) "Needs bluke-mirror on your computer" else null,
                                     icon = { Icon(Icons.Default.SportsEsports, null, tint = MaterialTheme.colorScheme.primary) },
                                     action = {
                                         Checkbox(

@@ -263,6 +263,10 @@ def quantiles(samples_ms: list[float]) -> dict:
     return {"count": len(s), "p50": pick(0.5), "p95": pick(0.95), "max": s[-1] if s else 0.0}
 
 
+def host_uptime() -> str:
+    return subprocess.run(["uptime"], capture_output=True, text=True).stdout.strip()
+
+
 def row(label: str, q: dict) -> str:
     return f"{label:<40} {q['count']:>5} {q['p50']:8.3f} {q['p95']:8.3f} {q['max']:8.3f}"
 
@@ -341,7 +345,9 @@ def main() -> int:
                      rec.wait(len(HOLD_EXPECTED), "held press"), HOLD_EXPECTED)
 
         # 5 (before 4, which closes Mirror). Timing: RUNS more drags, then read the phone's numbers.
+        # Load on the box and the emulator before and after, so the numbers carry what they ran under.
         print(f"timing: {RUNS} drags")
+        uptimes = [("before", host_uptime(), phone.shell("uptime").strip())]
         batch = 10
         for start in range(0, RUNS, batch):
             rec.mark()
@@ -354,6 +360,8 @@ def main() -> int:
         touch_to_flush = [us / 1000 for us in state["touchToFlushUs"]]
         event_to_flush = [us / 1000 for us in state["eventToFlushUs"]]
         round_trips = [us / 1000 for us in state["pingRoundTripUs"]]
+        decoded_to_drawn = [us / 1000 for us in state["decodedToDrawnUs"]]
+        uptimes.append(("after", host_uptime(), phone.shell("uptime").strip()))
 
         # 4. A held drag is released when Mirror leaves the screen.
         rec.mark()
@@ -403,16 +411,21 @@ def main() -> int:
     rows += [
         ("companion frame sent -> FrameAck", ack),
         ("frame sent -> decoded on phone", frame_total),
+        ("phone frame decoded -> drawn", quantiles(decoded_to_drawn)),
     ]
     print()
     print("```text")
     print(f"Mirror timing: emulator, loopback through adb forward (not Wi-Fi), {RUNS} drags; ms")
+    for when, host, emulator in uptimes:
+        print(f"uptime {when}, host: {host}")
+        print(f"uptime {when}, emulator: {emulator}")
     print(f"{'row':<40} {'count':>5} {'p50':>8} {'p95':>8} {'max':>8}")
     for label, q in rows:
         print(row(label, q))
     print(f"frames sent {summary['frames_sent']}, acked {summary['frames_acked']}, sessions {summary['sessions']}")
     print("a is measured per Pointer; a+b+c adds quantiles, so its p95 and max are upper bounds.")
     print("frame sent -> decoded is send -> ack minus the median one way.")
+    print("decoded -> drawn is the decode finishing to the image's draw pass, per frame (newest 512).")
     print("```")
     print("mirror rig: ok")
     return 0
