@@ -18,6 +18,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 
 from bumble import hid
 from bumble.core import PhysicalTransport
@@ -76,6 +77,20 @@ class App:
                 self._run("shell", "input", "tap", str((x1 + x2) // 2), str((y1 + y2) // 2))
                 return True
         return False
+
+    def wait_settled(self, limit: float = 240.0) -> None:
+        """Wait for the freshly booted system to stop churning. On a loaded host its post-boot work starves
+        Settings for long enough (12 s to deliver a pairing request, 17 s to draw the dialog) that the host's
+        30 s pairing window closes before anyone can press Pair."""
+        cores = int(self._run("shell", "nproc").strip() or "1")
+        deadline = time.monotonic() + limit
+        while True:
+            load = float(self._run("shell", "cat", "/proc/loadavg").split()[0])
+            if load < cores or time.monotonic() > deadline:
+                print(f"emulator load {load:.1f} on {cores} cores"
+                      f"{'' if load < cores else ', still busy after ' + str(int(limit)) + ' s; going on'}", flush=True)
+                return
+            time.sleep(5)
 
     def restart(self) -> None:
         self._run("shell", "am", "force-stop", PACKAGE)
@@ -357,6 +372,7 @@ async def run(args: argparse.Namespace) -> int:
         address = str(device.public_address).replace("/P", "")
         print(f"host {HOST_NAME} at {address}", flush=True)
 
+        await asyncio.to_thread(app.wait_settled)
         app.restart()
         await wait_state(app, lambda s: s["serviceState"] in ("PairingMode", "ReadyDisconnected"),
                          "the app to register as a HID device", timeout=60)

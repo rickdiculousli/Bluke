@@ -29,6 +29,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.HelpOutline
+import androidx.compose.material.icons.filled.DesktopWindows
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Mouse
@@ -89,6 +90,7 @@ internal val InputMode.icon: ImageVector
         InputMode.TOUCHPAD -> Icons.Default.Mouse
         InputMode.GAMEPAD -> Icons.Default.SportsEsports
         InputMode.MEDIA_PRESENTATION -> Icons.Default.SmartDisplay
+        InputMode.MIRROR -> Icons.Default.DesktopWindows
         else -> Icons.Default.Devices
     }
 
