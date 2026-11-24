@@ -196,7 +196,8 @@ private fun ModeDock(
                     "Use this phone as",
                     style = MaterialTheme.typography.labelLarge,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(start = 4.dp).semantics { heading() },
+                    // On the tiles' content edge, as the section headers sit on the rows'.
+                    modifier = Modifier.padding(start = 16.dp).semantics { heading() },
                 )
                 InputMode.entries.chunked(if (compactHeight) 4 else 2).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -321,7 +322,7 @@ private fun HostSections(state: HomeUiState, showMacAddress: Boolean, callbacks:
                     "Scan to add another host.",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 4.dp),
+                    modifier = Modifier.padding(horizontal = 16.dp),
                 )
             }
             AnimatedVisibility(
@@ -337,7 +338,7 @@ private fun HostSections(state: HomeUiState, showMacAddress: Boolean, callbacks:
                         textAlign = TextAlign.Start,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 4.dp, vertical = 8.dp),
+                            .padding(horizontal = 16.dp, vertical = 8.dp),
                     )
                 } else {
                     HostGroup(state.nearby, connection, showMacAddress, callbacks.onConnectHost)

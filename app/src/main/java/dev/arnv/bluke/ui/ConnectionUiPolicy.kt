@@ -310,11 +310,29 @@ fun ConnectionUi.surfaceHost(): SurfaceHostInfo = when (this) {
 }
 
 /** How one host's row reads, from the same state the card reads, never from status text. */
-enum class HostRowState { IDLE, LAST_USED, WORKING, CONNECTED, FAILED }
+enum class HostRowState {
+    IDLE, LAST_USED, WORKING, DISCONNECTING, CONNECTED, FAILED,
+
+    /** The connection is busy with something a host tap can't change, so rows read as plain devices and take no taps. */
+    INERT,
+}
+
+/** A tap on a row in this state starts a connection the card and row will show. */
+val HostRowState.acceptsTap: Boolean
+    get() = this == HostRowState.IDLE || this == HostRowState.FAILED || this == HostRowState.LAST_USED
+
+/** States that take precedence over any queued target, so a row tap would change nothing on screen. */
+private val ConnectionUi.ignoresHostTaps: Boolean
+    get() = when (this) {
+        ConnectionUi.Checking, is ConnectionUi.Starting, is ConnectionUi.Disconnecting, is ConnectionUi.Blocked -> true
+        is ConnectionUi.Failed -> reason == FailReason.SERVICE_FAILED
+        else -> false
+    }
 
 fun ConnectionUi.rowState(address: String): HostRowState = when {
     this is ConnectionUi.Connected && host.address == address -> HostRowState.CONNECTED
-    this is ConnectionUi.Disconnecting && host?.address == address -> HostRowState.WORKING
+    this is ConnectionUi.Disconnecting && host?.address == address -> HostRowState.DISCONNECTING
+    ignoresHostTaps -> HostRowState.INERT
     this is ConnectionUi.Connecting && host.address == address -> HostRowState.WORKING
     this is ConnectionUi.Pairing && host.address == address -> HostRowState.WORKING
     this is ConnectionUi.Failed && host?.address == address ->

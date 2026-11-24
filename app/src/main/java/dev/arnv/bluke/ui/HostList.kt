@@ -88,7 +88,8 @@ internal fun SectionHeader(
                         .semantics { stateDescription = if (expanded == true) "Expanded" else "Collapsed" }
                 } else Modifier,
             )
-            .padding(start = 4.dp, end = 4.dp),
+            // Text on the rows' content edge, the chevron on their trailing edge.
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(
@@ -155,14 +156,15 @@ private fun HostRow(
     onConnect: () -> Unit,
 ) {
     val likely = isLikelyHost(host)
-    val clickable = likely && (state == HostRowState.IDLE || state == HostRowState.FAILED || state == HostRowState.LAST_USED)
+    val clickable = likely && state.acceptsTap
     val scheme = MaterialTheme.colorScheme
     val supporting = when (state) {
         HostRowState.CONNECTED -> "Connected"
         HostRowState.WORKING -> if (host.bonded) "Connecting…" else "Pairing…"
+        HostRowState.DISCONNECTING -> "Disconnecting…"
         HostRowState.FAILED -> "Couldn't connect"
         HostRowState.LAST_USED -> "Last used"
-        HostRowState.IDLE -> if (!likely) "Unlikely to accept a keyboard" else host.type.displayName
+        HostRowState.IDLE, HostRowState.INERT -> if (!likely) "Unlikely to accept a keyboard" else host.type.displayName
     }
     Surface(
         shape = shape,
@@ -230,11 +232,11 @@ private fun HostRow(
             Spacer(Modifier.width(8.dp))
             when (state) {
                 HostRowState.CONNECTED -> Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(24.dp))
-                HostRowState.WORKING -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
+                HostRowState.WORKING, HostRowState.DISCONNECTING -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                 HostRowState.FAILED -> ConnectPill("Try again")
                 // A paired accessory (earbuds, a watch) stays listed and tappable, but isn't advertised as a host.
                 HostRowState.IDLE -> if (likely && (host.type.isSupported || host.hidCapable)) ConnectPill("Connect")
-                HostRowState.LAST_USED -> Unit
+                HostRowState.LAST_USED, HostRowState.INERT -> Unit
             }
         }
     }
@@ -260,7 +262,7 @@ internal fun FirstHostSteps(modifier: Modifier = Modifier) {
         color = MaterialTheme.colorScheme.surfaceContainer,
         modifier = modifier.fillMaxWidth().testTag("first_host_steps"),
     ) {
-        Column(modifier = Modifier.padding(20.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        Column(modifier = Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
             Text("Connect your first host", style = MaterialTheme.typography.titleMedium, modifier = Modifier.semantics { heading() })
             listOf(
                 "Open Bluetooth settings on your computer, TV or tablet.",

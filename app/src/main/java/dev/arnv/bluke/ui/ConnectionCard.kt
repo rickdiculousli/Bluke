@@ -145,7 +145,8 @@ internal fun ConnectionCard(
         Column(
             modifier = Modifier
                 .animateContentSize(spring(stiffness = Spring.StiffnessMedium))
-                .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp),
+                // 16dp, so the card's content shares one edge with the host rows below it.
+                .padding(start = 16.dp, end = 16.dp, top = 20.dp, bottom = 8.dp),
         ) {
             Row(verticalAlignment = Alignment.Top) {
                 StatusBadge(connection.icon(), card.tone, card.busy, container)

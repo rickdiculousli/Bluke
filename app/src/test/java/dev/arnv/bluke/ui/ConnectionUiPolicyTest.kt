@@ -148,6 +148,34 @@ class ConnectionUiPolicyTest {
     }
 
     @Test
+    fun aDisconnectingHostsRowSaysSoNotConnecting() {
+        val disconnecting = ui(connected = mac.address, disconnecting = true)
+        assertEquals(HostRowState.DISCONNECTING, disconnecting.rowState(mac.address))
+        assertFalse(disconnecting.rowState(mac.address).acceptsTap)
+    }
+
+    @Test
+    fun rowsTakeNoTapsWhileATapCouldShowNothing() {
+        val busy = listOf(
+            ui(bt = BluetoothState.CheckingCapabilities, lifecycle = HidLifecycleState.Idle),
+            ui(lifecycle = HidLifecycleState.BindingProxy(1)),
+            ui(lifecycle = HidLifecycleState.Registering(2)),
+            ui(lifecycle = HidLifecycleState.Error(HidFailure.entries.first { it != HidFailure.CONNECTION_REJECTED })),
+            ui(connected = mac.address, disconnecting = true),
+            ui(disconnecting = true),
+        )
+        busy.forEach { state ->
+            assertEquals("$state", HostRowState.INERT, state.rowState(ipad.address))
+            assertFalse("$state", state.rowState(ipad.address).acceptsTap)
+        }
+        // Where a tap does show (a new target, a retry), rows still take it.
+        assertTrue(ui().rowState(ipad.address).acceptsTap)
+        assertTrue(ui(target = mac.address).rowState(ipad.address).acceptsTap)
+        val refused = ui(failure = LastConnectionFailure(ConnectionFailure.CONNECTION_REJECTED, mac.address))
+        assertTrue(refused.rowState(mac.address).acceptsTap)
+    }
+
+    @Test
     fun surfacesSeeOneHostStatus() {
         assertEquals(SurfaceHostInfo(SurfaceHostStatus.CONNECTED, mac.name, null), ui(connected = mac.address).surfaceHost())
         assertEquals(SurfaceHostStatus.CONNECTING, ui(bt = BluetoothState.CheckingCapabilities, lifecycle = HidLifecycleState.Idle).surfaceHost().status)
