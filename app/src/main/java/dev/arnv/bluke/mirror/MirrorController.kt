@@ -389,7 +389,9 @@ class MirrorController(context: Context) : MirrorFrameSource {
         var message = first
         try {
             while (true) {
+                val triesBefore: Int
                 val step = synchronized(lock) {
+                    triesBefore = pairing.attemptsLeft
                     pairing.onMessage(socket, message, identity.fingerprint, companionFingerprint)
                 }
                 step.pinned?.let { identity.pin(it) }
@@ -400,15 +402,9 @@ class MirrorController(context: Context) : MirrorFrameSource {
                 }
                 step.reply?.let { writeNow(output, it) }
                 synchronized(lock) {
-                    val result = step.reply as? MirrorMessage.PairResult
                     publishLocked(
-                        notice = when {
-                            step.pinned != null -> MirrorNotice.Paired(step.pinned.name)
-                            result != null && result.status != MirrorMessage.PairResult.PAIRED &&
-                                result.status != MirrorMessage.PairResult.UNAVAILABLE ->
-                                MirrorNotice.WrongCode(pairing.attemptsLeft)
-                            else -> null
-                        },
+                        notice = step.pinned?.let { MirrorNotice.Paired(it.name) }
+                            ?: wrongCodeNotice(triesBefore, pairing.attemptsLeft),
                     )
                 }
                 if (step.close) return
@@ -419,8 +415,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
                 val wasShowing = pairing.state is PhonePairingState.ShowingCode
                 val before = pairing.attemptsLeft
                 pairing.onClosed(socket)
-                val struck = wasShowing && pairing.attemptsLeft < before
-                publishLocked(notice = if (struck) MirrorNotice.WrongCode(pairing.attemptsLeft) else null)
+                publishLocked(notice = if (wasShowing) wrongCodeNotice(before, pairing.attemptsLeft) else null)
             }
         }
     }
@@ -557,7 +552,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
                 }
                 val before = pairing.attemptsLeft
                 pairing.expire()?.let { closeQuietly(it as SSLSocket) }
-                publishLocked(notice = if (pairing.attemptsLeft < before) MirrorNotice.WrongCode(pairing.attemptsLeft) else null)
+                publishLocked(notice = wrongCodeNotice(before, pairing.attemptsLeft))
             }
             main.postDelayed(this, TICK_MS)
         }

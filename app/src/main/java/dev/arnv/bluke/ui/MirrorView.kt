@@ -109,13 +109,17 @@ fun MirrorView(
     val context = LocalContext.current
     val controller = remember(context) { (context.applicationContext as BlukeApplication).mirrorController }
     val state by controller.state.collectAsState()
-    val hapticsEnabled = remember(sharedPrefs) { sharedPrefs.getBoolean("haptics_enabled", true) }
+    // Read again whenever the surface starts, so a change made in Settings applies on return.
+    var hapticsEnabled by remember(sharedPrefs) { mutableStateOf(sharedPrefs.getBoolean("haptics_enabled", true)) }
     val lifecycleOwner = LocalLifecycleOwner.current
     // Mirror lives exactly while its surface is on screen: listening, the Wi-Fi lock, everything.
-    DisposableEffect(lifecycleOwner, controller) {
+    DisposableEffect(lifecycleOwner, controller, sharedPrefs) {
         val observer = LifecycleEventObserver { _, event ->
             when (event) {
-                Lifecycle.Event.ON_START -> controller.start()
+                Lifecycle.Event.ON_START -> {
+                    hapticsEnabled = sharedPrefs.getBoolean("haptics_enabled", true)
+                    controller.start()
+                }
                 Lifecycle.Event.ON_STOP -> controller.stop()
                 else -> Unit
             }
@@ -410,7 +414,8 @@ private fun MirrorImage(
             .fillMaxSize()
             .onSizeChanged { surfaceSize = it }
             .onGloballyPositioned { origin = it.positionInWindow() }
-            // A drag that reaches the screen's edge moves the picture's pointer, not Back.
+            // Asks Android to leave edge-started swipes to the picture instead of Back. Android honours
+            // this only for gestures that begin at an edge, and only the bottom 200dp of each edge.
             .then(if (live) Modifier.systemGestureExclusion() else Modifier)
             .drawBehind {
                 val seq = frames.frameSeq.value
@@ -453,7 +458,11 @@ private fun MirrorImage(
                 val action = event.actionMasked
                 // Moves as they arrive, not batched to the next frame: the computer sees them sooner.
                 if (action == MotionEvent.ACTION_DOWN) view.requestUnbufferedDispatch(event)
-                val fitNow = currentFit
+                // The fit of the frame on screen now, as the draw maps it: the drawn size state lags a display change by a draw.
+                val fitNow = frames.currentFrame()
+                    ?.takeIf { surfaceSize.width > 0 }
+                    ?.let { fitMirror(it.width, it.height, surfaceSize.width.toFloat(), surfaceSize.height.toFloat(), allowRotation = true) }
+                    ?: currentFit
                 if (fitNow == null || !currentLive) {
                     marks.value = emptyList()
                     return@pointerInteropFilter true

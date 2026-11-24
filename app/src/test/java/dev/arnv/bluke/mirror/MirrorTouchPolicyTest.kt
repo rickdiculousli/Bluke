@@ -76,7 +76,8 @@ class MirrorTouchPolicyTest {
   @Test
   fun aSecondFingerReleasesTheButtonThenScrolls() {
     touch(0, f(1000f, 1000f))
-    assertEquals(listOf(Pointer(1000, 1000, 0)), touch(10, f(1000f, 1000f), f(1200f, 1000f, 2)))
+    // The button lets go, then the cursor moves to the fingers' centroid, where the wheel will act.
+    assertEquals(listOf(Pointer(1000, 1000, 0), Pointer(1100, 1000, 0)), touch(10, f(1000f, 1000f), f(1200f, 1000f, 2)))
     assertFalse(policy.buttonHeld)
     // Fingers move down 30 px: positive dy (the view scrolls up).
     assertEquals(listOf(Wheel(0, 30)), touch(20, f(1000f, 1030f), f(1200f, 1030f, 2)))
@@ -90,6 +91,18 @@ class MirrorTouchPolicyTest {
   }
 
   @Test
+  fun twoFingersLandingTogetherMoveTheCursorToTheirCentroidOnce() {
+    assertEquals(listOf(Pointer(5, 0, 0)), touch(0, f(0f, 0f), f(10f, 0f, 2)))
+    assertEquals(listOf(Wheel(0, 10)), touch(10, f(0f, 10f), f(10f, 10f, 2)))
+  }
+
+  @Test
+  fun aScrollCentroidOffTheImageMovesTheCursorToItsEdge() {
+    val letterboxed = MirrorFit(0f, 100f, 1000f, 500f, MirrorRotation.NONE)
+    assertEquals(listOf(Pointer(32768, 0, 0)), policy.update(letterboxed, listOf(f(400f, 50f), f(600f, 50f, 2)), 0).messages)
+  }
+
+  @Test
   fun subPixelScrollAccumulates() {
     touch(0, f(0f, 0f), f(10f, 0f, 2))
     assertEquals(emptyList<MirrorMessage>(), touch(10, f(0f, 0.6f), f(10f, 0.6f, 2)))
@@ -100,7 +113,7 @@ class MirrorTouchPolicyTest {
   fun hoverTwoFingersScrollWithoutAClick() {
     policy.mode = MirrorTouchMode.HOVER
     touch(0, f(100f, 100f))
-    assertEquals(emptyList<MirrorMessage>(), touch(10, f(100f, 100f), f(200f, 100f, 2)))
+    assertEquals(listOf(Pointer(150, 100, 0)), touch(10, f(100f, 100f), f(200f, 100f, 2)))
     assertEquals(listOf(Wheel(0, -5)), touch(20, f(100f, 95f), f(200f, 95f, 2)))
     assertEquals(emptyList<MirrorMessage>(), touch(30))
   }
@@ -190,7 +203,7 @@ class MirrorTouchPolicyTest {
     assertTrue(press.held)
     val scroll = touchUpdate(10, f(100f, 200f), f(300f, 200f, 2))
     assertEquals(emptyList<MirrorTouchEvent>(), scroll.events)
-    assertEquals(listOf(Pointer(100, 200, 0)), scroll.messages)
+    assertEquals(listOf(Pointer(100, 200, 0), Pointer(200, 200, 0)), scroll.messages)
     assertEquals(2, scroll.rings.size)
     assertFalse(scroll.held)
     val lift = touchUpdate(20)

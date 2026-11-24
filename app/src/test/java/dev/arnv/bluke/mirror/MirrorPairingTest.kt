@@ -106,6 +106,37 @@ class MirrorPairingTest {
     assertTrue(listOf(first, second, third).flatMap { it.steps }.all { it.pinned == null })
   }
 
+  /** The notice the controller publishes for one message: the tries before and after it, through the real rule. */
+  private fun noticeFor(connection: Any, message: MirrorMessage): MirrorNotice? {
+    val before = pairing.attemptsLeft
+    pairing.onMessage(connection, message, phoneFp, companionFp)
+    return wrongCodeNotice(before, pairing.attemptsLeft)
+  }
+
+  @Test
+  fun onlyAnUsedTryShowsAWrongCodeNotice() {
+    assertNull(noticeFor("c1", MirrorMessage.PairRequest("Mac")))
+    // A bad confirmation used a try.
+    pairing.onClosed("c1")
+    runPairing("c2", typedCode = "000000")
+    assertEquals(MirrorNotice.WrongCode(2), wrongCodeNotice(3, pairing.attemptsLeft))
+    runPairing("c3", typedCode = "000000")
+    runPairing("c4", typedCode = "000000")
+    assertEquals(PhonePairingState.Locked, pairing.state)
+    // Locked: a new request is refused and nothing was typed, so nothing is shown.
+    assertNull(noticeFor("c5", MirrorMessage.PairRequest("Mac")))
+    assertNull(noticeFor("c6", MirrorMessage.PairRequest("Mac")))
+  }
+
+  @Test
+  fun theLastStrikeStillShowsItsNotice() {
+    runPairing("c1", typedCode = "000000")
+    runPairing("c2", typedCode = "000000")
+    val before = pairing.attemptsLeft
+    runPairing("c3", typedCode = "000000")
+    assertEquals(MirrorNotice.WrongCode(0), wrongCodeNotice(before, pairing.attemptsLeft))
+  }
+
   @Test
   fun rePairingAfterASuccessReplacesThePinnedCompanion() {
     val firstPin = runPairing("c1").last.pinned!!

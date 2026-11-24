@@ -66,7 +66,8 @@ class MirrorIdentity(context: Context) {
     /**
      * TLS 1.3 with the Keystore key. The trust manager accepts any client certificate during the
      * handshake (the library still checks its CertificateVerify signature); the caller compares the
-     * peer's fingerprint with the pin before it reads or writes a single message.
+     * peer's fingerprint with the pin before it acts on any message (it reads the first message,
+     * at most 256 KiB, only to route the connection).
      */
     fun sslContext(): SSLContext {
         certificate // make sure the key exists
