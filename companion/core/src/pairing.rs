@@ -28,7 +28,7 @@ pub enum PairFailure {
     PhoneRejected,
     /// The phone has used its attempts for this Mirror session.
     Locked,
-    /// The phone is busy with another pairing.
+    /// The phone is busy with another pairing, or a request was declined in the last 60 s.
     Unavailable,
     /// The phone refused with this reason.
     Refused(u8),
@@ -44,7 +44,10 @@ impl std::fmt::Display for PairFailure {
             PairFailure::WrongCode => write!(f, "the code was wrong (nothing was pinned)"),
             PairFailure::PhoneRejected => write!(f, "the phone rejected the code (nothing was pinned)"),
             PairFailure::Locked => write!(f, "the phone has used its 3 attempts; close and reopen Mirror on the phone"),
-            PairFailure::Unavailable => write!(f, "the phone is busy with another pairing"),
+            PairFailure::Unavailable => write!(
+                f,
+                "the phone isn't taking a pairing right now (another one is in progress, or one was just declined); try again in a minute"
+            ),
             PairFailure::Refused(r) => write!(f, "the phone refused the connection (reason {r})"),
             PairFailure::BadPoint => write!(f, "the phone sent an invalid pairing share"),
             PairFailure::Unexpected(t) => write!(f, "unexpected message type 0x{t:02x} during pairing"),

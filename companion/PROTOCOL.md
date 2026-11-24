@@ -46,7 +46,7 @@ A pairing connection is one PAKE run, after which both sides close; the companio
 
 The run:
 1. The companion sends `PairRequest` only after a local action by its user: `bluke-mirror pair`, or plain `bluke-mirror` with no phone paired yet.
-2. If the phone can take an attempt, it draws a fresh code, shows it, and answers `PairCode(attempts_left)`. Otherwise it answers `PairResult(2)` when its attempts are used up, or `PairResult(3)` when it is busy with another pairing, and closes.
+2. If the phone can take an attempt, it draws a fresh code, shows it, and answers `PairCode(attempts_left)`. Otherwise it answers `PairResult(2)` when its attempts are used up, or `PairResult(3)` when it is busy with another pairing or within 60 s of the user declining one, and closes.
 3. The user types the code at the companion, which sends `PakeShare`.
 4. The phone answers `PakeReply`.
 5. The companion checks `cB`. If it fails, the companion pins nothing, tells its user the code was wrong, and closes.
