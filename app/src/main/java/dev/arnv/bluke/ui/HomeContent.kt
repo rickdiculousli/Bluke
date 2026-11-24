@@ -141,7 +141,7 @@ private fun HomeScaffold(state: HomeUiState, callbacks: HomeCallbacks, showMacAd
         bottomBar = {
             // The modes sit outside the scrolling list, in thumb reach, so a press shows the instant it lands.
             if (connection.allowsLaunch) {
-                ModeDock(hapticsEnabled = hapticsEnabled, onLaunch = callbacks.onLaunch, onModeSettings = callbacks.onModeSettings)
+                ModeDock(connection is ConnectionUi.Connected, hapticsEnabled, callbacks.onLaunch, callbacks.onModeSettings)
             }
         },
         containerColor = MaterialTheme.colorScheme.surface,
@@ -176,6 +176,7 @@ private fun HomeScaffold(state: HomeUiState, callbacks: HomeCallbacks, showMacAd
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ModeDock(
+    connected: Boolean,
     hapticsEnabled: Boolean,
     onLaunch: (InputMode) -> Unit,
     onModeSettings: (InputMode) -> Unit,
@@ -202,7 +203,7 @@ private fun ModeDock(
                 InputMode.entries.chunked(if (compactHeight) 4 else 2).forEach { row ->
                     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                         row.forEach { mode ->
-                            ModeTile(mode, compactHeight, hapticsEnabled, onLaunch, onModeSettings, Modifier.weight(1f))
+                            ModeTile(mode, compactHeight, connected, hapticsEnabled, onLaunch, onModeSettings, Modifier.weight(1f))
                         }
                         if (!compactHeight && row.size == 1) Spacer(Modifier.weight(1f))
                     }
@@ -217,6 +218,7 @@ private fun ModeDock(
 private fun ModeTile(
     mode: InputMode,
     stacked: Boolean,
+    connected: Boolean,
     hapticsEnabled: Boolean,
     onLaunch: (InputMode) -> Unit,
     onModeSettings: (InputMode) -> Unit,
@@ -235,8 +237,17 @@ private fun ModeTile(
     }
     Surface(
         shape = MaterialTheme.shapes.large,
-        color = if (pressed) scheme.secondary else scheme.surfaceContainerHighest,
-        contentColor = if (pressed) scheme.onSecondary else scheme.onSurface,
+        // Once a host is connected the modes are the next step, so they take the tonal emphasis.
+        color = when {
+            pressed -> scheme.secondary
+            connected -> scheme.secondaryContainer
+            else -> scheme.surfaceContainerHighest
+        },
+        contentColor = when {
+            pressed -> scheme.onSecondary
+            connected -> scheme.onSecondaryContainer
+            else -> scheme.onSurface
+        },
         modifier = modifier
             .heightIn(min = 64.dp)
             .testTag("mode_tile_${mode.preferenceKey}"),
@@ -252,7 +263,11 @@ private fun ModeTile(
                 onClick = { onLaunch(mode) },
             )
             .heightIn(min = 64.dp)
-        val tint = if (pressed) scheme.onSecondary else scheme.onSurfaceVariant
+        val tint = when {
+            pressed -> scheme.onSecondary
+            connected -> scheme.onSecondaryContainer
+            else -> scheme.onSurfaceVariant
+        }
         if (stacked) {
             Column(
                 modifier = click.padding(horizontal = 8.dp, vertical = 8.dp),
@@ -280,7 +295,9 @@ private fun HostSections(state: HomeUiState, showMacAddress: Boolean, callbacks:
     val connection = state.connection
     val connected = connection is ConnectionUi.Connected
     // Paired steps aside while connected or scanning, so Nearby's results show; a tap overrides that until either changes.
-    val stepAside = connected || state.isScanning
+    // ...and while the card is about a host that isn't paired (pairing it, or it refused), so its Nearby row stays in view.
+    val cardHostUnpaired = connection.host?.let { host -> host.address.isNotBlank() && state.paired.none { it.address == host.address } } == true
+    val stepAside = connected || state.isScanning || cardHostUnpaired
     var pairedOverride by rememberSaveable { mutableStateOf<Boolean?>(null) }
     LaunchedEffect(stepAside) { pairedOverride = null }
     val pairedExpanded = pairedOverride ?: !stepAside

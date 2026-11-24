@@ -177,7 +177,10 @@ internal fun ConnectionCard(
             if (card.primary != null || card.secondary != null) {
                 Spacer(Modifier.size(16.dp))
                 Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                    card.primary?.let { PrimaryActionButton(it, card.tone, onAction, Modifier.weight(1f)) }
+                    // Connected's step is picking a mode below, so Disconnect stays at its own width instead of leading.
+                    card.primary?.let {
+                        PrimaryActionButton(it, card.tone, onAction, if (it == ConnectionAction.Disconnect) Modifier else Modifier.weight(1f))
+                    }
                     card.secondary?.let { action ->
                         TextButton(onClick = { onAction(action) }, colors = ButtonDefaults.textButtonColors(contentColor = content)) {
                             Text(action.label)
