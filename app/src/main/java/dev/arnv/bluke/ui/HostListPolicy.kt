@@ -31,6 +31,10 @@ data class HostRef(
  */
 fun isLikelyHost(host: HostRef): Boolean = host.bonded || host.hidCapable || host.type.isSupported
 
+/** Home's two lists from the phone's paired and found devices. The filters touch Nearby only. */
+fun hostLists(bonded: List<HostRef>, scanned: List<HostRef>, hideUnnamed: Boolean, hideUnlikely: Boolean): Pair<List<HostRef>, List<HostRef>> =
+    pairedHosts(bonded) to nearbyHosts(scanned, bonded.mapTo(HashSet()) { it.address }, hideUnnamed, hideUnlikely)
+
 /** Paired hosts are never filtered: a host you paired is always listed. */
 fun pairedHosts(bonded: List<HostRef>): List<HostRef> = bonded.distinctBy { it.address }
 

@@ -70,6 +70,20 @@ class ConnectionUiPolicyTest {
     }
 
     @Test
+    fun pairingThatTurnsIntoConnectingRestartsTheStallClock() {
+        val pairing = attemptKey(null, ipad.address, HidLifecycleState.Registered, bondedAddresses = emptySet())
+        val connecting = attemptKey(null, ipad.address, HidLifecycleState.Connecting(ipad.address), bondedAddresses = setOf(ipad.address))
+        assertTrue(pairing != null && connecting != null && pairing != connecting)
+        assertNull(attemptKey(mac.address, null, HidLifecycleState.Connected(mac.address), setOf(mac.address)))
+    }
+
+    @Test
+    fun aNewScanReplacesAStaleFailure() {
+        val refused = LastConnectionFailure(ConnectionFailure.HOST_REFUSED_PAIRING, ipad.address)
+        assertEquals(ConnectionUi.Ready(null, scanning = true), ui(failure = refused, scanning = true))
+    }
+
+    @Test
     fun pairingWaitsOnAPersonSoTheCardHoldsStill() {
         // A spinner under Android's pairing prompt never lets the screen go idle, and the prompt is the next step.
         assertFalse(ui(target = ipad.address).card().busy)

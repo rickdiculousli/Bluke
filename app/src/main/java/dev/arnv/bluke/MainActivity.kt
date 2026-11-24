@@ -37,7 +37,11 @@ class MainActivity : ComponentActivity(), RemoteVolumeKeyHost {
 
     private val permissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
-    ) { _ ->
+    ) { results ->
+        // Only a real denial counts as asked: a prompt dismissed with Back can still be shown again.
+        if (results.values.any { granted -> !granted }) {
+            getSharedPreferences("app_prefs", MODE_PRIVATE).edit().putBoolean(PERMISSION_REQUESTED_PREFERENCE, true).apply()
+        }
         if (!::btManager.isInitialized || isDestroyed) return@registerForActivityResult
         // Notify Bluetooth service to re-check status after user interaction
         btManager.checkBluetoothCapabilities()
@@ -103,10 +107,7 @@ class MainActivity : ComponentActivity(), RemoteVolumeKeyHost {
             askedBefore = prefs.getBoolean(PERMISSION_REQUESTED_PREFERENCE, false),
             deniedShowsRationale = denied.map(::shouldShowRequestPermissionRationale),
         )) {
-            PermissionStep.REQUEST -> {
-                prefs.edit().putBoolean(PERMISSION_REQUESTED_PREFERENCE, true).apply()
-                permissionLauncher.launch(requestedPermissions())
-            }
+            PermissionStep.REQUEST -> permissionLauncher.launch(requestedPermissions())
             PermissionStep.OPEN_APP_SETTINGS -> startActivity(
                 android.content.Intent(
                     android.provider.Settings.ACTION_APPLICATION_DETAILS_SETTINGS,

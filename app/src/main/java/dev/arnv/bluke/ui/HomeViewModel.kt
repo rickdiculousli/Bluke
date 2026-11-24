@@ -175,8 +175,7 @@ class HomeViewModel(
     )
 
     private fun attemptKey(s: ManagerSnapshot): String? =
-        if (s.connected != null) null
-        else s.targetAddress ?: (s.lifecycle as? HidLifecycleState.Connecting)?.deviceAddress
+        attemptKey(s.connected?.address, s.targetAddress, s.lifecycle, s.bonded.map { it.address }.toSet())
 
     private fun build(s: ManagerSnapshot, filters: HostListFilters): HomeUiState {
         val bonded = s.bonded.map { it.toHostRef() }
@@ -195,11 +194,12 @@ class HomeViewModel(
             attemptStartedAt = attemptClock.startedAt(attemptKey(s)),
             now = now(),
         )
+        val (paired, nearby) = hostLists(bonded, scanned, filters.hideUnnamed, filters.hideUnlikely)
         return HomeUiState(
             connection = connectionUi(inputs),
             statusLine = s.statusLine,
-            paired = pairedHosts(bonded),
-            nearby = nearbyHosts(scanned, bonded.mapTo(HashSet()) { it.address }, filters.hideUnnamed, filters.hideUnlikely),
+            paired = paired,
+            nearby = nearby,
             isScanning = s.isScanning,
             connectedDevice = s.connected,
             capsLock = s.capsLock,
