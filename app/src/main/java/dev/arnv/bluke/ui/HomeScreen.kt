@@ -383,7 +383,7 @@ fun HomeScreen(
                 sharedPrefs = sharedPrefs,
                 launchMode = launchMode,
                 isConnected = isConnected,
-                host = surfaceHost(btManager, homeUiState),
+                host = surfaceHost(btManager, homeUiState, context),
                 onClose = { isKeyboardActive = false },
                 onModeChange = { newMode -> switchInputMode(newMode) },
             )

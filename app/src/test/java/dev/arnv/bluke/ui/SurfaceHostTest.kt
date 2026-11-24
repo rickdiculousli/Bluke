@@ -24,7 +24,6 @@ class SurfaceHostTest {
     fun everyStatusSaysWhatItIs() {
         assertEquals("Rick's MacBook", hostChipContent(SurfaceHost(SurfaceHostStatus.Connected, "Rick's MacBook")).label)
         assertEquals("Connecting to Desk PC", hostChipContent(SurfaceHost(SurfaceHostStatus.Connecting, "Desk PC")).label)
-        assertEquals("Connecting Desk PC", hostChipContent(SurfaceHost(SurfaceHostStatus.Connecting, "Desk PC"), compact = true).label)
         assertEquals("Connecting…", hostChipContent(SurfaceHost(SurfaceHostStatus.Connecting, null)).label)
         val offline = hostChipContent(SurfaceHost(SurfaceHostStatus.Offline, "Desk PC", onReconnect = {}))
         assertEquals("Desk PC", offline.label)
@@ -33,6 +32,34 @@ class SurfaceHostTest {
         assertEquals("No host", hostChipContent(SurfaceHost(SurfaceHostStatus.Offline, null)).label)
         assertEquals("Bluetooth unavailable", hostChipContent(SurfaceHost(SurfaceHostStatus.Blocked, null)).label)
         assertEquals("Bluetooth off", hostChipContent(SurfaceHost(SurfaceHostStatus.Blocked, null, reason = blockedReason(BluetoothState.BluetoothOff))).label)
+    }
+
+    @Test
+    fun aBlockedChipOffersTheFixATapCanMake() {
+        assertEquals(BlockedFix.TurnOnBluetooth, blockedFix(BluetoothState.BluetoothOff))
+        assertEquals(BlockedFix.OpenAppSettings, blockedFix(BluetoothState.PermissionRequired))
+        assertNull(blockedFix(BluetoothState.ProfileNotSupported))
+        assertNull(blockedFix(BluetoothState.Unsupported))
+        assertNull(blockedFix(BluetoothState.ReadyDisconnected))
+
+        val fix = BlockedFix.TurnOnBluetooth
+        val off = hostChipContent(
+            SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off", onFix = {}, fixLabel = fix.label, fixClickLabel = fix.clickLabel),
+        )
+        assertEquals("Turn on", off.action)
+        assertEquals("Turn on Bluetooth", off.clickLabel)
+        // A label with nothing to run is no action.
+        assertNull(hostChipContent(SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off", fixLabel = "Turn on")).action)
+    }
+
+    @Test
+    fun aPhoneWithoutTheHidRoleSaysSoOnEverySurface() {
+        val reason = blockedReason(BluetoothState.ProfileNotSupported)
+        assertEquals("This phone can't be a Bluetooth input", reason)
+        val content = hostChipContent(SurfaceHost(SurfaceHostStatus.Blocked, null, reason = reason))
+        assertEquals(reason, content.label)
+        assertNull(content.action)
+        assertNull(content.clickLabel)
     }
 
     @Test

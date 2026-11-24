@@ -14,7 +14,13 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -44,6 +50,7 @@ class SurfaceToolbarFitTest {
         SurfaceHost(SurfaceHostStatus.Offline, "Desk PC", onReconnect = {}),
         SurfaceHost(SurfaceHostStatus.Offline, null),
         SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off"),
+        SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off", onFix = {}, fixLabel = "Turn on", fixClickLabel = "Turn on Bluetooth"),
     )
 
     /** A portrait phone: the keyboard's toolbar used to give the host chip no width at all. */
@@ -74,6 +81,34 @@ class SurfaceToolbarFitTest {
         }
     }
 
+    /** A large landscape phone: a long name used to stop at 180dp with room to spare beside it. */
+    @Test
+    @Config(qualifiers = "w914dp-h411dp-land-420dpi")
+    fun aWideToolbarGivesTheNameItsRoom() {
+        val layouts = showToolbars()
+        hosts.indices.forEach { assertStatusWhole(it, layouts[it]) }
+        assertChipsAndTuneOnScreen()
+
+        val long = layouts[0]["name"] ?: error("Connected shows no name")
+        // Characters an ellipsis hides lay out with no width. A 180dp cap showed about 18; the
+        // room that's free here holds 30 and more.
+        val shown = (0 until long.layoutInput.text.length).count { long.getBoundingBox(it).width > 0f }
+        assertTrue("a 40-character name shows at least 30 characters, not $shown", shown >= 30)
+    }
+
+    /** A Blocked chip with a fix is a button that says what it does; one without stays a status. */
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-420dpi")
+    fun aBlockedChipWithAFixIsAButton() {
+        showToolbars()
+        val chips = compose.onAllNodesWithTag("surface_host").fetchSemanticsNodes()
+        val fix = chips[hosts.lastIndex].config
+        assertEquals(Role.Button, fix.getOrNull(SemanticsProperties.Role))
+        assertEquals("Turn on Bluetooth", fix.getOrNull(SemanticsActions.OnClick)?.label)
+        val noFix = chips[hosts.lastIndex - 1].config
+        assertNull(noFix.getOrNull(SemanticsActions.OnClick))
+    }
+
     private fun showToolbars(): List<Map<String, TextLayoutResult>> {
         val layouts = hosts.map { mutableMapOf<String, TextLayoutResult>() }
         compose.setContent {
@@ -99,7 +134,7 @@ class SurfaceToolbarFitTest {
     }
 
     private fun assertStatusWhole(index: Int, layouts: Map<String, TextLayoutResult>) {
-        val content = hostChipContent(hosts[index], compact = true)
+        val content = hostChipContent(hosts[index])
         // A Connected host's name is its status words; every other status has words of its own.
         val role = if (content.status != null) "status" else "name"
         val layout = layouts[role] ?: error("row $index shows no $role")

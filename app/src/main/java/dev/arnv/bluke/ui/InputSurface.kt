@@ -1,8 +1,18 @@
 package dev.arnv.bluke.ui
 
 import android.annotation.SuppressLint
+import android.app.Activity
+import android.bluetooth.BluetoothAdapter
 import android.bluetooth.BluetoothDevice
+import android.content.ActivityNotFoundException
+import android.content.Context
+import android.content.Intent
 import android.content.SharedPreferences
+import android.net.Uri
+import android.provider.Settings
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Bluetooth
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -38,7 +48,7 @@ internal fun InputSurface(
     val currentOnModeChange by rememberUpdatedState(onModeChange)
     // The host is rebuilt on every home-state emission; keep it (and the chrome) the same object while
     // nothing it shows changed, so a lock-light or scan update doesn't recompose the whole surface.
-    val stableHost = remember(host.status, host.name, host.reason, host.onReconnect != null) { host }
+    val stableHost = remember(host.status, host.name, host.reason, host.onReconnect != null, host.onFix != null) { host }
     val chrome = remember(mode, stableHost) {
         SurfaceChrome(
             mode = mode,
@@ -130,16 +140,46 @@ internal fun blockedReason(state: BluetoothState): String? = when (state) {
     is BluetoothState.BluetoothOff -> "Bluetooth off"
     is BluetoothState.PermissionRequired -> "Nearby devices permission needed"
     is BluetoothState.Unsupported -> "No Bluetooth on this phone"
-    is BluetoothState.ProfileNotSupported -> "Keyboard mode not supported"
+    is BluetoothState.ProfileNotSupported -> "This phone can't be a Bluetooth input"
     else -> null
+}
+
+/** A tap on a Blocked chip that clears its cause: the chip's action word and what TalkBack says it does. */
+internal enum class BlockedFix(val label: String, val clickLabel: String) {
+    TurnOnBluetooth("Turn on", "Turn on Bluetooth"),
+    // The home screen owns the runtime request; from a surface, Bluke's settings page is where it's granted.
+    OpenAppSettings("Allow", "Allow nearby devices"),
+}
+
+/** The fix for [state]'s block, when a tap can clear it; no tap gives a phone Bluetooth or an HID role. */
+internal fun blockedFix(state: BluetoothState): BlockedFix? = when (state) {
+    is BluetoothState.BluetoothOff -> BlockedFix.TurnOnBluetooth
+    is BluetoothState.PermissionRequired -> BlockedFix.OpenAppSettings
+    else -> null
+}
+
+private fun BlockedFix.intent(context: Context): Intent = when (this) {
+    BlockedFix.TurnOnBluetooth -> Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
+    BlockedFix.OpenAppSettings -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
+}
+
+private fun BlockedFix.run(context: Context) {
+    val intent = intent(context)
+    if (context !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+        context.startActivity(intent)
+    } catch (_: SecurityException) {
+    } catch (_: ActivityNotFoundException) {
+    }
 }
 
 /**
  * The [SurfaceHost] for the surface call site, from the home screen's state plus the reconnect target.
- * Offline with a bonded reconnect target, the chip reconnects to it.
+ * Offline with a bonded reconnect target, the chip reconnects to it; Blocked by something a tap can
+ * clear, the chip opens that fix from [context].
  */
 @SuppressLint("MissingPermission")
-internal fun surfaceHost(btManager: BluetoothKeyboardManager, state: HomeUiState): SurfaceHost {
+internal fun surfaceHost(btManager: BluetoothKeyboardManager, state: HomeUiState, context: Context): SurfaceHost {
     fun BluetoothDevice.label(): String? = try { name ?: address } catch (_: SecurityException) { null }
     val status = surfaceHostStatus(state.bluetoothState, state.hidLifecycleState, hasTarget = state.connectionTargetAddress != null)
     val target = btManager.getReconnectTarget()?.takeIf { it in state.bondedDevices }
@@ -159,6 +199,21 @@ internal fun surfaceHost(btManager: BluetoothKeyboardManager, state: HomeUiState
             target?.label(),
             onReconnect = target?.let { device -> { btManager.connectDevice(device) } },
         )
-        SurfaceHostStatus.Blocked -> SurfaceHost(status, null, reason = blockedReason(state.bluetoothState))
+        SurfaceHostStatus.Blocked -> {
+            val fix = blockedFix(state.bluetoothState)
+            SurfaceHost(
+                status,
+                null,
+                reason = blockedReason(state.bluetoothState),
+                onFix = fix?.let { { it.run(context) } },
+                fixLabel = fix?.label,
+                fixClickLabel = fix?.clickLabel,
+                fixIcon = when (fix) {
+                    BlockedFix.TurnOnBluetooth -> Icons.Default.Bluetooth
+                    BlockedFix.OpenAppSettings -> Icons.Default.Settings
+                    null -> null
+                },
+            )
+        }
     }
 }

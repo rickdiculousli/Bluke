@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Keyboard
 import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material3.Icon
@@ -83,6 +84,14 @@ data class SurfaceHost(
     val onReconnect: (() -> Unit)? = null,
     /** For [SurfaceHostStatus.Blocked]: the cause in a few words ("Bluetooth off"), shown instead of a generic line. */
     val reason: String? = null,
+    /** For [SurfaceHostStatus.Blocked]: what tapping the chip does to clear the cause, when a tap can. */
+    val onFix: (() -> Unit)? = null,
+    /** The fix's action word on the chip ("Turn on"). */
+    val fixLabel: String? = null,
+    /** The fix as TalkBack says it ("Turn on Bluetooth"); [fixLabel] when null. */
+    val fixClickLabel: String? = null,
+    /** The fix's icon, the whole action on a narrow phone. */
+    val fixIcon: ImageVector? = null,
 )
 
 /** What every surface's toolbar needs from the host screen: its mode, its host, and how to leave or switch. */
@@ -163,7 +172,8 @@ fun SurfaceToolbar(
         fun hostRoom(controls: Placeable?) =
             if (controls == null || controls.width == 0) shared else shared - controls.width - gap
 
-        // What gives way, in order: the controls step down (all LEDs, lit LEDs only, no LEDs) before
+        // What gives way, in order: the controls step down (all LEDs, unlit ones as bare dots, lit LEDs
+        // only, no LEDs) before
         // the host's name drops under eight characters; they step down again, then leave the toolbar,
         // before the chip's status words cut. With no room even for those, the chip keeps its dot.
         val nameFloor = floor(HostNameFloorChars)
@@ -193,7 +203,7 @@ fun SurfaceToolbar(
  * How much room the toolbar gives the surface's own controls, the widest that still leaves the host
  * chip its floor. [SurfaceToolbarLeds] reads it; other controls keep their size.
  */
-internal enum class SurfaceToolbarRoom { Full, LitOnly, NoLeds }
+internal enum class SurfaceToolbarRoom { Full, UnlitDots, LitOnly, NoLeds }
 
 internal val LocalSurfaceToolbarRoom = staticCompositionLocalOf { SurfaceToolbarRoom.Full }
 
@@ -249,11 +259,18 @@ private fun ModeButton(chrome: SurfaceChrome, haptics: SurfaceHaptics, compact: 
  * The words a [SurfaceHost] shows; pure so a test can read every status. [status] words never
  * truncate; only [name], the host's own name, ellipsizes when it's long.
  */
-internal data class HostChipContent(val status: String?, val name: String?, val action: String?, val description: String) {
+internal data class HostChipContent(
+    val status: String?,
+    val name: String?,
+    val action: String?,
+    val description: String,
+    /** What TalkBack says tapping the chip does; null when the chip isn't a button. */
+    val clickLabel: String? = action,
+) {
     val label: String get() = listOfNotNull(status, name).joinToString(" ")
 }
 
-internal fun hostChipContent(host: SurfaceHost, compact: Boolean = false): HostChipContent {
+internal fun hostChipContent(host: SurfaceHost): HostChipContent {
     val name = host.name?.takeIf { it.isNotBlank() }
     return when (host.status) {
         SurfaceHostStatus.Connected -> HostChipContent(
@@ -263,8 +280,7 @@ internal fun hostChipContent(host: SurfaceHost, compact: Boolean = false): HostC
             description = "Connected to ${name ?: "host"}",
         )
         SurfaceHostStatus.Connecting -> HostChipContent(
-            // On a narrow phone the ring dot already says "on the way", so the name gets the room.
-            status = if (name == null) "Connecting…" else if (compact) "Connecting" else "Connecting to",
+            status = if (name == null) "Connecting…" else "Connecting to",
             name = name,
             action = null,
             description = "Connecting to ${name ?: "host"}",
@@ -275,12 +291,16 @@ internal fun hostChipContent(host: SurfaceHost, compact: Boolean = false): HostC
             action = if (host.onReconnect != null) "Reconnect" else null,
             description = if (name != null) "Offline. Last host $name" else "Offline. No host paired",
         )
-        SurfaceHostStatus.Blocked -> HostChipContent(
-            status = host.reason ?: "Bluetooth unavailable",
-            name = null,
-            action = null,
-            description = host.reason ?: "Bluetooth unavailable",
-        )
+        SurfaceHostStatus.Blocked -> {
+            val fix = host.fixLabel?.takeIf { host.onFix != null }
+            HostChipContent(
+                status = host.reason ?: "Bluetooth unavailable",
+                name = null,
+                action = fix,
+                description = host.reason ?: "Bluetooth unavailable",
+                clickLabel = fix?.let { host.fixClickLabel ?: it },
+            )
+        }
     }
 }
 
@@ -297,7 +317,7 @@ internal val LocalHostChipTextLayout = staticCompositionLocalOf<(role: String, T
 @Composable
 private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, compact: Boolean, probeNameChars: Int? = null) {
     val colors = MaterialTheme.colorScheme
-    val content = hostChipContent(host, compact).let { full ->
+    val content = hostChipContent(host).let { full ->
         when {
             probeNameChars == null || full.name == null -> full
             // At zero the probe is the status words alone; a name that is the status keeps a hint of itself.
@@ -307,7 +327,12 @@ private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, compact: Boolea
         }
     }
     val observe = LocalHostChipTextLayout.current.takeIf { probeNameChars == null } ?: { _, _ -> }
-    val reconnect = host.onReconnect.takeIf { host.status == SurfaceHostStatus.Offline }
+    // Offline, a tap reconnects; Blocked, a tap clears the cause where one can.
+    val tap = when (host.status) {
+        SurfaceHostStatus.Offline -> host.onReconnect
+        SurfaceHostStatus.Blocked -> host.onFix
+        else -> null
+    }?.takeIf { content.action != null }
     val shape = CircleShape
     var chip = Modifier
         .minimumInteractiveComponentSize()
@@ -317,12 +342,15 @@ private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, compact: Boolea
         .border(1.dp, colors.outlineVariant, shape)
     chip = when {
         probeNameChars != null -> chip.clearAndSetSemantics {}
-        reconnect != null -> chip.semantics { liveRegion = LiveRegionMode.Polite; stateDescription = "Offline" }.clickable(
-            onClickLabel = "Reconnect",
+        tap != null -> chip.semantics {
+            liveRegion = LiveRegionMode.Polite
+            if (host.status == SurfaceHostStatus.Offline) stateDescription = "Offline"
+        }.clickable(
+            onClickLabel = content.clickLabel,
             role = Role.Button,
             onClick = {
                 haptics.perform(HapticEvent.PRESS)
-                reconnect()
+                tap()
             },
         ).testTag("surface_host")
         // The tag goes first: clearAndSetSemantics drops what comes after it.
@@ -338,7 +366,7 @@ private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, compact: Boolea
     ) {
         HostDot(host.status)
         val textColor = if (host.status == SurfaceHostStatus.Connected) colors.onSurface else colors.onSurfaceVariant
-        // What gives way, in order: the host's name, then status words; the Reconnect action never does.
+        // What gives way, in order: the host's name, then status words; the action never does.
         Row(
             modifier = Modifier.weight(1f, fill = false),
             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -365,13 +393,14 @@ private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, compact: Boolea
                     softWrap = false,
                     overflow = TextOverflow.Ellipsis,
                     onTextLayout = { observe("name", it) },
-                    modifier = Modifier.weight(1f, fill = false).widthIn(max = 180.dp),
+                    modifier = Modifier.weight(1f, fill = false),
                 )
             }
         }
         if (content.action != null) {
-            Icon(Icons.Default.Refresh, contentDescription = null, tint = colors.primary, modifier = Modifier.size(if (compact) 20.dp else 16.dp))
-            // On a narrow phone the icon alone is the action, so the name keeps the room; TalkBack still hears "Reconnect".
+            val icon = if (host.status == SurfaceHostStatus.Blocked) host.fixIcon ?: Icons.Default.Settings else Icons.Default.Refresh
+            Icon(icon, contentDescription = null, tint = colors.primary, modifier = Modifier.size(if (compact) 20.dp else 16.dp))
+            // On a narrow phone the icon alone is the action, so the name keeps the room; TalkBack still hears it.
             if (!compact) Text(content.action, style = MaterialTheme.typography.labelLarge, color = colors.primary, maxLines = 1)
         }
     }
@@ -422,7 +451,7 @@ fun SurfaceToolbarIconButton(
 /**
  * Indicator LEDs with a label each, in one 40dp group (the keyboard's lock lights, the touchpad's
  * numpad). Each LED is its own 48dp-wide toggle; [onToggle] gets the index tapped. When the toolbar
- * is short of room for the host chip, only the lit LEDs show, then none.
+ * is short of room for the host chip, unlit LEDs shrink to their dots, then only the lit LEDs show, then none.
  */
 @Composable
 fun SurfaceToolbarLeds(
@@ -433,7 +462,7 @@ fun SurfaceToolbarLeds(
     val colors = MaterialTheme.colorScheme
     // When the toolbar is tight the unlit LEDs give way to the host chip; with no room, the group goes.
     val shown = when (LocalSurfaceToolbarRoom.current) {
-        SurfaceToolbarRoom.Full -> leds.indices.toList()
+        SurfaceToolbarRoom.Full, SurfaceToolbarRoom.UnlitDots -> leds.indices.toList()
         SurfaceToolbarRoom.LitOnly -> leds.indices.filter { leds[it].second }
         SurfaceToolbarRoom.NoLeds -> emptyList()
     }
@@ -455,13 +484,18 @@ fun SurfaceToolbarLeds(
     ) {
         shown.forEach { index ->
             val (label, lit) = leds[index]
+            // A tight toolbar keeps an unlit LED as its bare dot, so "off" still reads as off, not gone.
+            val bare = !lit && LocalSurfaceToolbarRoom.current == SurfaceToolbarRoom.UnlitDots
             Row(
                 modifier = Modifier
                     .minimumInteractiveComponentSize()
                     .widthIn(min = 48.dp)
                     .toggleable(value = lit, role = Role.Switch, onValueChange = { onToggle(index) })
-                    .semantics { stateDescription = if (lit) "On" else "Off" }
-                    .padding(horizontal = 8.dp),
+                    .semantics {
+                        stateDescription = if (lit) "On" else "Off"
+                        if (bare) contentDescription = label
+                    }
+                    .padding(horizontal = if (bare) 4.dp else 8.dp),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
             ) {
@@ -471,12 +505,14 @@ fun SurfaceToolbarLeds(
                         .clip(CircleShape)
                         .background(if (lit) SurfaceTokens.LedLit else colors.outline),
                 )
-                Text(
-                    label,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = if (lit) colors.onSurface else colors.onSurfaceVariant,
-                    maxLines = 1,
-                )
+                if (!bare) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (lit) colors.onSurface else colors.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
             }
         }
     }
