@@ -3,7 +3,6 @@ package dev.arnv.bluke.ui
 import android.content.Context
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
@@ -42,10 +41,7 @@ class SurfaceToolbarScreenshotTest {
             SurfaceHost(SurfaceHostStatus.Connecting, "Desk PC"),
             SurfaceHost(SurfaceHostStatus.Offline, "Desk PC", onReconnect = {}),
             SurfaceHost(SurfaceHostStatus.Offline, null),
-            SurfaceHost(
-                SurfaceHostStatus.Blocked, null, reason = "Bluetooth off",
-                onFix = {}, fixLabel = "Turn on", fixClickLabel = "Turn on Bluetooth", fixIcon = Icons.Default.Bluetooth,
-            ),
+            SurfaceHost(SurfaceHostStatus.Blocked, null, reason = BlockReason.BLUETOOTH_OFF.chipReason),
             SurfaceHost(SurfaceHostStatus.Blocked, null, reason = BlockReason.NO_HID_ROLE.chipReason),
         )
         captureMatrix(name = name, landscape = landscape) {

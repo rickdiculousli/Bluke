@@ -119,7 +119,6 @@ fun HomeScreen(
 
     val surfaceHost = connection.surfaceHost(
         onReconnect = { host -> homeViewModel.device(host.address)?.let(btManager::connectDevice) },
-        onFix = { fix -> fix.run(context) },
     )
     val isConnected = surfaceHost.status == SurfaceHostStatus.Connected
     val keyboardState = rememberKeyboardSurfaceState(btManager, soundSynth, sharedPrefs, homeUiState, isConnected)

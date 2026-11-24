@@ -1,13 +1,6 @@
 package dev.arnv.bluke.ui
 
-import android.app.Activity
-import android.bluetooth.BluetoothAdapter
-import android.content.ActivityNotFoundException
-import android.content.Context
-import android.content.Intent
 import android.content.SharedPreferences
-import android.net.Uri
-import android.provider.Settings
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
@@ -41,7 +34,7 @@ internal fun InputSurface(
     val currentOnModeChange by rememberUpdatedState(onModeChange)
     // The host is rebuilt on every home-state emission; keep it (and the chrome) the same object while
     // nothing it shows changed, so a lock-light or scan update doesn't recompose the whole surface.
-    val stableHost = remember(host.status, host.name, host.reason, host.onReconnect != null, host.onFix != null) { host }
+    val stableHost = remember(host.status, host.name, host.reason, host.onReconnect != null) { host }
     val chrome = remember(mode, stableHost) {
         SurfaceChrome(
             mode = mode,
@@ -115,18 +108,4 @@ internal fun caseBrush(theme: KeyboardThemeDefinition): Brush {
         start = Offset(0f, 0f),
         end = Offset(500f, 500f),
     )
-}
-
-/** Opens the screen that clears a Blocked chip's cause, from a surface that may not be an activity's own context. */
-internal fun BlockedFix.run(context: Context) {
-    val intent = when (this) {
-        BlockedFix.TurnOnBluetooth -> Intent(BluetoothAdapter.ACTION_REQUEST_ENABLE)
-        BlockedFix.OpenAppSettings -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", context.packageName, null))
-    }
-    if (context !is Activity) intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-    try {
-        context.startActivity(intent)
-    } catch (_: SecurityException) {
-    } catch (_: ActivityNotFoundException) {
-    }
 }

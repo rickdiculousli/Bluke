@@ -1,9 +1,5 @@
 package dev.arnv.bluke.ui
 
-import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Bluetooth
-import androidx.compose.material.icons.filled.Settings
-import androidx.compose.ui.graphics.vector.ImageVector
 import dev.arnv.bluke.bluetooth.BluetoothState
 import dev.arnv.bluke.bluetooth.ConnectionFailure
 import dev.arnv.bluke.bluetooth.HidFailure
@@ -303,13 +299,6 @@ val ConnectionUi.host: HostRef?
         else -> null
     }
 
-/** A tap on a Blocked chip that clears its cause: the chip's action word and what TalkBack says it does. */
-enum class BlockedFix(val label: String, val clickLabel: String, val icon: ImageVector) {
-    TurnOnBluetooth("Turn on", "Turn on Bluetooth", Icons.Default.Bluetooth),
-    // Home owns the runtime request; from a surface, Bluke's settings page is where it's granted.
-    OpenAppSettings("Allow", "Allow nearby devices", Icons.Default.Settings),
-}
-
 /** The block's cause in a few words, short enough to stay whole in a portrait chip at large text. */
 val BlockReason.chipReason: String
     get() = when (this) {
@@ -319,23 +308,12 @@ val BlockReason.chipReason: String
         BlockReason.NO_HID_ROLE -> "Phone not supported"
     }
 
-/** The fix a tap can make; no tap gives a phone Bluetooth or an HID role. */
-val BlockReason.fix: BlockedFix?
-    get() = when (this) {
-        BlockReason.BLUETOOTH_OFF -> BlockedFix.TurnOnBluetooth
-        BlockReason.PERMISSION_MISSING -> BlockedFix.OpenAppSettings
-        BlockReason.NO_ADAPTER, BlockReason.NO_HID_ROLE -> null
-    }
-
 /**
  * The input surfaces' host chip, read from the same state as the card, so "connected" has one source.
  * Checking and Starting read as Connecting (the surface stays open and says so); the chip reconnects to a
- * bonded host [onReconnect] names, and a Blocked chip runs [onFix] when a tap can clear the cause.
+ * bonded host [onReconnect] names, and a Blocked chip names the cause (the home card offers its fix).
  */
-fun ConnectionUi.surfaceHost(
-    onReconnect: (HostRef) -> Unit = {},
-    onFix: (BlockedFix) -> Unit = {},
-): SurfaceHost {
+fun ConnectionUi.surfaceHost(onReconnect: (HostRef) -> Unit = {}): SurfaceHost {
     fun offline(host: HostRef?, reconnect: HostRef?) = SurfaceHost(
         SurfaceHostStatus.Offline,
         host?.displayName,
@@ -350,18 +328,7 @@ fun ConnectionUi.surfaceHost(
         is ConnectionUi.Disconnecting -> offline(host, reconnect = null)
         is ConnectionUi.Ready -> offline(reconnectHost, reconnectHost)
         is ConnectionUi.Failed -> offline(host, if (reason == FailReason.STALLED) null else host?.takeIf { it.bonded })
-        is ConnectionUi.Blocked -> {
-            val fix = reason.fix
-            SurfaceHost(
-                SurfaceHostStatus.Blocked,
-                null,
-                reason = reason.chipReason,
-                onFix = fix?.let { { onFix(it) } },
-                fixLabel = fix?.label,
-                fixClickLabel = fix?.clickLabel,
-                fixIcon = fix?.icon,
-            )
-        }
+        is ConnectionUi.Blocked -> SurfaceHost(SurfaceHostStatus.Blocked, null, reason = reason.chipReason)
     }
 }
 

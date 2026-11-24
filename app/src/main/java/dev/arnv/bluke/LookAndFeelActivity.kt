@@ -25,6 +25,8 @@ import androidx.compose.ui.unit.dp
 import dev.arnv.bluke.ui.SettingsCardGroup
 import dev.arnv.bluke.ui.SettingsItemData
 import dev.arnv.bluke.ui.theme.MyApplicationTheme
+import dev.arnv.bluke.ui.theme.PALETTE_STYLE_PREFERENCE
+import dev.arnv.bluke.ui.theme.PaletteStyle
 import dev.arnv.bluke.ui.theme.AccentColors
 import dev.arnv.bluke.ui.theme.getCookieShape
 import kotlinx.coroutines.launch
@@ -46,7 +48,7 @@ class LookAndFeelActivity : ComponentActivity() {
             MyApplicationTheme {
                 var dynamicColor by remember { mutableStateOf(sharedPrefs.getBoolean("dynamic_color", isDynamicColorDefault)) }
                 var accentColorIndex by remember { mutableIntStateOf(sharedPrefs.getInt("accent_color_index", 0)) }
-                var paletteStyleState by remember { mutableStateOf(sharedPrefs.getString("palette_style", "Tonal Spot") ?: "Tonal Spot") }
+                var paletteStyleState by remember { mutableStateOf(PaletteStyle.fromPreference(sharedPrefs.getString(PALETTE_STYLE_PREFERENCE, null))) }
                 
                 var hapticsEnabled by remember { mutableStateOf(sharedPrefs.getBoolean("haptics_enabled", true)) }
                 var keySoundEnabled by remember { mutableStateOf(sharedPrefs.getBoolean("key_sound_enabled", true)) }
@@ -207,7 +209,7 @@ class LookAndFeelActivity : ComponentActivity() {
                                 ),
                                 SettingsItemData(
                                     title = "Palette style",
-                                    subtitle = paletteStyleState,
+                                    subtitle = paletteStyleState.label,
                                     icon = { Icon(Icons.Default.Palette, null, tint = MaterialTheme.colorScheme.primary) },
                                     onClick = { showPaletteDialog = true }
                                 )
@@ -220,18 +222,18 @@ class LookAndFeelActivity : ComponentActivity() {
                                 title = { Text("Palette style") },
                                 text = {
                                     Column {
-                                        listOf("Tonal Spot", "Vibrant", "Expressive", "Rainbow", "Fruit Salad", "Fidelity", "Content", "Neutral", "Monochrome").forEach { option ->
+                                        PaletteStyle.entries.forEach { option ->
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 modifier = Modifier.fillMaxWidth().clickable { 
                                                     paletteStyleState = option
-                                                    sharedPrefs.edit { putString("palette_style", option) }
+                                                    sharedPrefs.edit { putString(PALETTE_STYLE_PREFERENCE, option.preferenceValue) }
                                                     showPaletteDialog = false 
                                                 }.padding(vertical = 8.dp)
                                             ) {
                                                 RadioButton(selected = option == paletteStyleState, onClick = null)
                                                 Spacer(Modifier.width(16.dp))
-                                                Text(option)
+                                                Text(option.label)
                                             }
                                         }
                                     }

@@ -61,22 +61,12 @@ class SurfaceHostTest {
     }
 
     @Test
-    fun aBlockedChipOffersTheFixATapCanMake() {
-        val fixes = mutableListOf<BlockedFix>()
-        val off = ConnectionUi.Blocked(BlockReason.BLUETOOTH_OFF).surfaceHost(onFix = { fixes += it })
-        val content = hostChipContent(off)
-        assertEquals("Bluetooth off", content.label)
-        assertEquals("Turn on", content.action)
-        assertEquals("Turn on Bluetooth", content.clickLabel)
-        off.onFix!!.invoke()
-        assertEquals(listOf(BlockedFix.TurnOnBluetooth), fixes)
-
-        val permission = hostChipContent(ConnectionUi.Blocked(BlockReason.PERMISSION_MISSING).surfaceHost())
-        assertEquals("Allow", permission.action)
-        assertEquals("Allow nearby devices", permission.clickLabel)
-        assertNull(ConnectionUi.Blocked(BlockReason.NO_ADAPTER).surfaceHost().onFix)
-        // A label with nothing to run is no action.
-        assertNull(hostChipContent(SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off", fixLabel = "Turn on")).action)
+    fun aBlockedChipNamesTheCauseAndLeavesTheFixToHome() {
+        for (reason in BlockReason.entries) {
+            val content = hostChipContent(ConnectionUi.Blocked(reason).surfaceHost())
+            assertEquals(reason.chipReason, content.label)
+            assertNull("$reason offers no tap; the home card has the fix", content.action)
+        }
     }
 
     @Test
@@ -84,7 +74,6 @@ class SurfaceHostTest {
         val content = hostChipContent(ConnectionUi.Blocked(BlockReason.NO_HID_ROLE).surfaceHost())
         assertEquals("Phone not supported", content.label)
         assertNull(content.action)
-        assertNull(content.clickLabel)
     }
 
     @Test

@@ -59,7 +59,6 @@ class SurfaceToolbarFitTest {
         SurfaceHost(SurfaceHostStatus.Offline, "Desk PC", onReconnect = {}),
         SurfaceHost(SurfaceHostStatus.Offline, null),
         SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off"),
-        SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off", onFix = {}, fixLabel = "Turn on", fixClickLabel = "Turn on Bluetooth"),
         SurfaceHost(SurfaceHostStatus.Blocked, null, reason = BlockReason.NO_HID_ROLE.chipReason),
     )
 
@@ -109,17 +108,17 @@ class SurfaceToolbarFitTest {
         assertLedsLabelledAndTargetsSpacedAtBothScales()
     }
 
-    /** A Blocked chip with a fix is a button that says what it does; one without stays a status. */
+    /** A Blocked chip is a status that names its cause, not a button; Offline with a host to reconnect is one. */
     @Test
     @Config(qualifiers = "w411dp-h914dp-port-420dpi")
-    fun aBlockedChipWithAFixIsAButton() {
+    fun aBlockedChipIsAStatusNotAButton() {
         showToolbars()
         val chips = compose.onAllNodesWithTag("surface_host").fetchSemanticsNodes()
-        val fix = chips[hosts.indexOfFirst { it.onFix != null }].config
-        assertEquals(Role.Button, fix.getOrNull(SemanticsProperties.Role))
-        assertEquals("Turn on Bluetooth", fix.getOrNull(SemanticsActions.OnClick)?.label)
-        val noFix = chips[hosts.indexOfFirst { it.status == SurfaceHostStatus.Blocked && it.onFix == null }].config
-        assertNull(noFix.getOrNull(SemanticsActions.OnClick))
+        val reconnect = chips[hosts.indexOfFirst { it.onReconnect != null }].config
+        assertEquals(Role.Button, reconnect.getOrNull(SemanticsProperties.Role))
+        hosts.indices.filter { hosts[it].status == SurfaceHostStatus.Blocked }.forEach {
+            assertNull("${hosts[it].reason} is no button", chips[it].config.getOrNull(SemanticsActions.OnClick))
+        }
     }
 
     /** The touchpad's two labelled toggles hold the same rules at every width, at both font scales. */

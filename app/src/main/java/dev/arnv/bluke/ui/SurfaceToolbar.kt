@@ -28,7 +28,6 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowRight
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -79,14 +78,6 @@ data class SurfaceHost(
     val onReconnect: (() -> Unit)? = null,
     /** For [SurfaceHostStatus.Blocked]: the cause in a few words ("Bluetooth off"), shown instead of a generic line. */
     val reason: String? = null,
-    /** For [SurfaceHostStatus.Blocked]: what tapping the chip does to clear the cause, when a tap can. */
-    val onFix: (() -> Unit)? = null,
-    /** The fix's action word on the chip ("Turn on"). */
-    val fixLabel: String? = null,
-    /** The fix as TalkBack says it ("Turn on Bluetooth"); [fixLabel] when null. */
-    val fixClickLabel: String? = null,
-    /** The fix's icon, the whole action on a narrow phone. */
-    val fixIcon: ImageVector? = null,
 )
 
 /** What every surface's toolbar needs from the host screen: its mode, its host, and how to leave or switch. */
@@ -270,8 +261,6 @@ internal data class HostChipContent(
     val name: String?,
     val action: String?,
     val description: String,
-    /** What TalkBack says tapping the chip does; null when the chip isn't a button. */
-    val clickLabel: String? = action,
 ) {
     val label: String get() = listOfNotNull(status, name).joinToString(" ")
 }
@@ -300,16 +289,13 @@ internal fun hostChipContent(host: SurfaceHost, compact: Boolean = false, withNa
             action = if (host.onReconnect != null) "Reconnect" else null,
             description = if (name != null) "Offline. Last host $name" else "Offline. No host paired",
         )
-        SurfaceHostStatus.Blocked -> {
-            val fix = host.fixLabel?.takeIf { host.onFix != null }
-            HostChipContent(
-                status = host.reason ?: "Bluetooth unavailable",
-                name = null,
-                action = fix,
-                description = host.reason ?: "Bluetooth unavailable",
-                clickLabel = fix?.let { host.fixClickLabel ?: it },
-            )
-        }
+        // The home card offers the fix; the surface closes once the connection is Blocked.
+        SurfaceHostStatus.Blocked -> HostChipContent(
+            status = host.reason ?: "Bluetooth unavailable",
+            name = null,
+            action = null,
+            description = host.reason ?: "Bluetooth unavailable",
+        )
     }
 }
 
@@ -336,12 +322,8 @@ private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, compact: Boolea
         }
     }
     val observe = LocalHostChipTextLayout.current.takeIf { probeNameChars == null } ?: { _, _ -> }
-    // Offline, a tap reconnects; Blocked, a tap clears the cause where one can.
-    val tap = when (host.status) {
-        SurfaceHostStatus.Offline -> host.onReconnect
-        SurfaceHostStatus.Blocked -> host.onFix
-        else -> null
-    }?.takeIf { content.action != null }
+    // Offline, a tap reconnects.
+    val tap = host.onReconnect?.takeIf { host.status == SurfaceHostStatus.Offline && content.action != null }
     val shape = CircleShape
     var chip = Modifier
         .minimumInteractiveComponentSize()
@@ -355,7 +337,7 @@ private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, compact: Boolea
             liveRegion = LiveRegionMode.Polite
             if (host.status == SurfaceHostStatus.Offline) stateDescription = "Offline"
         }.clickable(
-            onClickLabel = content.clickLabel,
+            onClickLabel = content.action,
             role = Role.Button,
             onClick = {
                 haptics.perform(HapticEvent.PRESS)
@@ -407,8 +389,7 @@ private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, compact: Boolea
             }
         }
         if (content.action != null) {
-            val icon = if (host.status == SurfaceHostStatus.Blocked) host.fixIcon ?: Icons.Default.Settings else Icons.Default.Refresh
-            Icon(icon, contentDescription = null, tint = colors.primary, modifier = Modifier.size(if (compact) 20.dp else 16.dp))
+            Icon(Icons.Default.Refresh, contentDescription = null, tint = colors.primary, modifier = Modifier.size(if (compact) 20.dp else 16.dp))
             // On a narrow phone the icon alone is the action, so the name keeps the room; TalkBack still hears it.
             if (!compact) Text(content.action, style = MaterialTheme.typography.labelLarge, color = colors.primary, maxLines = 1)
         }
