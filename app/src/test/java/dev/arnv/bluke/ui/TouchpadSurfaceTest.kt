@@ -27,6 +27,7 @@ import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performSemanticsAction
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -67,7 +68,7 @@ class TouchpadSurfaceTest {
         manager.close()
     }
 
-    private fun showTouchpad(visible: () -> Boolean = { true }) {
+    private fun showTouchpad(modifierStyle: KeyboardModifierStyle = KeyboardModifierStyle.PC, visible: () -> Boolean = { true }) {
         compose.setContent {
             CompositionLocalProvider(LocalHapticPerformer provides haptics, LocalMouseReportSink provides sink) {
                 SurfaceTheme {
@@ -77,6 +78,7 @@ class TouchpadSurfaceTest {
                             chrome = previewChrome(InputMode.TOUCHPAD),
                             sharedPrefs = prefs,
                             caseBrush = SolidColor(Color(0xFF1E1E20)),
+                            modifierStyle = modifierStyle,
                         )
                     }
                 }
@@ -303,29 +305,95 @@ class TouchpadSurfaceTest {
         assertEquals("right", prefs.getString(TOUCHPAD_MODIFIER_POSITION_PREFERENCE, null))
     }
 
+    private val held = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Held")
+    private val released = SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Released")
+
     @Test
     fun noRailKeyLooksHeldUntilItIsHeld() {
         TouchpadTuneState(modifierPosition = TouchpadModifierPosition.LEFT).write(prefs)
         showTouchpad()
-        val labels = listOf("Ctrl", "Shift", "Alt", "Meta")
-        labels.forEach { compose.onNodeWithTag("touchpad_rail_key_$it").assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, false)) }
+        val labels = listOf("Ctrl", "Shift", "Alt", "Win")
+        labels.forEach { compose.onNodeWithTag("touchpad_rail_key_$it").assert(released) }
         val idle = drawWindow()
         val colours = labels.map { centrePixel(idle, "touchpad_rail_key_$it") }
         assertEquals("every unheld rail key draws alike: $colours", 1, colours.toSet().size)
 
-        val meta = compose.onNodeWithTag("touchpad_rail_key_Meta")
-        meta.performTouchInput { down(center) }
+        val win = compose.onNodeWithTag("touchpad_rail_key_Win")
+        win.performTouchInput { down(center) }
         compose.waitForIdle()
-        meta.assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true))
-        assertNotEquals("a held key draws differently", colours.first(), centrePixel(drawWindow(), "touchpad_rail_key_Meta"))
-        meta.performTouchInput { up() }
+        win.assert(held)
+        assertNotEquals("a held key draws differently", colours.first(), centrePixel(drawWindow(), "touchpad_rail_key_Win"))
+        win.performTouchInput { up() }
         compose.waitForIdle()
+        win.assert(released)
+    }
+
+    @Test
+    fun railKeysUseTheKeyboardsNamesForTheHostStyle() {
+        TouchpadTuneState(modifierPosition = TouchpadModifierPosition.LEFT).write(prefs)
+        showTouchpad(KeyboardModifierStyle.PC)
+        compose.onNodeWithTag("touchpad_rail_key_Win").assertExists()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Windows")))
+        compose.onNodeWithTag("touchpad_rail_key_Meta").assertDoesNotExist()
+    }
+
+    @Test
+    fun railKeysUseMacNamesOnAMacHost() {
+        TouchpadTuneState(modifierPosition = TouchpadModifierPosition.LEFT).write(prefs)
+        showTouchpad(KeyboardModifierStyle.MAC)
+        compose.onNodeWithTag("touchpad_rail_key_Cmd").assertExists()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Command")))
+        compose.onNodeWithTag("touchpad_rail_key_Opt").assertExists()
+    }
+
+    @Test
+    fun talkBackLatchesARailKeyUntilItIsActivatedAgain() {
+        TouchpadTuneState(modifierPosition = TouchpadModifierPosition.LEFT).write(prefs)
+        showTouchpad()
+        val ctrl = compose.onNodeWithTag("touchpad_rail_key_Ctrl")
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Switch))
+            .assert(SemanticsMatcher.keyIsDefined(SemanticsActions.OnClick))
+            .assert(released)
+
+        ctrl.performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitForIdle()
+        ctrl.assert(held)
+        compose.onNodeWithTag("touchpad_rail_key_Shift").assert(released)
+
+        ctrl.performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitForIdle()
+        ctrl.assert(released)
+    }
+
+    @Test
+    fun aTouchOnALatchedRailKeyReleasesItWhenTheFingerLifts() {
+        TouchpadTuneState(modifierPosition = TouchpadModifierPosition.LEFT).write(prefs)
+        showTouchpad()
+        val shift = compose.onNodeWithTag("touchpad_rail_key_Shift")
+        shift.performSemanticsAction(SemanticsActions.OnClick)
+        compose.waitForIdle()
+        shift.assert(held)
+        shift.performTouchInput { down(center); up() }
+        compose.waitForIdle()
+        shift.assert(released)
+    }
+
+    @Test
+    fun theTuneSheetNamesEachSingleChoiceOnce() {
+        showTouchpad()
+        compose.onNodeWithTag("surface_tune").performClick()
+        compose.waitForIdle()
+        compose.onNodeWithText("Buttons").assertExists()
+        compose.onNodeWithText("This pad").assertDoesNotExist()
+        compose.onNodeWithText("Click buttons").assertDoesNotExist()
+        compose.onNodeWithText("Modifier keys").assertExists()
+        compose.onNodeWithText("Ctrl, Shift, Alt and Meta beside the pad").assertDoesNotExist()
     }
 
     @Test
     fun buttonModeAndNumpadSurviveLeavingTheSurface() {
         var visible by mutableStateOf(true)
-        showTouchpad { visible }
+        showTouchpad(visible = { visible })
 
         compose.onNodeWithTag("surface_tune").performClick()
         compose.waitForIdle()

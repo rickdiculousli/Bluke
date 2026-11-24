@@ -92,4 +92,20 @@ class TouchpadTapDragGestureTest {
         assertFalse(gesture.release())
         assertTrue(reports.isEmpty())
     }
+
+    @Test fun onlyADoubleTapsLandingClicksRunTheClickCallback() = runTest {
+        var clicks = 0
+        val gesture = TouchpadTapDragGesture(this, {}, { clicks++ })
+        gesture.queueClick(100, 20f, 20f)
+        gesture.down(200, 20f, 20f)
+        assertTrue(gesture.release())
+        assertEquals(1, clicks)
+
+        // A tap-and-drag is a held press, not a click.
+        gesture.queueClick(2_000, 20f, 20f)
+        gesture.down(2_100, 20f, 20f)
+        assertTrue(gesture.move())
+        assertTrue(gesture.release())
+        assertEquals(1, clicks)
+    }
 }
