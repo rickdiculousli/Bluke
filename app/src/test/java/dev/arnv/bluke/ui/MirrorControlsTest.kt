@@ -286,6 +286,15 @@ class MirrorControlsTest {
         val during = sent.drop(before)
         assertTrue("$during", during.none { it is MirrorMessage.Wheel })
         assertEquals(listOf(1, 1, 1, 1, 0), during.map { (it as Pointer).buttons })
+        // Android hands the thumb's id to the next finger, which lands on the picture: it is the picture's.
+        val after = sent.size
+        rule.onRoot().performTouchInput {
+            down(0, onPicture(0.5f, 0.4f))
+            moveTo(0, onPicture(0.55f, 0.45f))
+            up(0)
+        }
+        settle()
+        assertTrue("${sent.drop(after)}", sent.drop(after).isNotEmpty())
     }
 
     @Test

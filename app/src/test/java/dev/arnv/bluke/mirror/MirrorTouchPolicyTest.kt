@@ -459,4 +459,29 @@ class MirrorTouchPolicyTest {
     assertEquals(emptyList<MirrorMessage>(), routed(30, onKey, point(1, 20f, 400f, down = true, wasDown = false)))
     assertFalse(policy.buttonHeld)
   }
+
+  @Test
+  fun aThumbsIdReusedForAPictureFingerAfterItsUnseenLiftIsThePictures() {
+    val onKey = { x: Float, _: Float -> x < 50f }
+    // Thumb (id 0) on a control, finger (id 1) on the picture.
+    routed(0, onKey, point(0, 20f, 300f, down = true, wasDown = false))
+    routed(10, onKey, point(0, 20f, 300f, down = true, wasDown = true), point(1, 400f, 400f, down = true, wasDown = false))
+    routed(20, onKey, point(0, 20f, 300f, down = true, wasDown = true), point(1, 400f, 400f, down = false, wasDown = true))
+    // The thumb's lift never reaches the picture. Android hands its id to the next finger, on the picture.
+    assertEquals(listOf(Pointer(500, 500, 1)), routed(1000, onKey, point(0, 500f, 500f, down = true, wasDown = false)))
+    assertEquals(listOf(Pointer(500, 500, 0)), routed(1010, onKey, point(0, 500f, 500f, down = false, wasDown = true)))
+  }
+
+  @Test
+  fun aControlFingersStaleIdNeverTurnsAScrollIntoADrag() {
+    val onKey = { x: Float, _: Float -> x < 50f }
+    routed(0, onKey, point(0, 400f, 400f, down = true, wasDown = false))
+    routed(10, onKey, point(0, 400f, 400f, down = true, wasDown = true), point(1, 20f, 300f, down = true, wasDown = false))
+    routed(20, onKey, point(0, 400f, 400f, down = false, wasDown = true), point(1, 20f, 300f, down = true, wasDown = true))
+    // Thumb (id 1) lifts unseen; then two fingers land on the picture with ids 0 and 1, and scroll.
+    routed(1000, onKey, point(0, 400f, 400f, down = true, wasDown = false))
+    val scroll = routed(1010, onKey, point(0, 400f, 400f, down = true, wasDown = true), point(1, 600f, 400f, down = true, wasDown = false)) +
+        routed(1020, onKey, point(0, 400f, 450f, down = true, wasDown = true), point(1, 600f, 450f, down = true, wasDown = true))
+    assertTrue("$scroll", scroll.any { it is Wheel })
+  }
 }

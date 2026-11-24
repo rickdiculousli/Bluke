@@ -573,8 +573,6 @@ private fun MirrorImage(
             }
             .pointerInteropFilter { event ->
                 val action = event.actionMasked
-                // Moves as they arrive, not batched to the next frame: the computer sees them sooner.
-                if (action == MotionEvent.ACTION_DOWN) view.requestUnbufferedDispatch(event)
                 // The fit of the frame on screen now, as the draw maps it: the drawn size state lags a display change by a draw.
                 val fitNow = frames.currentFrame()
                     ?.takeIf { surfaceSize.width > 0 }
@@ -584,6 +582,10 @@ private fun MirrorImage(
                 val frame = router.route(event.toMirrorTouchFrame(fitNow ?: NO_FIT)) { x, y ->
                     bounds.hits(Offset(origin.x + x, origin.y + y))
                 }
+                // Moves as they arrive, not batched to the next frame: the computer sees them sooner.
+                // Asked for whenever a picture finger lands, the first or one after a thumb on a control.
+                val landing = action == MotionEvent.ACTION_DOWN || action == MotionEvent.ACTION_POINTER_DOWN
+                if (landing && !frame.points[event.actionIndex].onControl) view.requestUnbufferedDispatch(event)
                 if (fitNow == null || !currentLive) {
                     marks.value = emptyList()
                     return@pointerInteropFilter true
