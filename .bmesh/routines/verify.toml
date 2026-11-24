@@ -1,3 +1,3 @@
 mode = "inline"
 deterministic = true
-command = "export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk} JAVA_HOME=${JAVA_HOME:-$(mise where java@temurin-21)}; ./gradlew --no-daemon -q assembleDebug testDebugUnitTest && tools/hid-rig/run.sh"
+command = "export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk} JAVA_HOME=${JAVA_HOME:-$(mise where java@temurin-21)}; ./gradlew --no-daemon -q assembleDebug testDebugUnitTest verifyRoborazziDebug && cd companion && mise exec rust@1.99.0 -- cargo test --workspace --features bluke-mirror/rig"
