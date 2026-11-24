@@ -176,16 +176,25 @@ fun SurfaceTuneSheet(
 /** How much of its width the panel travels toward its edge over a whole Back gesture. */
 private const val BACK_TRAVEL = 0.5f
 
-/** A titled group of tune controls. */
+/**
+ * A titled group of tune controls. A section that holds one control names it with [title] and
+ * passes the control no label of its own (`label = null`), with any explanation as [supporting],
+ * so one choice never carries two headings.
+ */
 @Composable
-fun TuneSection(title: String, content: @Composable ColumnScope.() -> Unit) {
+fun TuneSection(title: String, supporting: String? = null, content: @Composable ColumnScope.() -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(
-            title,
-            style = MaterialTheme.typography.titleSmall,
-            color = MaterialTheme.colorScheme.primary,
-            modifier = Modifier.semantics { heading() },
-        )
+        Column {
+            Text(
+                title,
+                style = MaterialTheme.typography.titleSmall,
+                color = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.semantics { heading() },
+            )
+            if (supporting != null) {
+                Text(supporting, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+        }
         content()
     }
 }
@@ -256,7 +265,7 @@ fun TuneSwitch(
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun <T> TuneChoice(
-    label: String,
+    label: String?,
     options: List<T>,
     selected: T,
     optionLabel: (T) -> String,
@@ -264,7 +273,9 @@ fun <T> TuneChoice(
     modifier: Modifier = Modifier,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+        if (label != null) {
+            Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+        }
         // Segments only when every label is a word or two; longer ones would clip at large font scales.
         if (options.size <= 3 && options.all { optionLabel(it).length <= 10 }) {
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
