@@ -43,7 +43,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
 import dev.arnv.bluke.BuildConfig
 import dev.arnv.bluke.HelpActivity
-import dev.arnv.bluke.QuickCycleActivity
+import dev.arnv.bluke.ui.settings.SettingsSection
+import dev.arnv.bluke.ui.settings.settingsIntent
 import dev.arnv.bluke.SettingsActivity
 import dev.arnv.bluke.bluetooth.BluetoothKeyboardManager
 import dev.arnv.bluke.bluetooth.CURRENT_HID_DESCRIPTOR_REVISION
@@ -164,7 +165,7 @@ fun HomeScreen(
                     onConnectHost = { host -> homeViewModel.device(host.address)?.let(btManager::connectDevice) },
                     onToggleScan = { if (homeUiState.isScanning) btManager.stopScanning() else btManager.startScanning() },
                     onLaunch = ::open,
-                    onModeSettings = { context.startActivity(Intent(context, QuickCycleActivity::class.java)) },
+                    onModeSettings = { context.startActivity(settingsIntent(context, SettingsSection.INPUT_MODES)) },
                     onOpenSettings = { context.startActivity(Intent(context, SettingsActivity::class.java)) },
                     onOpenHelp = { context.startActivity(Intent(context, HelpActivity::class.java)) },
                 ),

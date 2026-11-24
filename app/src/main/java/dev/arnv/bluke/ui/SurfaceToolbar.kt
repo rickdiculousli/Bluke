@@ -87,7 +87,7 @@ class SurfaceChrome(
     val host: SurfaceHost,
     val onClose: () -> Unit,
     val onNextMode: () -> Unit,
-    /** Long-press on the mode button. Null until a Settings route to its input-modes section exists. */
+    /** Long-press on the mode button: Settings at its input-modes section. Null offers no long-press. */
     val onModeLongPress: (() -> Unit)? = null,
 )
 

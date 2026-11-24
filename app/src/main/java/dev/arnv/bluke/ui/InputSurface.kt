@@ -9,8 +9,11 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalContext
 import dev.arnv.bluke.bluetooth.BluetoothKeyboardManager
 import dev.arnv.bluke.sound.KeyboardSoundSynthesizer
+import dev.arnv.bluke.ui.settings.SettingsSection
+import dev.arnv.bluke.ui.settings.settingsIntent
 import dev.arnv.bluke.ui.theme.MyApplicationTheme
 
 /**
@@ -29,18 +32,20 @@ internal fun InputSurface(
     onClose: () -> Unit,
     onModeChange: (Int) -> Unit,
 ) {
+    val context = LocalContext.current
     val mode = InputMode.fromId(launchMode)
     val currentOnClose by rememberUpdatedState(onClose)
     val currentOnModeChange by rememberUpdatedState(onModeChange)
     // The host is rebuilt on every home-state emission; keep it (and the chrome) the same object while
     // nothing it shows changed, so a lock-light or scan update doesn't recompose the whole surface.
     val stableHost = remember(host.status, host.name, host.reason, host.onReconnect != null) { host }
-    val chrome = remember(mode, stableHost) {
+    val chrome = remember(mode, stableHost, context) {
         SurfaceChrome(
             mode = mode,
             host = stableHost,
             onClose = { currentOnClose() },
             onNextMode = { currentOnModeChange(nextInputMode(sharedPrefs.enabledInputModes(), mode).id) },
+            onModeLongPress = { context.startActivity(settingsIntent(context, SettingsSection.INPUT_MODES)) },
         )
     }
     val caseBrush = caseBrush(keyboardState.selectedKeyboardTheme)

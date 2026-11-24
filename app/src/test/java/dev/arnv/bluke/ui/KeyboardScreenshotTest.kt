@@ -64,6 +64,8 @@ class KeyboardScreenshotTest {
     @Test
     fun capsLockLitByHost() {
         val host = SurfaceHost(SurfaceHostStatus.Connected, "MacBook Pro")
+        // The lights follow the host only once it has sent a lock-light report on this connection.
+        manager.parseLedReport(byteArrayOf(0x01, 0x02))
         captureMatrix(name = "keyboard-caps-lock", landscape = true) {
             KeyboardSurfaceUnderTest(manager, synth, prefs, host = host, homeUiState = HomeUiState(capsLock = true))
         }

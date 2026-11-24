@@ -21,7 +21,7 @@ Release builds sign from the `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_ALIAS` and 
 
 ## Debugging on a device
 
-- Developer options: tap the logo in Settings > About five times. Developer Logs there shows the in-app log, with Clear and Export.
+- Developer options: tap the logo in Settings > Help & about > About five times. Developer Logs there shows the in-app log, with Clear and Export.
 - Live logs over ADB: `adb logcat -s BlukeHID BlukeLifecycle`.
 - Logs carry the Bluetooth MAC address and raw keycodes.
 
@@ -29,7 +29,7 @@ Release builds sign from the `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_ALIAS` and 
 
 Mirror shows a low-resolution live copy of the computer's screen on the phone. A finger on the image presses, drags and releases at that spot on the computer, which is how cards are dragged in a game like Slay the Spire. Direct mode presses on touch; Hover mode moves the pointer without pressing, so tooltips show, and a tap clicks.
 
-- Mirror is off by default. On the phone, open any input surface, long-press its mode button to open Input mode cycle, and tick Mirror. Then tap the mode button until Mirror shows. On the home screen, tap the Mirror tile.
+- Mirror is off by default. On the phone, open any input surface, long-press its mode button to open Settings › Input modes, and tick Mirror. Then tap the mode button until Mirror shows. On the home screen, tap the Mirror tile.
 - The computer runs `bluke-mirror`, the companion in `companion/` (Rust). This version runs on macOS. Build it with `cargo build --release -p bluke-mirror` in `companion/`, then run `bluke-mirror` with Mirror open on the phone: the first time, it pairs (type the code the phone shows), then it mirrors. It captures through ScreenCaptureKit on macOS 14 and later, scaled to the phone's size by the system, and falls back to a slower full-resolution capture otherwise, saying so; its status line names the capture path and how long each grab takes.
 - It needs Screen Recording and Accessibility (System Settings > Privacy & Security), granted to the terminal it runs in. When one is missing, it asks macOS to list the terminal there, opens the pane, and says to turn it on and reopen the terminal. A rebuilt unsigned binary can lose them.
 - Frames and touches go over Wi-Fi, not Bluetooth. This is Bluke's only network access (the `INTERNET`, `ACCESS_NETWORK_STATE` and `WAKE_LOCK` permissions). The phone listens on its Wi-Fi address, on port 47800, only while Mirror is on screen, and holds a low-latency Wi-Fi lock for that time. The computer finds it over mDNS (`_bluke-mirror._tcp`) or `--phone <address>`, which Mirror shows.
@@ -50,7 +50,7 @@ Mirror shows a low-resolution live copy of the computer's screen on the phone. A
 - Battery savers can kill the background session when the screen locks.
 - After ~100 ms with nothing to send, the Bluetooth link drops into sniff subrating and the next report lands 100-450 ms late. While Bluke is in use (a minute after the last input or touch) the manager re-sends the unchanged keyboard state whenever nothing went out for 40 ms, which holds the delay near 30 ms; hosts ignore a repeated report.
 - Hosts may ask for a report's current state (GET_REPORT); macOS does. Bluke answers from the last report it sent, mouse movement zeroed.
-- macOS sees one device whose main role is keyboard, so an app reads the gamepad only with Input Monitoring permission (System Settings > Privacy & Security). On first pairing it runs the Keyboard Setup Assistant. "Modifier keys: Mac" in keyboard settings puts Cmd and Opt beside the space bar.
+- macOS sees one device whose main role is keyboard, so an app reads the gamepad only with Input Monitoring permission (System Settings > Privacy & Security). On first pairing it runs the Keyboard Setup Assistant. "Modifier keys: Mac" in Settings > Keyboard puts Cmd and Opt beside the space bar.
 - macOS treats the touchpad as a mouse: it accelerates wheel steps and adds no momentum. Two-finger scrolling therefore sends wheel steps by physical finger distance, follows the faster finger, and plays its own short glide after a flick, timed after a Mac trackpad's.
 - macOS scrolls a wheel report by how soon it follows the last one, not by its size: a lone report moves a page 1 px whatever it carries, a fast run up to ~90 px each, and a reversal starts over. Short back-and-forth two-finger scrolls therefore move little on a Mac. Turning off macOS wheel acceleration (`defaults write -g com.apple.scrollwheel.scaling -1`) would fix it; Bluke leaves that to the user.
 

@@ -33,12 +33,13 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.selection.selectable
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.selection.toggleable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
@@ -59,7 +60,9 @@ import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.unit.LayoutDirection
 import kotlin.coroutines.cancellation.CancellationException
 import androidx.compose.ui.Alignment
@@ -71,6 +74,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.isTraversalGroup
 import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.ui.semantics.role
 import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -199,7 +203,11 @@ fun TuneSection(title: String, supporting: String? = null, content: @Composable 
     }
 }
 
-/** A labelled slider over [steps] stops, its current value shown beside the label as [valueLabel]. */
+/**
+ * A labelled slider over [steps] stops, its current value shown beside the label as [valueLabel] and
+ * any explanation under it as [supporting]. The one slider of the Tune sheets and Settings; the caller
+ * plays the step tick, since only it knows what a step is.
+ */
 @Composable
 fun TuneSlider(
     label: String,
@@ -210,12 +218,17 @@ fun TuneSlider(
     onValueChange: (Float) -> Unit,
     modifier: Modifier = Modifier,
     enabled: Boolean = true,
+    supporting: String? = null,
 ) {
     val colors = MaterialTheme.colorScheme
     Column(modifier) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
             Text(label, style = MaterialTheme.typography.bodyLarge, color = colors.onSurface, modifier = Modifier.weight(1f))
+            Spacer(Modifier.width(16.dp))
             Text(valueLabel, style = MaterialTheme.typography.labelLarge, color = colors.onSurfaceVariant)
+        }
+        if (supporting != null) {
+            Text(supporting, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
         }
         Slider(
             value = value,
@@ -248,7 +261,7 @@ fun TuneSwitch(
             .toggleable(value = checked, role = Role.Switch, onValueChange = onCheckedChange),
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        Column(Modifier.weight(1f).padding(end = 16.dp)) {
+        Column(Modifier.weight(1f).padding(end = 16.dp, top = 8.dp, bottom = 8.dp)) {
             Text(label, style = MaterialTheme.typography.bodyLarge, color = colors.onSurface)
             if (supporting != null) {
                 Text(supporting, style = MaterialTheme.typography.bodyMedium, color = colors.onSurfaceVariant)
@@ -259,10 +272,12 @@ fun TuneSwitch(
 }
 
 /**
- * One choice among [options]. Up to three short options are a segmented row; more are a wrapping
- * group of chips, so every option stays visible and nothing truncates.
+ * One choice among [options], by the one rule the Tune sheets and Settings share: a segmented row
+ * while every label fits its segment on one line at the current width and font scale; when they
+ * don't, radio rows for up to [MAX_LISTED_CHOICES] options and a wrapping group of chips for more,
+ * so every option stays visible and nothing truncates.
  */
-@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun <T> TuneChoice(
     label: String?,
@@ -271,38 +286,105 @@ fun <T> TuneChoice(
     optionLabel: (T) -> String,
     onSelect: (T) -> Unit,
     modifier: Modifier = Modifier,
+    supporting: String? = null,
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        if (label != null) {
-            Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
-        }
-        // Segments only when every label is a word or two; longer ones would clip at large font scales.
-        if (options.size <= 3 && options.all { optionLabel(it).length <= 10 }) {
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
-                options.forEachIndexed { index, option ->
-                    SegmentedButton(
-                        selected = option == selected,
-                        onClick = { onSelect(option) },
-                        shape = SegmentedButtonDefaults.itemShape(index, options.size),
-                    ) { Text(optionLabel(option), maxLines = 1) }
+        if (label != null || supporting != null) {
+            Column {
+                if (label != null) {
+                    Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+                }
+                if (supporting != null) {
+                    Text(supporting, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
             }
-        } else {
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                options.forEach { option ->
-                    val isSelected = option == selected
-                    FilterChip(
-                        selected = isSelected,
-                        onClick = { onSelect(option) },
-                        label = { Text(optionLabel(option)) },
-                        leadingIcon = if (isSelected) {
-                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
-                        } else null,
-                    )
+        }
+        BoxWithConstraints(Modifier.fillMaxWidth()) {
+            val measurer = rememberTextMeasurer()
+            val style = MaterialTheme.typography.labelLarge
+            // Each segment holds its label inside 12dp side padding plus room for the check icon
+            // (18dp + 8dp gap) that the selected one shows. Every option reserves it, so the layout
+            // depends on width and font scale, never on which option is selected.
+            val density = LocalDensity.current
+            val segmented = options.size <= MAX_LISTED_CHOICES && with(density) {
+                val segment = maxWidth / options.size
+                options.all { option ->
+                    val room = segment - 24.dp - 26.dp
+                    measurer.measure(optionLabel(option), style, maxLines = 1).size.width <= room.roundToPx()
+                }
+            }
+            when {
+                segmented -> SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+                    options.forEachIndexed { index, option ->
+                        SegmentedButton(
+                            selected = option == selected,
+                            onClick = { onSelect(option) },
+                            shape = SegmentedButtonDefaults.itemShape(index, options.size),
+                        ) { Text(optionLabel(option), maxLines = 1) }
+                    }
+                }
+                options.size <= MAX_LISTED_CHOICES -> Column(Modifier.fillMaxWidth().selectableGroup()) {
+                    options.forEach { option ->
+                        TuneRadioRow(optionLabel(option), option == selected) { onSelect(option) }
+                    }
+                }
+                else -> FlowRow(Modifier.selectableGroup(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    options.forEach { option ->
+                        TuneChoiceChip(
+                            selected = option == selected,
+                            onClick = { onSelect(option) },
+                            label = optionLabel(option),
+                        )
+                    }
                 }
             }
         }
     }
+}
+
+/** The most options [TuneChoice] lists as segments or radio rows; more become chips. */
+const val MAX_LISTED_CHOICES = 4
+
+/**
+ * One option of a [TuneChoice] that didn't fit as segments; the whole row selects it. It sits inside
+ * content already at the rows' inset, so with [ChoiceRadio] its radio and label land where Settings'
+ * radio rows put theirs.
+ */
+@Composable
+private fun TuneRadioRow(label: String, selected: Boolean, onClick: () -> Unit) {
+    Row(
+        Modifier
+            .fillMaxWidth()
+            .heightIn(min = ChoiceRowMinHeight)
+            .selectable(selected = selected, role = Role.RadioButton, onClick = onClick),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
+        ChoiceRadio(selected)
+        Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
+    }
+}
+
+/**
+ * A chip that picks one of several (a [TuneChoice] option, a keyboard theme): it says so to TalkBack
+ * as a radio button rather than a chip's checkbox, and leads with a check while selected.
+ */
+@Composable
+internal fun TuneChoiceChip(
+    selected: Boolean,
+    onClick: () -> Unit,
+    label: String,
+    trailingIcon: (@Composable () -> Unit)? = null,
+) {
+    FilterChip(
+        selected = selected,
+        onClick = onClick,
+        label = { Text(label) },
+        leadingIcon = if (selected) {
+            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
+        } else null,
+        trailingIcon = trailingIcon,
+        modifier = Modifier.semantics { role = Role.RadioButton },
+    )
 }
 
 /** A tune action that opens or does something (Edit layout, Manage themes…). */

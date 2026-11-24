@@ -154,9 +154,12 @@ fun MultimediaTuneContent(
     state: MultimediaTuneState,
     onChange: (MultimediaTuneState) -> Unit,
     haptics: SurfaceHaptics? = null,
+    showPointer: Boolean = true,
 ) {
-    TuneSection("Pointer") {
-        PointerSpeedTune(state.pointer, { onChange(state.copy(pointer = it)) }, haptics)
+    if (showPointer) {
+        TuneSection("Pointer") {
+            PointerSpeedTune(state.pointer, { onChange(state.copy(pointer = it)) }, haptics)
+        }
     }
     TuneSection("Volume") {
         TuneSwitch(

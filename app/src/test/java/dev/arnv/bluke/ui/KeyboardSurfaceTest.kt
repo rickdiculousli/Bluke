@@ -6,6 +6,10 @@ import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.assertIsOff
 import androidx.compose.ui.test.assertIsOn
 import androidx.activity.ComponentActivity
@@ -15,6 +19,7 @@ import androidx.core.view.drawToBitmap
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.captureRoboImage
@@ -22,9 +27,11 @@ import dev.arnv.bluke.bluetooth.BluetoothKeyboardManager
 import dev.arnv.bluke.data.KEYBOARD_GEOMETRY_PREFERENCE
 import dev.arnv.bluke.sound.KEY_SOUND_ENABLED_PREFERENCE
 import dev.arnv.bluke.sound.KeyboardSoundSynthesizer
+import dev.arnv.bluke.sound.SwitchType
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Rule
 import org.junit.Test
@@ -206,6 +213,44 @@ class KeyboardSurfaceTest {
         compose.onNodeWithTag("key_Q").assertExists()
     }
 
+    /**
+     * Connected to a host, the phone lights Caps itself until the host sends a lock-light report on
+     * this connection; from then on only the host's reports move the light. The lights come from the
+     * manager's flows, as `HomeViewModel` folds them into [HomeUiState].
+     */
+    @Test
+    fun connectedLockLightsAreThePhonesUntilTheHostReports() {
+        compose.setContent {
+            val caps by manager.capsLockState.collectAsState()
+            val num by manager.numLockState.collectAsState()
+            val scroll by manager.scrollLockState.collectAsState()
+            KeyboardSurfaceUnderTest(
+                manager, synth, prefs,
+                host = SurfaceHost(SurfaceHostStatus.Connected, "MacBook Pro"),
+                homeUiState = HomeUiState(capsLock = caps, numLock = num, scrollLock = scroll),
+            )
+        }
+        compose.waitForIdle()
+        val caps = compose.onNode(hasTestTag("surface_led") and hasText("CAPS"))
+        caps.assertIsOff()
+
+        caps.performClick()
+        compose.waitForIdle()
+        caps.assertIsOn()
+
+        // The host reports Num on, Caps off: the light goes dark, and a tap no longer moves it.
+        compose.runOnIdle { manager.parseLedReport(byteArrayOf(0x01, 0x01)) }
+        compose.waitForIdle()
+        caps.assertIsOff()
+        caps.performClick()
+        compose.waitForIdle()
+        caps.assertIsOff()
+
+        compose.runOnIdle { manager.parseLedReport(byteArrayOf(0x01, 0x03)) }
+        compose.waitForIdle()
+        caps.assertIsOn()
+    }
+
     @Test
     fun tuneSheetOpensFromToolbarAndWritesSettings() {
         showSurface()
@@ -218,6 +263,20 @@ class KeyboardSurfaceTest {
 
         assertEquals(KeyboardGeometry.HHKB_60, KeyboardTuneState.read(prefs).geometry)
         compose.onNodeWithTag("key_F1").assertDoesNotExist()
+    }
+
+    @Test
+    fun choosingASoundInTuneWhileMutedTurnsKeySoundsOn() {
+        prefs.edit().putBoolean(KEY_SOUND_ENABLED_PREFERENCE, false).commit()
+        showSurface()
+        compose.onNodeWithTag("surface_tune").performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithText(SwitchType.HOLY_PANDA.displayName).performScrollTo().performClick()
+        compose.waitForIdle()
+
+        assertEquals(KeyboardSound.BuiltIn(SwitchType.HOLY_PANDA), KeyboardTuneState.read(prefs).sound)
+        assertTrue(prefs.getBoolean(KEY_SOUND_ENABLED_PREFERENCE, false))
     }
 
     @Test
@@ -274,9 +333,22 @@ class KeyboardTuneStateTest {
         chosen.write(prefs)
         assertEquals(chosen, KeyboardTuneState.read(prefs))
 
-        val builtIn = chosen.copy(sound = KeyboardSound.BuiltIn(dev.arnv.bluke.sound.SwitchType.TOPRE))
+        val builtIn = chosen.copy(sound = KeyboardSound.BuiltIn(SwitchType.TOPRE))
         builtIn.write(prefs)
         assertEquals(builtIn, KeyboardTuneState.read(prefs))
+    }
+
+    @Test
+    fun aNewSoundTurnsKeySoundsOnAndOtherChangesLeaveThemAsTheyAre() {
+        prefs.edit().clear().putBoolean(KEY_SOUND_ENABLED_PREFERENCE, false).commit()
+        val start = KeyboardTuneState.read(prefs)
+
+        start.writeChange(prefs, start.copy(geometry = KeyboardGeometry.HHKB_60))
+        assertFalse(prefs.getBoolean(KEY_SOUND_ENABLED_PREFERENCE, true))
+
+        start.writeChange(prefs, start.copy(sound = KeyboardSound.BuiltIn(SwitchType.TOPRE)))
+        assertTrue(prefs.getBoolean(KEY_SOUND_ENABLED_PREFERENCE, false))
+        assertEquals(KeyboardSound.BuiltIn(SwitchType.TOPRE), KeyboardTuneState.read(prefs).sound)
     }
 
     @Test

@@ -3,6 +3,7 @@ package dev.arnv.bluke.sound
 import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
@@ -66,20 +67,60 @@ class SoundPreferencesTest {
     }
 
     @Test
-    fun legacyCycleSelectionMigratesAndIncludesExistingCustomPacks() {
-        preferences.edit()
-            .putStringSet(CYCLE_KEY_SOUNDS_PREFERENCE, setOf(SwitchType.TOPRE.name))
-            .commit()
+    fun choosingAPackWhileMutedTurnsKeySoundsOn() {
+        turnKeySoundsOff(preferences)
 
-        val selected = soundCycleSelection(preferences, listOf("office"))
+        assertTrue(selectKeySound(preferences, customSoundProfileId("office")))
 
-        assertEquals(setOf("built_in:TOPRE", "custom:office"), selected)
+        assertTrue(preferences.getBoolean(KEY_SOUND_ENABLED_PREFERENCE, false))
     }
 
     @Test
-    fun explicitNativeCycleSelectionIsPreserved() {
-        saveSoundCycleSelection(preferences, setOf("custom:office"))
+    fun choosingACustomPackStoresItAndChoosingABuiltInClearsIt() {
+        selectKeySound(preferences, customSoundProfileId("office"))
+        assertEquals("office", preferences.getString(CUSTOM_SOUND_PACK_PREFERENCE, null))
 
-        assertEquals(setOf("custom:office"), soundCycleSelection(preferences, listOf("office", "other")))
+        selectKeySound(preferences, builtInSoundProfileId(SwitchType.TOPRE))
+
+        assertNull(preferences.getString(CUSTOM_SOUND_PACK_PREFERENCE, null))
+        assertEquals(SwitchType.TOPRE, selectedBuiltInSound(preferences))
+    }
+
+    @Test
+    fun anUnknownSoundChangesNothing() {
+        turnKeySoundsOff(preferences)
+        val before = preferences.all.toMap()
+
+        assertFalse(selectKeySound(preferences, "built_in:NOT_A_SWITCH"))
+        assertFalse(selectKeySound(preferences, customSoundProfileId("")))
+        assertFalse(selectKeySound(preferences, "office"))
+
+        assertEquals(before, preferences.all.toMap())
+    }
+
+    @Test
+    fun turningSoundsOffKeepsTheChosenSound() {
+        selectKeySound(preferences, customSoundProfileId("office"))
+
+        turnKeySoundsOff(preferences)
+
+        assertFalse(preferences.getBoolean(KEY_SOUND_ENABLED_PREFERENCE, true))
+        assertEquals("office", preferences.getString(CUSTOM_SOUND_PACK_PREFERENCE, null))
+    }
+
+    @Test
+    fun theOldSoundCycleKeysAreDroppedOnceAndTheChoiceStays() {
+        preferences.edit()
+            .putStringSet("cycle_key_sounds", setOf("builtin:TOPRE"))
+            .putInt("sound_cycle_schema", 1)
+            .putString("selected_builtin_key_sound", "TOPRE")
+            .commit()
+
+        migrateSoundCyclePreferences(preferences)
+        migrateSoundCyclePreferences(preferences)
+
+        assertFalse(preferences.contains("cycle_key_sounds"))
+        assertFalse(preferences.contains("sound_cycle_schema"))
+        assertEquals("TOPRE", preferences.getString("selected_builtin_key_sound", null))
     }
 }

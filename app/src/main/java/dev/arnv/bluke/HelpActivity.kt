@@ -12,164 +12,138 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.BluetoothConnected
-import androidx.compose.material.icons.filled.ErrorOutline
+import androidx.compose.material.icons.filled.Info
 import androidx.compose.material.icons.filled.LaptopMac
+import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.filled.Warning
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
-import kotlinx.coroutines.delay
 
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.arnv.bluke.ui.theme.MyApplicationTheme
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import kotlin.time.Duration.Companion.milliseconds
 
 class HelpActivity : ComponentActivity() {
-    @OptIn(ExperimentalMaterial3Api::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val isFirstRun = intent.getBooleanExtra("first_run", false)
-        
         setContent {
             MyApplicationTheme {
-                var timer by remember { mutableIntStateOf(if (isFirstRun) 5 else 0) }
-                LaunchedEffect(timer) {
-                    if (timer > 0) {
-                        delay(1000L.milliseconds)
-                        timer -= 1
-                    }
-                }
-                androidx.activity.compose.BackHandler(enabled = isFirstRun && timer > 0) {
-                    // Do nothing until timer completes
-                }
-                
-                val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
-
-                Scaffold(
-                    modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-                    topBar = {
-                        LargeTopAppBar(
-                            title = { Text("Help & Guide") },
-                            navigationIcon = {
-                                if (!isFirstRun || timer == 0) {
-                                    IconButton(onClick = { finish() }) {
-                                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                                    }
-                                }
-                            },
-                            colors = TopAppBarDefaults.largeTopAppBarColors(
-                                containerColor = MaterialTheme.colorScheme.surface,
-                                titleContentColor = MaterialTheme.colorScheme.onSurface
-                            ),
-                            scrollBehavior = scrollBehavior
-                        )
-                    },
-                    bottomBar = {
-                        if (isFirstRun) {
-                            Surface(
-                                color = MaterialTheme.colorScheme.surface,
-                                shadowElevation = 8.dp,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Button(
-                                    onClick = { finish() },
-                                    enabled = timer == 0,
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(16.dp)
-                                ) {
-                                    Text(if (timer > 0) "I Understand ($timer)" else "I Understand")
-                                }
-                            }
-                        }
-                    }
-                ) { innerPadding ->
-
-                    Column(
-                        modifier = Modifier
-                            .fillMaxSize()
-                            .verticalScroll(rememberScrollState())
-                            .padding(innerPadding)
-                            .padding(horizontal = 16.dp, vertical = 24.dp),
-                        verticalArrangement = Arrangement.spacedBy(24.dp)
-                    ) {
-                        
-                        StepSection(
-                            icon = Icons.Default.Bluetooth, 
-                            title = "Connect a new host",
-                            steps = listOf(
-                                "Make the computer, TV, tablet, or phone visible in its Bluetooth settings.",
-                                "Scan in Bluke and tap the host name.",
-                                "Accept the matching pairing prompt on both devices.",
-                                "Wait for Bluke's status dot to turn green before sending input."
-                            )
-                        )
-                        
-                        StepSection(
-                            icon = Icons.Default.BluetoothConnected, 
-                            title = "Repair a stale pairing",
-                            steps = listOf(
-                                "Forget the host in this phone's Bluetooth settings.",
-                                "Remove Bluke or this phone from the host's Bluetooth settings.",
-                                "Toggle Bluetooth on both sides, then pair again from Bluke.",
-                                "Reinstalling Bluke alone does not clear the host's cached HID layout."
-                            )
-                        )
-                        
-                        StepSection(
-                            icon = Icons.Default.Warning, 
-                            title = "Pairing was refused",
-                            isWarning = true,
-                            steps = listOf(
-                                "A refusal means the host or phone rejected the request; it does not prove HID is unsupported.",
-                                "Retry once and accept every prompt on both devices.",
-                                "If it repeats, use the full repair steps above."
-                            )
-                        )
-
-                        StepSection(
-                            icon = Icons.Default.ErrorOutline, 
-                            title = "Controller and browser games",
-                            isWarning = true,
-                            steps = listOf(
-                                "Choose Native for Windows/Linux games, Android for Android games, or Web when a browser game ignores directions.",
-                                "Tap the controller mode button to cycle Native / Android / Web. Hold it to open Controller compatibility settings. All modes switch live without reconnecting.",
-                                "For Steam, enable the controller in Steam Input and verify it in Steam's controller test or the operating system's game-controller panel.",
-                                "Bluke is a generic HID gamepad, not an Xbox XInput device. Some newer Windows games accept only XInput without a compatibility layer."
-                            )
-                        )
-
-                        StepSection(
-                            icon = Icons.Default.LaptopMac,
-                            title = "Using a Mac",
-                            steps = listOf(
-                                "On first pairing macOS opens the Keyboard Setup Assistant: press the keys it asks for and choose ANSI or ISO as on your layout.",
-                                "Set Keyboard settings > Modifier keys to Mac so Cmd and Opt sit beside the space bar.",
-                                "Games and browsers read the gamepad only with Input Monitoring permission: System Settings > Privacy & Security > Input Monitoring. If you denied it to Chrome or Steam, turn it on there.",
-                                "Two-finger scrolling, its direction and the momentum glide are in Settings > Touchpad."
-                            )
-                        )
-
-                        StepSection(
-                            icon = Icons.Default.Warning,
-                            title = "Platform limitations",
-                            steps = listOf(
-                                "Support depends on the phone firmware exposing Android's Bluetooth HID Device role.",
-                                "iPhone and iPad are not supported hosts.",
-                                "Host audio routing prevention is a best-effort workaround for Linux and may be undone by the host or phone firmware.",
-                                "If Android repeatedly rejects HID registration, use Retry once. The incompatible-device screen appears only after the registration attempt ceiling."
-                            )
-                        )
-                        
-                        Spacer(modifier = Modifier.height(16.dp))
-                    }
-                }
+                HelpContent(onBack = ::finish)
             }
+        }
+    }
+}
+
+/** The help screen: its top bar and the step cards, with Back left to the caller. */
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun HelpContent(onBack: () -> Unit) {
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
+
+    Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        topBar = {
+            LargeTopAppBar(
+                title = { Text("Help") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                colors = TopAppBarDefaults.largeTopAppBarColors(
+                    containerColor = MaterialTheme.colorScheme.surface,
+                    titleContentColor = MaterialTheme.colorScheme.onSurface
+                ),
+                scrollBehavior = scrollBehavior
+            )
+        }
+    ) { innerPadding ->
+
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .verticalScroll(rememberScrollState())
+                .padding(innerPadding)
+                .padding(horizontal = 16.dp, vertical = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(24.dp)
+        ) {
+            
+            StepSection(
+                icon = Icons.Default.Bluetooth, 
+                title = "Connect a new host",
+                steps = listOf(
+                    "Make the host (a computer, TV, tablet or phone) visible in its Bluetooth settings.",
+                    "Scan in Bluke and tap the host name.",
+                    "Accept the matching pairing prompt on both devices.",
+                    "Wait for Bluke's status dot to turn green before sending input."
+                )
+            )
+            
+            StepSection(
+                icon = Icons.Default.BluetoothConnected, 
+                title = "Repair a stale pairing",
+                steps = listOf(
+                    "Forget the host in this phone's Bluetooth settings.",
+                    "Remove Bluke or this phone from the host's Bluetooth settings.",
+                    "Toggle Bluetooth on both sides, then pair again from Bluke.",
+                    "Reinstalling Bluke alone does not clear the host's cached HID layout."
+                )
+            )
+            
+            StepSection(
+                icon = Icons.Default.Warning, 
+                title = "Pairing was refused",
+                isWarning = true,
+                steps = listOf(
+                    "A refusal means the host or phone rejected the request; it does not prove HID is unsupported.",
+                    "Retry once and accept every prompt on both devices.",
+                    "If it repeats, use the full repair steps above."
+                )
+            )
+
+            StepSection(
+                icon = Icons.Default.SportsEsports,
+                title = "Gamepad and browser games",
+                steps = listOf(
+                    "Choose Native for Windows/Linux games, Android for Android games, or Web when a browser game ignores directions.",
+                    "Choose the profile in the gamepad's Tune sheet or in Settings › Gamepad. Every profile switches live without reconnecting.",
+                    "For Steam, enable the controller in Steam Input and verify it in Steam's controller test or the operating system's game-controller panel.",
+                    "Bluke is a generic HID gamepad, not an Xbox XInput device. Some newer Windows games accept only XInput without a compatibility layer."
+                )
+            )
+
+            StepSection(
+                icon = Icons.Default.LaptopMac,
+                title = "Using a Mac",
+                steps = listOf(
+                    "On first pairing macOS opens the Keyboard Setup Assistant: press the keys it asks for and choose ANSI or ISO as on your layout.",
+                    "Set Settings › Keyboard › Modifier keys to Mac so Cmd and Opt sit beside the space bar.",
+                    "Games and browsers read the gamepad only with Input Monitoring permission: System Settings > Privacy & Security > Input Monitoring. If you denied it to Chrome or Steam, turn it on there.",
+                    "Pointer and scroll speed, scroll direction and the momentum glide are in Settings › Touchpad."
+                )
+            )
+
+            StepSection(
+                icon = Icons.Default.Info,
+                title = "Platform limitations",
+                steps = listOf(
+                    "Support depends on the phone firmware exposing Android's Bluetooth HID Device role.",
+                    "iPhone and iPad are not supported hosts.",
+                    "Host audio routing prevention is a best-effort workaround for Linux and may be undone by the host or phone firmware.",
+                    "If Android repeatedly rejects HID registration, use Retry once. The incompatible-device screen appears only after the registration attempt ceiling."
+                )
+            )
+            
+            Spacer(modifier = Modifier.height(16.dp))
         }
     }
 }
@@ -178,7 +152,7 @@ class HelpActivity : ComponentActivity() {
 fun StepSection(icon: ImageVector, title: String, steps: List<String>, isWarning: Boolean = false) {
     Surface(
         shape = MaterialTheme.shapes.large,
-        color = if (isWarning) MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.5f) else MaterialTheme.colorScheme.surfaceVariant,
+        color = if (isWarning) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.surfaceContainer,
         modifier = Modifier.fillMaxWidth()
     ) {
         Column(modifier = Modifier.padding(16.dp)) {
@@ -202,7 +176,8 @@ fun StepSection(icon: ImageVector, title: String, steps: List<String>, isWarning
                     text = title,
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
-                    color = if (isWarning) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface
+                    color = if (isWarning) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurface,
+                    modifier = Modifier.semantics { heading() },
                 )
             }
             
@@ -214,23 +189,25 @@ fun StepSection(icon: ImageVector, title: String, steps: List<String>, isWarning
                         Box(
                             modifier = Modifier
                                 .padding(top = 2.dp)
-                                .size(20.dp)
+                                // Sized in sp, so the digit still fits the circle at large font scales.
+                                .size(with(LocalDensity.current) { 20.sp.toDp() })
                                 .clip(CircleShape)
-                                .background(if (isWarning) MaterialTheme.colorScheme.error.copy(alpha = 0.2f) else MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)),
+                                // On a warning card an errorContainer badge would vanish into the card, so it takes the solid error role.
+                                .background(if (isWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.secondaryContainer),
                             contentAlignment = Alignment.Center
                         ) {
                             Text(
                                 text = "${index + 1}",
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = if (isWarning) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.primary
+                                color = if (isWarning) MaterialTheme.colorScheme.onError else MaterialTheme.colorScheme.onSecondaryContainer
                             )
                         }
                         Spacer(modifier = Modifier.width(12.dp))
                         Text(
                             text = step,
                             style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            color = if (isWarning) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(top = 1.dp)
                         )
                     }

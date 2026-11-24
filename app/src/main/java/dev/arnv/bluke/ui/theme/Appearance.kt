@@ -34,7 +34,7 @@ enum class ThemeMode(val preferenceValue: Int, val label: String) {
  * drew the same scheme, so they read as [DEFAULT].
  */
 enum class PaletteStyle(val preferenceValue: String, val label: String) {
-    DEFAULT("Default", "Accent colour"),
+    DEFAULT("Default", "Colorful"),
     MONOCHROME("Monochrome", "Monochrome"),
     ;
 

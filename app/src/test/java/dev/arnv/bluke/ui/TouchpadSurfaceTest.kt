@@ -419,7 +419,7 @@ class TouchpadSurfaceTest {
         compose.onNodeWithText("Buttons").assertExists()
         compose.onNodeWithText("This pad").assertDoesNotExist()
         compose.onNodeWithText("Click buttons").assertDoesNotExist()
-        compose.onNodeWithText("Modifier keys").assertExists()
+        compose.onNodeWithText("Modifier key strip").assertExists()
         compose.onNodeWithText("Ctrl, Shift, Alt and Meta beside the pad").assertDoesNotExist()
     }
 

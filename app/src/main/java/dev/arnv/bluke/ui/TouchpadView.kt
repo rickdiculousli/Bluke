@@ -1,5 +1,12 @@
 package dev.arnv.bluke.ui
 
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
@@ -155,7 +162,8 @@ data class TouchpadTuneState(
 }
 
 
-private fun glideLabel(glide: Float): String = when {
+/** Glide's word for [glide] (0..1): its slider's value and the Settings header's. */
+internal fun glideLabel(glide: Float): String = when {
     glide < 0.34f -> "Short"
     glide < 0.67f -> "Medium"
     else -> "Long"
@@ -184,7 +192,11 @@ fun TouchpadTuneContent(
             onCheckedChange = { onChange(state.copy(momentum = it)) },
             supporting = "Keep scrolling after a flick",
         )
-        if (state.momentum) {
+        AnimatedVisibility(
+            visible = state.momentum,
+            enter = expandVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeIn(),
+            exit = shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(),
+        ) {
             TuneSlider(
                 label = "Glide",
                 value = state.glide,
@@ -198,7 +210,7 @@ fun TouchpadTuneContent(
             )
         }
     }
-    TuneSection("Modifier keys", supporting = "Ctrl, Shift, Alt and the Win or Cmd key, beside the pad") {
+    TuneSection("Modifier key strip", supporting = "Ctrl, Shift, Alt and the Win or Cmd key, beside the pad") {
         TuneChoice(
             label = null,
             options = TouchpadModifierPosition.entries,

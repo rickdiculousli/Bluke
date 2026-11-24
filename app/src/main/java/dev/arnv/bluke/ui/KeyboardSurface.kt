@@ -11,6 +11,7 @@ import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
+import androidx.compose.foundation.selection.selectableGroup
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
@@ -21,18 +22,14 @@ import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LibraryMusic
-import androidx.compose.material.icons.filled.Check
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.FilterChipDefaults
-import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.MutableState
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.State
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateListOf
@@ -64,15 +61,14 @@ import dev.arnv.bluke.sound.KEY_SOUND_ENABLED_PREFERENCE
 import dev.arnv.bluke.sound.KeyboardSoundSynthesizer
 import dev.arnv.bluke.sound.SELECTED_BUILT_IN_SOUND_PREFERENCE
 import dev.arnv.bluke.sound.SwitchType
+import dev.arnv.bluke.sound.builtInSoundProfileId
+import dev.arnv.bluke.sound.customSoundProfileId
+import dev.arnv.bluke.sound.selectKeySound
 import dev.arnv.bluke.sound.selectedBuiltInSound
 import kotlinx.coroutines.delay
 
 private const val KEY_SENSITIVITY_PREFERENCE = "key_sensitivity"
-private const val LOCK_SYNC_MODE_PREFERENCE = "lock_sync_mode"
 
-private const val KEY_CAPS_LOCK = 0x39
-private const val KEY_NUM_LOCK = 0x53
-private const val KEY_SCROLL_LOCK = 0x47
 /** Keys an accessibility click latches rather than taps: the modifiers and Fn. */
 private val LATCHING_KEYS = (KeyboardLayouts.MOD_LCTRL..KeyboardLayouts.MOD_RWIN).toSet() + KeyboardLayouts.KEY_FN
 
@@ -81,6 +77,13 @@ sealed interface KeyboardSound {
     data class BuiltIn(val switchType: SwitchType) : KeyboardSound
     data class Custom(val packId: String) : KeyboardSound
 }
+
+/** The id [selectKeySound] takes for this sound. */
+val KeyboardSound.profileId: String
+    get() = when (this) {
+        is KeyboardSound.BuiltIn -> builtInSoundProfileId(switchType)
+        is KeyboardSound.Custom -> customSoundProfileId(packId)
+    }
 
 /**
  * The keyboard's settings, as the Tune sheet (and spec 005's Settings) shows them. Its keys and stored
@@ -106,6 +109,15 @@ data class KeyboardTuneState(
             }
             is KeyboardSound.Custom -> putString(CUSTOM_SOUND_PACK_PREFERENCE, sound.packId)
         }
+    }
+
+    /**
+     * Stores [next], chosen while this was showing. A newly chosen sound goes through [selectKeySound],
+     * so picking one while muted turns key sounds on.
+     */
+    fun writeChange(prefs: SharedPreferences, next: KeyboardTuneState) {
+        next.write(prefs)
+        if (next.sound != sound) selectKeySound(prefs, next.sound.profileId)
     }
 
     companion object {
@@ -150,7 +162,8 @@ fun rememberKeyboardTuneOptions(refresh: Any? = null): KeyboardTuneOptions {
 /**
  * The keyboard's settings: geometry, typing layout, modifier keys, theme and key sound. Stateless, so
  * the Tune sheet and Settings host the same controls. [onEditThemes] and [onManageSounds] open the
- * editors when the host offers them.
+ * editors when the host offers them. A host that lists key sounds or themes its own way passes
+ * [showSound] or [showTheme] false.
  */
 @Composable
 fun KeyboardTuneContent(
@@ -159,6 +172,8 @@ fun KeyboardTuneContent(
     options: KeyboardTuneOptions,
     onEditThemes: (() -> Unit)? = null,
     onManageSounds: (() -> Unit)? = null,
+    showSound: Boolean = true,
+    showTheme: Boolean = true,
 ) {
     TuneSection("Layout") {
         TuneChoice(
@@ -183,11 +198,11 @@ fun KeyboardTuneContent(
             onSelect = { onChange(state.copy(modifierStyle = it)) },
         )
     }
-    TuneSection("Theme") {
+    if (showTheme) TuneSection("Theme") {
         ThemeChoice(options.themes, state.themeId) { onChange(state.copy(themeId = it)) }
         if (onEditThemes != null) TuneAction("Edit themes", Icons.Default.Edit, onEditThemes)
     }
-    TuneSection("Key sound") {
+    if (showSound) TuneSection("Key sound") {
         val sounds = SwitchType.entries.map { KeyboardSound.BuiltIn(it) to it.displayName } +
             options.customSoundPacks.map { (id, name) -> KeyboardSound.Custom(id) to name }
         val names = sounds.toMap()
@@ -205,18 +220,18 @@ fun KeyboardTuneContent(
 /** Themes as chips, each with a swatch of its keycaps, so the choice shows what it picks. */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-private fun ThemeChoice(themes: List<KeyboardThemeDefinition>, selectedId: String, onSelect: (String) -> Unit) {
-    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+internal fun ThemeChoice(themes: List<KeyboardThemeDefinition>, selectedId: String, onSelect: (String) -> Unit) {
+    FlowRow(
+        Modifier.selectableGroup(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
         themes.forEach { theme ->
-            val selected = theme.id == selectedId
             // The check leads when selected, as on every other chip; the swatch always trails.
-            FilterChip(
-                selected = selected,
+            TuneChoiceChip(
+                selected = theme.id == selectedId,
                 onClick = { onSelect(theme.id) },
-                label = { Text(theme.name) },
-                leadingIcon = if (selected) {
-                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
-                } else null,
+                label = theme.name,
                 trailingIcon = { ThemeSwatch(theme) },
             )
         }
@@ -252,7 +267,6 @@ class KeyboardSurfaceState internal constructor(
     selectedKeyboardTheme: State<KeyboardThemeDefinition>,
     soundOn: State<Boolean>,
     keySensitivity: State<Float>,
-    lockSyncMode: State<String>,
     isCapsLockActive: MutableState<Boolean>,
     isNumLockActive: MutableState<Boolean>,
     isScrollLockActive: MutableState<Boolean>,
@@ -264,7 +278,6 @@ class KeyboardSurfaceState internal constructor(
     val modifierStyle: KeyboardModifierStyle get() = tune.modifierStyle
     val isSoundOn by soundOn
     val keySensitivity by keySensitivity
-    val lockSyncMode by lockSyncMode
 
     // Lock indicators: one source of truth, set by local presses and by the host's LED reports.
     var isCapsLockActive by isCapsLockActive
@@ -287,26 +300,32 @@ class KeyboardSurfaceState internal constructor(
         sharedPrefs.edit { putBoolean(KEY_SOUND_ENABLED_PREFERENCE, on) }
     }
 
-    /**
-     * A tap on a toolbar lock light. Connected, it sends the lock key and, unless the device owns the
-     * lights, waits for the host's LED report; offline, it only flips the light.
-     */
+    private var lockLeds: LockLeds
+        get() = LockLeds(isCapsLockActive, isNumLockActive, isScrollLockActive)
+        set(value) {
+            isCapsLockActive = value.capsLock
+            isNumLockActive = value.numLock
+            isScrollLockActive = value.scrollLock
+        }
+
+    /** A lock key went down on the phone: the lights toggle here unless the host drives them. */
+    internal fun onLockKeyPressed(keyCode: Int, isConnected: Boolean) {
+        val followHost = lockLightsFollowHost(isConnected, btManager.hostReportsLockLights.value)
+        lockLeds = lockLeds.afterLockKeyPress(keyCode, followHost)
+    }
+
+    /** The host's latest lock-light state, shown once the host has reported on this connection. */
+    internal fun onHostLockLights(host: LockLeds, followHost: Boolean) {
+        lockLeds = lockLeds.withHostReport(host, followHost)
+    }
+
+    /** A tap on a toolbar lock light: connected, it sends the lock key; the light follows [onLockKeyPressed]. */
     fun toggleLock(keyCode: Int, isConnected: Boolean) {
         if (isConnected) {
             btManager.sendKey(keyCode, true)
             btManager.sendKey(keyCode, false)
-            if (lockSyncMode == "device") flipLock(keyCode)
-        } else {
-            flipLock(keyCode)
         }
-    }
-
-    private fun flipLock(keyCode: Int) {
-        when (keyCode) {
-            KEY_CAPS_LOCK -> isCapsLockActive = !isCapsLockActive
-            KEY_SCROLL_LOCK -> isScrollLockActive = !isScrollLockActive
-            KEY_NUM_LOCK -> isNumLockActive = !isNumLockActive
-        }
+        onLockKeyPressed(keyCode, isConnected)
     }
 
     /** Modifiers (and Fn) an accessibility click holds down until the next other key's click. */
@@ -421,10 +440,7 @@ class KeyboardSurfaceState internal constructor(
                 activePressedKeys.add(keyCode)
                 soundSynth.playPress(keyCode)
                 btManager.sendKey(keyCode, true)
-
-                // Only toggle status indicators locally if we are disconnected OR in device-controlled mode.
-                // In Host-Controlled mode, we wait for the Host OS to send an LED Output Report (to ensure true sync).
-                if (!isConnected || lockSyncMode == "device") flipLock(keyCode)
+                onLockKeyPressed(keyCode, isConnected)
             }
         } else {
             activePressedKeys.remove(keyCode)
@@ -467,16 +483,13 @@ internal fun rememberKeyboardSurfaceState(
 
     val soundOn = rememberPreference(sharedPrefs, KEY_SOUND_ENABLED_PREFERENCE) { it.getBoolean(KEY_SOUND_ENABLED_PREFERENCE, true) }
     val keySensitivity = rememberPreference(sharedPrefs, KEY_SENSITIVITY_PREFERENCE) { it.getFloat(KEY_SENSITIVITY_PREFERENCE, 6f) }
-    val lockSyncMode = rememberPreference(sharedPrefs, LOCK_SYNC_MODE_PREFERENCE) {
-        it.getString(LOCK_SYNC_MODE_PREFERENCE, "host") ?: "host"
-    }
     val isCapsLockActive = rememberSaveable { mutableStateOf(false) }
     val isNumLockActive = rememberSaveable { mutableStateOf(true) }
     val isScrollLockActive = rememberSaveable { mutableStateOf(false) }
     val state = remember {
         KeyboardSurfaceState(
             btManager, soundSynth, sharedPrefs,
-            tune, selectedKeyboardTheme, soundOn, keySensitivity, lockSyncMode,
+            tune, selectedKeyboardTheme, soundOn, keySensitivity,
             isCapsLockActive, isNumLockActive, isScrollLockActive,
         )
     }
@@ -491,12 +504,12 @@ internal fun rememberKeyboardSurfaceState(
         }
     }
 
-    LaunchedEffect(isConnected, homeUiState.capsLock, homeUiState.numLock, homeUiState.scrollLock, state.lockSyncMode) {
-        if (isConnected && state.lockSyncMode == "host") {
-            state.isCapsLockActive = homeUiState.capsLock
-            state.isNumLockActive = homeUiState.numLock
-            state.isScrollLockActive = homeUiState.scrollLock
-        }
+    val hostReportsLockLights by btManager.hostReportsLockLights.collectAsState()
+    LaunchedEffect(isConnected, hostReportsLockLights, homeUiState.capsLock, homeUiState.numLock, homeUiState.scrollLock) {
+        state.onHostLockLights(
+            LockLeds(homeUiState.capsLock, homeUiState.numLock, homeUiState.scrollLock),
+            lockLightsFollowHost(isConnected, hostReportsLockLights),
+        )
     }
     return state
 }
@@ -526,7 +539,7 @@ internal fun KeyboardSurface(
                         "SCR" to state.isScrollLockActive,
                     ),
                     onToggle = { index ->
-                        state.toggleLock(listOf(KEY_CAPS_LOCK, KEY_NUM_LOCK, KEY_SCROLL_LOCK)[index], isConnected)
+                        state.toggleLock(listOf(CAPS_LOCK_KEY, NUM_LOCK_KEY, SCROLL_LOCK_KEY)[index], isConnected)
                     },
                 )
                 SurfaceToolbarIconButton(
@@ -584,7 +597,7 @@ internal fun KeyboardSurface(
         SurfaceTuneSheet(visible = tuneOpen, title = "Keyboard", onDismiss = { tuneOpen = false }) {
             KeyboardTuneContent(
                 state = state.tune,
-                onChange = { it.write(sharedPrefs) },
+                onChange = { state.tune.writeChange(sharedPrefs, it) },
                 options = rememberKeyboardTuneOptions(refresh = tuneOpen),
                 onEditThemes = { context.startActivity(Intent(context, KeyboardThemesActivity::class.java)) },
                 onManageSounds = { context.startActivity(Intent(context, SoundPacksActivity::class.java)) },

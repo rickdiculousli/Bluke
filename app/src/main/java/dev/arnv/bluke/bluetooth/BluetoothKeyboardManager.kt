@@ -163,6 +163,11 @@ class BluetoothKeyboardManager(private val context: Context) {
     private val _scrollLockState = MutableStateFlow(false)
     val scrollLockState: StateFlow<Boolean> = _scrollLockState
 
+    // Whether the host has sent a lock-light report on the current connection. Until it has, the
+    // phone's own lights are the only ones (see ui/LockLeds.kt); some hosts never send one.
+    private val _hostReportsLockLights = MutableStateFlow(false)
+    val hostReportsLockLights: StateFlow<Boolean> = _hostReportsLockLights
+
     private val bluetoothAdapter: BluetoothAdapter? = try {
         val bluetoothManager = context.getSystemService(Context.BLUETOOTH_SERVICE) as BluetoothManager
         bluetoothManager.adapter
@@ -1214,6 +1219,7 @@ class BluetoothKeyboardManager(private val context: Context) {
         if (isNewLink) {
             connectionEpoch.incrementAndGet()
             lastInputReports.clear() // A new host's GET_REPORT sees idle input, not the last host's.
+            _hostReportsLockLights.value = false
         }
         automaticReconnectAttempted = true
         recordSupportedFirmware()
@@ -1385,21 +1391,27 @@ class BluetoothKeyboardManager(private val context: Context) {
             if (activeRegistrationAttempt !== attempt) return
             logHidEvent("callback virtualCableUnplug device=${device.address}")
         }
+    }
 
-        private fun parseLedReport(data: ByteArray?) {
-            if (data == null || data.isEmpty()) return
-            val ledByte = if (data.size > 1 && data[0] == 1.toByte()) {
-                data[1].toInt()
-            } else {
-                data[0].toInt()
-            }
-            ledOutputByte = ledByte.toByte()
-            _numLockState.value = (ledByte and 0x01) != 0
-            numLockTogglePending.set(false)
-            _capsLockState.value = (ledByte and 0x02) != 0
-            _scrollLockState.value = (ledByte and 0x04) != 0
-            Log.d("BluetoothKeyboard", "Received LED report: byte=$ledByte, caps=${_capsLockState.value}, num=${_numLockState.value}, scroll=${_scrollLockState.value}")
+    /**
+     * The host's keyboard LED output report (from a set-report or interrupt data): the lock lights,
+     * and the mark that this host reports them on the current connection.
+     */
+    @androidx.annotation.VisibleForTesting
+    internal fun parseLedReport(data: ByteArray?) {
+        if (data == null || data.isEmpty()) return
+        val ledByte = if (data.size > 1 && data[0] == 1.toByte()) {
+            data[1].toInt()
+        } else {
+            data[0].toInt()
         }
+        ledOutputByte = ledByte.toByte()
+        _numLockState.value = (ledByte and 0x01) != 0
+        numLockTogglePending.set(false)
+        _capsLockState.value = (ledByte and 0x02) != 0
+        _scrollLockState.value = (ledByte and 0x04) != 0
+        _hostReportsLockLights.value = true
+        Log.d("BluetoothKeyboard", "Received LED report: byte=$ledByte, caps=${_capsLockState.value}, num=${_numLockState.value}, scroll=${_scrollLockState.value}")
     }
 
     @SuppressLint("MissingPermission")

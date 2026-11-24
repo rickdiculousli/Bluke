@@ -4,8 +4,9 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -36,7 +37,6 @@ import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Checkbox
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -56,7 +56,6 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -68,11 +67,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.nestedscroll.nestedScroll
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.core.content.edit
-import dev.arnv.bluke.data.CYCLE_KEYBOARD_THEMES_PREFERENCE
 import dev.arnv.bluke.data.KEYBOARD_GEOMETRY_PREFERENCE
 import dev.arnv.bluke.data.KeyboardThemeRepository
 import dev.arnv.bluke.ui.CUSTOM_KEYBOARD_THEME_PREFIX
@@ -85,9 +80,10 @@ import dev.arnv.bluke.ui.KeyboardThemeCatalog
 import dev.arnv.bluke.ui.KeyboardThemeDefinition
 import dev.arnv.bluke.ui.KeyboardView
 import dev.arnv.bluke.ui.VisualColorPicker
-import dev.arnv.bluke.ui.normalizedCycleSelection
-import dev.arnv.bluke.ui.selectedOrFirstEnabled
-import dev.arnv.bluke.ui.toggledCycleSelection
+import dev.arnv.bluke.ui.SettingsGroup
+import dev.arnv.bluke.ui.SettingsSubheader
+import dev.arnv.bluke.ui.settings.LibraryChoiceRow
+import androidx.compose.foundation.selection.selectableGroup
 import dev.arnv.bluke.ui.theme.MyApplicationTheme
 import java.util.UUID
 import kotlin.math.roundToInt
@@ -95,6 +91,7 @@ import kotlin.math.roundToInt
 class KeyboardThemesActivity : ComponentActivity() {
     @OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
+        enableEdgeToEdge()
         super.onCreate(savedInstanceState)
         setContent {
             MyApplicationTheme {
@@ -102,22 +99,7 @@ class KeyboardThemesActivity : ComponentActivity() {
                 var customThemes by remember { mutableStateOf(repository.listCustomThemes()) }
                 var editingTheme by remember { mutableStateOf<KeyboardThemeDefinition?>(null) }
                 var pendingDelete by remember { mutableStateOf<KeyboardThemeDefinition?>(null) }
-                val preferences = remember { getSharedPreferences("app_prefs", MODE_PRIVATE) }
-                val initialThemeIds = remember { repository.allThemes().map { it.id } }
-                val initialCycleThemes = remember {
-                    normalizedCycleSelection(preferences.getStringSet(CYCLE_KEYBOARD_THEMES_PREFERENCE, null), initialThemeIds)
-                }
-                var cycleThemes by remember {
-                    mutableStateOf(initialCycleThemes)
-                }
-                val storedThemeId = remember { repository.selectedThemeId() }
-                var selectedThemeId by remember {
-                    mutableStateOf(selectedOrFirstEnabled(storedThemeId, initialCycleThemes, initialThemeIds)!!)
-                }
-                LaunchedEffect(Unit) {
-                    if (selectedThemeId != storedThemeId) repository.selectTheme(selectedThemeId)
-                }
-                val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+                var selectedThemeId by remember { mutableStateOf(repository.selectedThemeId()) }
 
                 fun beginCopy(source: KeyboardThemeDefinition) {
                     editingTheme = source.copy(
@@ -128,21 +110,9 @@ class KeyboardThemesActivity : ComponentActivity() {
                 }
 
                 BackHandler(enabled = editingTheme != null) { editingTheme = null }
-                Scaffold(
-                    modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
-                    topBar = {
-                        LargeTopAppBar(
-                            title = { Text(if (editingTheme == null) "Keyboard themes" else "Edit keyboard theme") },
-                            navigationIcon = {
-                                IconButton(onClick = {
-                                    if (editingTheme == null) finish() else editingTheme = null
-                                }) {
-                                    Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                                }
-                            },
-                            scrollBehavior = scrollBehavior,
-                        )
-                    },
+                KeyboardThemesScreen(
+                    editing = editingTheme != null,
+                    onBack = { if (editingTheme == null) finish() else editingTheme = null },
                 ) { padding ->
                     val theme = editingTheme
                     if (theme == null) {
@@ -150,27 +120,14 @@ class KeyboardThemesActivity : ComponentActivity() {
                             modifier = Modifier.padding(padding),
                             selectedThemeId = selectedThemeId,
                             customThemes = customThemes,
-                            cycleThemes = cycleThemes,
                             onCreate = { beginCopy(repository.selectedTheme()) },
                             onSelect = { selected ->
-                                val nextCycle = cycleThemes + selected.id
-                                cycleThemes = nextCycle
-                                preferences.edit { putStringSet(CYCLE_KEYBOARD_THEMES_PREFERENCE, nextCycle) }
                                 repository.selectTheme(selected.id)
                                 selectedThemeId = selected.id
                             },
                             onCopy = ::beginCopy,
                             onEdit = { editingTheme = it },
                             onDelete = { pendingDelete = it },
-                            onCycleToggle = { id ->
-                                val nextCycle = toggledCycleSelection(cycleThemes, id)
-                                val themeIds = repository.allThemes().map { it.id }
-                                val nextSelected = selectedOrFirstEnabled(selectedThemeId, nextCycle, themeIds)!!
-                                cycleThemes = nextCycle
-                                selectedThemeId = nextSelected
-                                repository.selectTheme(nextSelected)
-                                preferences.edit { putStringSet(CYCLE_KEYBOARD_THEMES_PREFERENCE, nextCycle) }
-                            },
                         )
                     } else {
                         KeyboardThemeEditor(
@@ -186,8 +143,6 @@ class KeyboardThemesActivity : ComponentActivity() {
                                 repository.selectTheme(saved.id)
                                 selectedThemeId = saved.id
                                 customThemes = repository.listCustomThemes()
-                                cycleThemes = cycleThemes + saved.id
-                                preferences.edit { putStringSet(CYCLE_KEYBOARD_THEMES_PREFERENCE, cycleThemes) }
                                 editingTheme = null
                             },
                         )
@@ -203,13 +158,8 @@ class KeyboardThemesActivity : ComponentActivity() {
                             TextButton(onClick = {
                                 repository.delete(themeToDelete.id)
                                 customThemes = repository.listCustomThemes()
-                                val themeIds = repository.allThemes().map { it.id }
-                                val nextCycle = normalizedCycleSelection(cycleThemes - themeToDelete.id, themeIds)
-                                val nextSelected = selectedOrFirstEnabled(repository.selectedThemeId(), nextCycle, themeIds)!!
-                                cycleThemes = nextCycle
-                                selectedThemeId = nextSelected
-                                repository.selectTheme(nextSelected)
-                                preferences.edit { putStringSet(CYCLE_KEYBOARD_THEMES_PREFERENCE, nextCycle) }
+                                // Deleting the chosen theme moves the choice to the default one.
+                                selectedThemeId = repository.selectedThemeId()
                                 pendingDelete = null
                             }) { Text("Delete") }
                         },
@@ -223,30 +173,54 @@ class KeyboardThemesActivity : ComponentActivity() {
     }
 }
 
+/** The Keyboard themes screen's frame: the app bar, titled for the library or the editor, around [content]. */
+@OptIn(ExperimentalMaterial3Api::class)
 @Composable
-private fun KeyboardThemeLibrary(
+internal fun KeyboardThemesScreen(
+    editing: Boolean,
+    onBack: () -> Unit,
+    content: @Composable (PaddingValues) -> Unit,
+) {
+    val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior()
+    Scaffold(
+        modifier = Modifier.nestedScroll(scrollBehavior.nestedScrollConnection),
+        topBar = {
+            LargeTopAppBar(
+                title = { Text(if (editing) "Edit keyboard theme" else "Keyboard themes") },
+                navigationIcon = {
+                    IconButton(onClick = onBack) {
+                        Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                    }
+                },
+                scrollBehavior = scrollBehavior,
+            )
+        },
+        content = content,
+    )
+}
+
+/** The theme library, stateless so a screenshot test can draw it without themes on disk. */
+@Composable
+internal fun KeyboardThemeLibrary(
     modifier: Modifier,
     selectedThemeId: String,
     customThemes: List<KeyboardThemeDefinition>,
-    cycleThemes: Set<String>,
     onCreate: () -> Unit,
     onSelect: (KeyboardThemeDefinition) -> Unit,
     onCopy: (KeyboardThemeDefinition) -> Unit,
     onEdit: (KeyboardThemeDefinition) -> Unit,
     onDelete: (KeyboardThemeDefinition) -> Unit,
-    onCycleToggle: (String) -> Unit,
 ) {
     LazyColumn(
         modifier = modifier.fillMaxSize(),
-        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp),
+        contentPadding = PaddingValues(vertical = 8.dp),
     ) {
         item {
             Text(
                 text = "Choose a keyboard look. Layout and letter arrangement stay independent.",
                 style = MaterialTheme.typography.bodyLarge,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(bottom = 4.dp),
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
             )
         }
         item {
@@ -256,9 +230,9 @@ private fun KeyboardThemeLibrary(
                 ?: "selected theme"
             FilledTonalButton(
                 onClick = onCreate,
-                modifier = Modifier.fillMaxWidth(),
-                shape = MaterialTheme.shapes.extraLarge,
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 18.dp),
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp),
+                shape = MaterialTheme.shapes.large,
+                contentPadding = PaddingValues(horizontal = 16.dp, vertical = 16.dp),
             ) {
                 Icon(Icons.Default.Add, contentDescription = null)
                 Spacer(Modifier.width(16.dp))
@@ -266,7 +240,7 @@ private fun KeyboardThemeLibrary(
                     modifier = Modifier.weight(1f),
                     horizontalAlignment = Alignment.Start,
                 ) {
-                    Text("Create from $selectedThemeName", style = MaterialTheme.typography.titleMedium)
+                    Text("New theme from \u201C$selectedThemeName\u201D", style = MaterialTheme.typography.titleMedium)
                     Text(
                         "Makes an editable copy; the original theme stays unchanged",
                         style = MaterialTheme.typography.bodySmall,
@@ -274,43 +248,27 @@ private fun KeyboardThemeLibrary(
                 }
             }
         }
-        if (customThemes.isNotEmpty()) {
-            item { ThemeSectionTitle("Your themes") }
-            item {
-                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    customThemes.forEachIndexed { index, theme ->
-                        KeyboardThemeCard(
-                            theme = theme,
-                            selected = selectedThemeId == theme.id,
-                            includedInCycle = theme.id in cycleThemes,
-                            canRemoveFromCycle = theme.id !in cycleThemes || cycleThemes.size > 1,
-                            first = index == 0,
-                            last = index == customThemes.lastIndex,
-                            onSelect = { onSelect(theme) },
-                            onCopy = { onCopy(theme) },
-                            onEdit = { onEdit(theme) },
-                            onDelete = { onDelete(theme) },
-                            onCycleToggle = { onCycleToggle(theme.id) },
-                        )
+        val lists = listOfNotNull(
+            customThemes.takeIf { it.isNotEmpty() }?.let { Triple("Your themes", it, true) },
+            Triple("Built-in themes", KeyboardThemeCatalog.builtIns, false),
+        )
+        lists.forEach { (title, themes, custom) ->
+            item(key = title) {
+                Spacer(Modifier.height(8.dp))
+                SettingsGroup {
+                    SettingsSubheader(title)
+                    Column(Modifier.selectableGroup()) {
+                        themes.forEach { theme ->
+                            KeyboardThemeRow(
+                                theme = theme,
+                                selected = selectedThemeId == theme.id,
+                                onSelect = { onSelect(theme) },
+                                onCopy = { onCopy(theme) },
+                                onEdit = if (custom) ({ onEdit(theme) }) else null,
+                                onDelete = if (custom) ({ onDelete(theme) }) else null,
+                            )
+                        }
                     }
-                }
-            }
-        }
-        item { ThemeSectionTitle("Built-in themes") }
-        item {
-            Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                KeyboardThemeCatalog.builtIns.forEachIndexed { index, theme ->
-                    KeyboardThemeCard(
-                        theme = theme,
-                        selected = selectedThemeId == theme.id,
-                        includedInCycle = theme.id in cycleThemes,
-                        canRemoveFromCycle = theme.id !in cycleThemes || cycleThemes.size > 1,
-                        first = index == 0,
-                        last = index == KeyboardThemeCatalog.builtIns.lastIndex,
-                        onSelect = { onSelect(theme) },
-                        onCopy = { onCopy(theme) },
-                        onCycleToggle = { onCycleToggle(theme.id) },
-                    )
                 }
             }
         }
@@ -318,103 +276,63 @@ private fun KeyboardThemeLibrary(
     }
 }
 
+/** One theme of the library: a [LibraryChoiceRow] with the theme's swatches and its ⋮ menu. */
 @Composable
-private fun ThemeSectionTitle(title: String) {
-    Text(
-        text = title,
-        style = MaterialTheme.typography.titleSmall,
-        color = MaterialTheme.colorScheme.primary,
-        modifier = Modifier.padding(top = 8.dp),
+private fun KeyboardThemeRow(
+    theme: KeyboardThemeDefinition,
+    selected: Boolean,
+    onSelect: () -> Unit,
+    onCopy: () -> Unit,
+    onEdit: (() -> Unit)?,
+    onDelete: (() -> Unit)?,
+) {
+    LibraryChoiceRow(
+        title = theme.name,
+        selected = selected,
+        onSelect = onSelect,
+        leading = { KeyboardThemeSwatches(theme) },
+        trailing = { KeyboardThemeMenu(theme.name, onCopy, onEdit, onDelete) },
     )
 }
 
 @Composable
-private fun KeyboardThemeCard(
-    theme: KeyboardThemeDefinition,
-    selected: Boolean,
-    includedInCycle: Boolean,
-    canRemoveFromCycle: Boolean,
-    first: Boolean,
-    last: Boolean,
-    onSelect: () -> Unit,
-    onCopy: () -> Unit,
-    onCycleToggle: () -> Unit,
-    onEdit: (() -> Unit)? = null,
-    onDelete: (() -> Unit)? = null,
-) {
-    var menuExpanded by remember(theme.id) { mutableStateOf(false) }
-    Surface(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clickable(onClick = onSelect),
-        shape = androidx.compose.foundation.shape.RoundedCornerShape(
-            topStart = if (first) 28.dp else 4.dp,
-            topEnd = if (first) 28.dp else 4.dp,
-            bottomStart = if (last) 28.dp else 4.dp,
-            bottomEnd = if (last) 28.dp else 4.dp,
-        ),
-        color = if (selected) MaterialTheme.colorScheme.primaryContainer
-        else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
-        contentColor = if (selected) MaterialTheme.colorScheme.onPrimaryContainer
-        else MaterialTheme.colorScheme.onSurface,
-    ) {
-        Row(
-            modifier = Modifier.padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
+private fun KeyboardThemeMenu(name: String, onCopy: () -> Unit, onEdit: (() -> Unit)?, onDelete: (() -> Unit)?) {
+    var menuExpanded by remember(name) { mutableStateOf(false) }
+    Box {
+        IconButton(onClick = { menuExpanded = true }, modifier = Modifier.size(48.dp)) {
+            Icon(Icons.Default.MoreVert, contentDescription = "More options for $name")
+        }
+        DropdownMenu(
+            expanded = menuExpanded,
+            onDismissRequest = { menuExpanded = false },
         ) {
-            KeyboardThemeSwatches(theme)
-            Spacer(Modifier.width(14.dp))
-            Column(Modifier.weight(1f)) {
-                Text(
-                    theme.name,
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = if (selected) FontWeight.SemiBold else FontWeight.Normal,
-                    maxLines = 2,
-                    overflow = TextOverflow.Ellipsis,
+            DropdownMenuItem(
+                text = { Text("Copy") },
+                leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
+                onClick = {
+                    menuExpanded = false
+                    onCopy()
+                },
+            )
+            onEdit?.let { edit ->
+                DropdownMenuItem(
+                    text = { Text("Edit") },
+                    leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
+                    onClick = {
+                        menuExpanded = false
+                        edit()
+                    },
                 )
             }
-            Checkbox(
-                checked = includedInCycle,
-                enabled = canRemoveFromCycle,
-                onCheckedChange = { onCycleToggle() },
-            )
-            Box {
-                IconButton(onClick = { menuExpanded = true }) {
-                    Icon(Icons.Default.MoreVert, contentDescription = "More options for ${theme.name}")
-                }
-                DropdownMenu(
-                    expanded = menuExpanded,
-                    onDismissRequest = { menuExpanded = false },
-                ) {
-                    DropdownMenuItem(
-                        text = { Text("Copy") },
-                        leadingIcon = { Icon(Icons.Default.ContentCopy, contentDescription = null) },
-                        onClick = {
-                            menuExpanded = false
-                            onCopy()
-                        },
-                    )
-                    onEdit?.let { edit ->
-                        DropdownMenuItem(
-                            text = { Text("Edit") },
-                            leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                edit()
-                            },
-                        )
-                    }
-                    onDelete?.let { delete ->
-                        DropdownMenuItem(
-                            text = { Text("Delete") },
-                            leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
-                            onClick = {
-                                menuExpanded = false
-                                delete()
-                            },
-                        )
-                    }
-                }
+            onDelete?.let { delete ->
+                DropdownMenuItem(
+                    text = { Text("Delete") },
+                    leadingIcon = { Icon(Icons.Default.Delete, contentDescription = null) },
+                    onClick = {
+                        menuExpanded = false
+                        delete()
+                    },
+                )
             }
         }
     }
@@ -422,13 +340,14 @@ private fun KeyboardThemeCard(
 
 @Composable
 private fun KeyboardThemeSwatches(theme: KeyboardThemeDefinition) {
-    Row(horizontalArrangement = Arrangement.spacedBy((-7).dp)) {
+    Row(horizontalArrangement = Arrangement.spacedBy((-6).dp)) {
         KeyboardThemeCatalog.previewColors(theme).forEach { color ->
             Box(
                 Modifier
-                    .size(28.dp)
+                    .size(22.dp)
                     .clip(CircleShape)
-                    .background(color),
+                    .background(color)
+                    .border(1.dp, MaterialTheme.colorScheme.outline, CircleShape),
             )
         }
     }

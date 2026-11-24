@@ -4,10 +4,11 @@ title: One Settings screen with collapsible sections replaces eight settings act
 kind: ux
 size: L
 judge: opus
-status: proposed
+status: done
 lens: ux
 proposed_by: coordinator on ricks-macbook, from the operator's request
 proposed_on: 2026-11-23
+scope_grew: [003, 004]
 ---
 
 ## Opportunity
@@ -62,6 +63,8 @@ Out:
 
 Judge: opus, because it's an information-architecture call with many dependents.
 
+Scope grew: the surfaces spec (003) landed first, so Settings › Touchpad, Gamepad, Multimedia and Keyboard host its `*TuneContent`, Appearance renders its `appearanceOptions`, and its shared choice control (`TuneChoice`) and switch row took the fixes the hill-climb found on this screen. 003 also removed the keyboard toolbar's layout, theme and sound buttons, so those three toolbar cycles have no reader: their "Edit cycle" lists are cut, not hidden; only Input modes keeps its cycle. The home spec (004) left its mode tiles' long-press waiting for `settingsIntent`; it now opens Input modes.
+
 ## What you'll see
 Settings is one calm screen. Every section is a tap away, and each section's header shows what's inside. Every control on screen does something in the current configuration. Keyboard geometry shows a preview and sound packs play a sample. The caps-lock light is right on hosts that report it and still works on hosts that don't.
 
@@ -83,10 +86,34 @@ Settings is one calm screen. Every section is a tap away, and each section's hea
   - If three rounds in a row bring no gain, or one finding survives two fixes, write down the belief both fixes assumed, test it, and report it with `bmesh ask`.
 
 ## Shown
+- One Settings screen, collapsible sections, eight Activities gone: `OldSettingsShortcutsTest.noSourceNamesADeletedSettingsScreen` (sources and manifest name none of the eight); `settings-collapsed-*` captures show nine sections under three group labels, each header summarising its values.
+- Every section a tap away and a Settings path to input modes: `SettingsRoutingTest.theInputModesPathShowsTheModeCheckboxes` (fails on today's code: no path existed) and `everySectionRoundTripsThroughItsIntent`, `anUnknownOrMissingSectionOpensTheTop`.
+- Every old shortcut lands on its section: `InputModeShortcutsTest` long-presses the surface toolbar's mode button and a home mode tile and sees `SettingsActivity` started at Input modes (003 removed the layout and gamepad pills that had other shortcuts). Mirror's mode button is wired the same way but has no test.
+- Choosing a pack while muted turns key sounds on, from anywhere: `SoundPreferencesTest.choosingAPackWhileMutedTurnsKeySoundsOn` (fails today); Settings, Sound packs and the keyboard Tune sheet all choose through `selectKeySound`.
+- Lock lights follow the host after its first report and toggle locally before it: `LockLedsTest.afterTheHostsFirstReportTheLightsFollowTheHost`, `beforeTheHostsFirstReportThePhoneTogglesItsOwnLights` (fail today: no rule existed); the per-connection flag is `BluetoothKeyboardManager.hostReportsLockLights`, reset on a new link; `KeyboardSurfaceTest.connectedLockLightsAreThePhonesUntilTheHostReports` drives the real surface through both halves.
+- Migrations for every cut preference: `LockLightMigrationTest.theOldLocalModeChoiceIsDropped` (`lock_sync_mode`); palette styles migrate in 003's `migratePaletteStyle`; the layout and theme cycle keys stay, read by their existing migrations; the sound cycle keys go: `SoundPreferencesTest.theOldSoundCycleKeysAreDroppedOnceAndTheChoiceStays`.
+- A control shows only when it applies: `SettingsAppearanceTest.wallpaperColoursHideTheAccentAndPaletteStyle`, `aDarkStaticSchemeShowsAccentPaletteAndPureBlack` (through 003's `appearanceOptions`); `SettingsControlsTest.multimediaLeavesPointerSpeedToTouchpad`; key touch area folded under Advanced (`keyTouchAreaIsFoldedUnderAdvanced`). Glide showing only with momentum is 003's `TouchpadTuneContent`, seen in `settings-touchpad-*`, not tested here.
+- Geometry shows a preview and sound packs play a sample: `settings-keyboard-*` and `soundpacks-*` captures (a live preview in the chosen theme; a "Play <name>" button on every sound row). Choosing a sound also plays it (`KeyboardSettingsController.selectSound`); no test hears it.
+- Screenshots of every section, light and dark, fs 1.0, 1.3, 2.0, portrait: `ls app/src/test/screenshots | grep -cE "^(settings|soundpacks|keyboardthemes|help)-"` -> `102`.
+- Verify: `./gradlew --no-daemon -q assembleDebug testDebugUnitTest` -> exit 0, `tests 564 failures 0 errors 0` (summed from the test-result XML).
+- The rig mid-build, on the lock-light manager change: `tools/hid-rig/run.sh` -> `18/18 checks passed` (on ab1ed63; the first attempt failed to pair under load average 42 and passed unchanged on re-run).
+- Hill-climb against `ui-rubric.md`, fresh Opus reviewers who never saw earlier rounds (rounds 1-3 one reviewer; from round 4, three, scored by median, as the operator asked):
+  - Round 1: 4 (7 with 003's theme set aside). P1 segmented labels broke at fs2.0; fixed with a measured fallback.
+  - Round 2: 4 (8). Sections grouped, value summaries, stepped labels, slider ticks.
+  - Round 3: 4 (8). Keyboard themes library moved onto the kit.
+  - Round 4: 4, 4, 4 (9, 9, 9 with theme set aside); every cap was 003's dark-primary P0, before 003 landed.
+  - Round 5, after merging 003: 8, 8, 7, median 8. One slider, one choice fallback, haptics passed to hosted Tune content, US "color".
+  - Round 6: 8, 8, 9, median 8. Multimedia stopped repeating Touchpad's sliders; swatch outlines; Help colours.
+  - Round 7: 8, 8, 9, median 8. Help stopped painting advice as an error; header summaries name non-default values; one radio-row geometry.
+  - Round 8: 9, 9, 9, median 9. Its P2s were then fixed: `TuneChoice` no longer changes layout with the selection (`SettingsControlsTest`), theme chips align.
+  - One finding survived fixes: where key touch area sits (under Sound, then Layout, then Touch › Advanced). The belief both fixes assumed was that it needed a heading of its own; it doesn't: it is the spec's Advanced fold, last in Keyboard, set apart by a divider.
+- Easy to miss: preference keys and value sets are the contract, never renamed: `hide_unsupported` keeps its key though it now reads "Hide unlikely devices", and `PaletteStyle.DEFAULT` keeps its stored value though it now reads "Colorful": `SettingsPreferencesTest.storedKeysAndValuesNeverChange` (every key and value as a literal).
+- Not shown: the caps-lock light on real Mac and Windows hosts: needs a phone and hosts (the operator step below).
+- Not shown: haptic strength, spring feel and sound-sample latency on a device: the emulator can't judge them; every reviewer listed them as not verified.
 
 ## Risks and the alternative considered
 - **The lock-light rule** rests on a belief: hosts that report lock lights do so soon after connecting. The rig covers a host that follows the spec; real hosts are the operator's check.
 - **Alternative: keep the Activities and restyle them.** It lost because the depth is the problem, as the audit's tap counts show.
 
 ## Needs from the operator
-- [phone] With one Mac host and one Android host, toggle caps lock on the phone and on the host's own keyboard. Say whether the phone's light always matched.
+- [phone] With a Mac host (and a Windows host if one is at hand), connect, then toggle caps lock on the phone and on the host's own keyboard. Say whether the phone's light always matched.

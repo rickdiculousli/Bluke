@@ -6,8 +6,6 @@ import androidx.core.content.edit
 private const val SOUND_PREFERENCES_SCHEMA = 1
 private const val SOUND_PREFERENCES_SCHEMA_KEY = "sound_preferences_schema"
 const val KEY_SOUND_ENABLED_PREFERENCE = "key_sound_enabled"
-const val CYCLE_KEY_SOUNDS_PREFERENCE = "cycle_key_sounds"
-private const val SOUND_CYCLE_SCHEMA_KEY = "sound_cycle_schema"
 private const val LEGACY_SOUND_TOGGLE_PREFERENCE = "sound_toggle"
 
 /** Normalizes legacy sound settings once without overriding an explicit mute choice. */
@@ -28,36 +26,45 @@ fun migrateSoundPreferences(preferences: SharedPreferences) {
     }
 }
 
-fun soundCycleSelection(
-    preferences: SharedPreferences,
-    customPackIds: List<String>,
-): Set<String> {
-    val builtIns = SwitchType.entries.map(::builtInSoundProfileId)
-    val custom = customPackIds.map(::customSoundProfileId)
-    val available = (builtIns + custom).toSet()
-    val stored = preferences.getStringSet(CYCLE_KEY_SOUNDS_PREFERENCE, null)
-    var selected = stored
-        ?.mapTo(mutableSetOf()) { value ->
-            SwitchType.entries.firstOrNull { it.name == value }?.let(::builtInSoundProfileId) ?: value
-        }
-        ?.intersect(available)
-        ?.toMutableSet()
-        ?: available.toMutableSet()
+private const val LEGACY_SOUND_CYCLE_PREFERENCE = "cycle_key_sounds"
+private const val LEGACY_SOUND_CYCLE_SCHEMA_KEY = "sound_cycle_schema"
 
-    if (preferences.getInt(SOUND_CYCLE_SCHEMA_KEY, 0) < 1) {
-        selected.addAll(custom)
+/** Drops the sound pill's old cycle list: the toolbar no longer cycles key sounds, so nothing reads it. Safe to run twice. */
+fun migrateSoundCyclePreferences(preferences: SharedPreferences) {
+    if (preferences.contains(LEGACY_SOUND_CYCLE_PREFERENCE) || preferences.contains(LEGACY_SOUND_CYCLE_SCHEMA_KEY)) {
         preferences.edit {
-            putStringSet(CYCLE_KEY_SOUNDS_PREFERENCE, selected)
-            putInt(SOUND_CYCLE_SCHEMA_KEY, 1)
+            remove(LEGACY_SOUND_CYCLE_PREFERENCE)
+            remove(LEGACY_SOUND_CYCLE_SCHEMA_KEY)
         }
     }
-    if (selected.isEmpty()) selected = available.toMutableSet()
-    return selected
 }
 
-fun saveSoundCycleSelection(preferences: SharedPreferences, selected: Set<String>) {
+/**
+ * Makes [profileId] (a [builtInSoundProfileId] or [customSoundProfileId]) the key sound and turns key
+ * sounds on: choosing a sound is asking to hear it, wherever it's chosen. Returns false, changing
+ * nothing, for an id that names no sound. A live [KeyboardSoundSynthesizer] picks the choice up with
+ * `reloadSelectedSoundPack()` and `setMute(false)`.
+ */
+fun selectKeySound(preferences: SharedPreferences, profileId: String): Boolean {
+    val builtIn = SwitchType.entries.firstOrNull { builtInSoundProfileId(it) == profileId }
+    val customPrefix = customSoundProfileId("")
+    val customPackId = profileId.takeIf { builtIn == null && it.startsWith(customPrefix) }
+        ?.removePrefix(customPrefix)
+        ?.takeIf { it.isNotEmpty() }
+    if (builtIn == null && customPackId == null) return false
     preferences.edit {
-        putStringSet(CYCLE_KEY_SOUNDS_PREFERENCE, selected)
-        putInt(SOUND_CYCLE_SCHEMA_KEY, 1)
+        if (builtIn != null) {
+            remove(CUSTOM_SOUND_PACK_PREFERENCE)
+            putString(SELECTED_BUILT_IN_SOUND_PREFERENCE, builtIn.name)
+        } else {
+            putString(CUSTOM_SOUND_PACK_PREFERENCE, customPackId)
+        }
+        putBoolean(KEY_SOUND_ENABLED_PREFERENCE, true)
     }
+    return true
+}
+
+/** Turns key sounds off, keeping the chosen sound for when they come back on. */
+fun turnKeySoundsOff(preferences: SharedPreferences) {
+    preferences.edit { putBoolean(KEY_SOUND_ENABLED_PREFERENCE, false) }
 }

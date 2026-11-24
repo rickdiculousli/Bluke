@@ -67,7 +67,8 @@ import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import dev.arnv.bluke.BlukeApplication
-import dev.arnv.bluke.QuickCycleActivity
+import dev.arnv.bluke.ui.settings.SettingsSection
+import dev.arnv.bluke.ui.settings.settingsIntent
 import dev.arnv.bluke.bluetooth.BluetoothKeyboardManager
 import dev.arnv.bluke.mirror.MirrorFit
 import dev.arnv.bluke.mirror.MirrorNotice
@@ -149,7 +150,7 @@ fun MirrorView(
             val index = enabled.indexOf(launchMode)
             onModeChange(enabled[(index + 1) % enabled.size])
         },
-        onConfigureModes = { context.startActivity(Intent(context, QuickCycleActivity::class.java)) },
+        onConfigureModes = { context.startActivity(settingsIntent(context, SettingsSection.INPUT_MODES)) },
         onOpenWifiSettings = {
             // The panel joins a network without leaving Bluke; before Android 10, the full settings page.
             val action = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) Settings.Panel.ACTION_WIFI
