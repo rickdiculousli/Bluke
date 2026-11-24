@@ -134,6 +134,8 @@ data class MirrorUiState(
     /** Nothing has come from the connected companion for [MirrorRates.LINK_QUIET_MS]: the picture may be frozen. */
     val linkQuiet: Boolean = false,
     val touchMode: MirrorTouchMode = MirrorTouchMode.DIRECT,
+    /** The left-button key holds the computer's button (Hover). */
+    val keyHeld: Boolean = false,
     val notice: MirrorNotice? = null,
 ) {
     /** What to type on the computer when mDNS can't find the phone. */
@@ -178,8 +180,18 @@ fun MirrorUiState.readout(): MirrorReadout {
     }
 }
 
-/** One touch pointer as the surface saw it, in the surface's pixels. */
-data class MirrorTouchPoint(val id: Long, val x: Float, val y: Float, val down: Boolean, val wasDown: Boolean)
+/**
+ * One touch pointer as the surface saw it, in the surface's pixels. [onControl] when it landed on
+ * one of the overlay's controls, which owns it until it lifts ([MirrorFingerRouter]).
+ */
+data class MirrorTouchPoint(
+    val id: Long,
+    val x: Float,
+    val y: Float,
+    val down: Boolean,
+    val wasDown: Boolean,
+    val onControl: Boolean = false,
+)
 
 /**
  * Every pointer of one input event on the mirror image, with the fit the image was drawn at.

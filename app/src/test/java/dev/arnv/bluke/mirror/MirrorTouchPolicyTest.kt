@@ -292,4 +292,171 @@ class MirrorTouchPolicyTest {
     }
     assertFalse(MirrorTouchPolicy.countsAsLiveness(MirrorMessage.FrameAck(7, 1200)))
   }
+
+  // --- the left-button key (Hover) ---
+
+  /** Hover, with the pointer already sent to (100, 100) by a finger that then lifted without clicking. */
+  private fun hoverWithAPointSent() {
+    policy.mode = MirrorTouchMode.HOVER
+    touch(0, f(100f, 100f))
+    touch(50, f(140f, 100f))
+    assertEquals(emptyList<MirrorMessage>(), touch(1000))
+  }
+
+  @Test
+  fun theKeyHoldsThroughRightFingerMovesLiftsAndNewLandingsUntilItLifts() {
+    hoverWithAPointSent()
+    val press = policy.pressKey()
+    assertEquals(listOf(Pointer(140, 100, 1)), press.messages)
+    assertEquals(listOf(MirrorTouchEvent.PRESSED), press.events)
+    assertTrue(policy.keyHeld)
+    assertTrue(policy.buttonHeld)
+    // The right finger lands elsewhere: the pointer goes straight there, held, and drags.
+    assertEquals(listOf(Pointer(500, 500, 1)), touch(2000, f(500f, 500f, id = 2)))
+    assertEquals(listOf(Pointer(600, 520, 1)), touch(2010, f(600f, 520f, id = 2)))
+    // Lifting it (a quick one, which in Hover would be a tap) neither releases nor clicks.
+    assertEquals(emptyList<MirrorMessage>(), touch(2020))
+    assertTrue(policy.keyHeld)
+    // Another finger, another held drag.
+    assertEquals(listOf(Pointer(700, 700, 1)), touch(3000, f(700f, 700f, id = 3)))
+    assertEquals(listOf(Pointer(710, 690, 1)), touch(3010, f(710f, 690f, id = 3)))
+    // Only the key's lift lets go, at the point last sent.
+    val lift = policy.liftKey()
+    assertEquals(listOf(Pointer(710, 690, 0)), lift.messages)
+    assertEquals(listOf(MirrorTouchEvent.RELEASED), lift.events)
+    assertFalse(policy.keyHeld)
+    // The finger still down goes on hovering, and its lift never clicks.
+    assertEquals(listOf(Pointer(720, 690, 0)), touch(3020, f(720f, 690f, id = 3)))
+    assertEquals(emptyList<MirrorMessage>(), touch(3030))
+  }
+
+  @Test
+  fun pressingTheKeyUnderAHoveringFingerTurnsItIntoADrag() {
+    policy.mode = MirrorTouchMode.HOVER
+    touch(0, f(100f, 100f))
+    assertEquals(listOf(Pointer(100, 100, 1)), policy.pressKey().messages)
+    assertEquals(listOf(Pointer(300, 100, 1)), touch(10, f(300f, 100f)))
+    val held = touchUpdate(20, f(300f, 100f))
+    assertEquals(listOf(f(300f, 100f)), held.rings)
+    assertTrue(held.held)
+    assertEquals(emptyList<MirrorMessage>(), touch(30))
+    assertEquals(listOf(Pointer(300, 100, 0)), policy.liftKey().messages)
+  }
+
+  @Test
+  fun whileTheKeyIsHeldASecondFingerNeverScrolls() {
+    hoverWithAPointSent()
+    policy.pressKey()
+    touch(2000, f(500f, 500f, id = 2))
+    val two = touch(2010, f(520f, 500f, id = 2), f(800f, 800f, id = 3)) +
+        touch(2020, f(540f, 520f, id = 2), f(820f, 830f, id = 3))
+    assertEquals(listOf(Pointer(520, 500, 1), Pointer(540, 520, 1)), two)
+    assertTrue(two.none { it is Wheel })
+  }
+
+  @Test
+  fun theKeyIsInertBeforeAnyPointIsSentAndInDirect() {
+    policy.mode = MirrorTouchMode.HOVER
+    assertEquals(emptyList<MirrorMessage>(), policy.pressKey().messages)
+    assertFalse(policy.keyHeld)
+    // A point arrives while the inert thumb is still down: still nothing, and its lift sends nothing.
+    touch(0, f(100f, 100f))
+    assertEquals(emptyList<MirrorMessage>(), policy.liftKey().messages)
+    touch(10)
+    policy.mode = MirrorTouchMode.DIRECT
+    assertEquals(emptyList<MirrorMessage>(), policy.pressKey().messages)
+    assertFalse(policy.keyHeld)
+  }
+
+  @Test
+  fun theHeldKeySurvivesAStillPointerOnHeartbeats() {
+    hoverWithAPointSent()
+    policy.pressKey()
+    var lastSent = 1000L
+    var beats = 0
+    for (now in 1000L..6000L step 100) {
+      if (policy.heartbeat(now, lastSent) != null) {
+        beats++
+        lastSent = now
+      }
+    }
+    // Every 250 ms (on the 100 ms tick: 300 ms apart) for 5 s, and still held.
+    assertEquals(16, beats)
+    assertTrue(policy.keyHeld)
+    assertEquals(listOf(Pointer(140, 100, 0)), policy.liftKey().messages)
+    assertNull(policy.heartbeat(7000, lastSent))
+  }
+
+  @Test
+  fun aLinkDropWhileHeldReadsReleasedAndTheKeyIsInertUntilAPointIsSent() {
+    hoverWithAPointSent()
+    policy.pressKey()
+    touch(2000, f(500f, 500f, id = 2))
+    policy.abandon()
+    assertFalse(policy.keyHeld)
+    assertFalse(policy.buttonHeld)
+    // The thumb still on the key lifts: nothing goes out (the companion let go on its own).
+    assertEquals(emptyList<MirrorMessage>(), policy.liftKey().messages)
+    assertEquals(emptyList<MirrorMessage>(), touch(2010, f(510f, 500f, id = 2)))
+    touch(2020)
+    // The new session has sent no point yet.
+    assertEquals(emptyList<MirrorMessage>(), policy.pressKey().messages)
+  }
+
+  @Test
+  fun switchingModeWhileTheKeyIsHeldReleasesFirst() {
+    hoverWithAPointSent()
+    policy.pressKey()
+    val switched = policy.changeMode(MirrorTouchMode.DIRECT)
+    assertEquals(listOf(Pointer(140, 100, 0)), switched.messages)
+    assertFalse(policy.keyHeld)
+    assertEquals(MirrorTouchMode.DIRECT, policy.mode)
+  }
+
+  @Test
+  fun aSystemCancelOnThePictureLeavesTheKeysHold() {
+    hoverWithAPointSent()
+    policy.pressKey()
+    touch(2000, f(500f, 500f, id = 2))
+    assertEquals(emptyList<MirrorMessage>(), policy.cancel().messages)
+    assertTrue(policy.keyHeld)
+    assertEquals(listOf(Pointer(500, 500, 0)), policy.liftKey().messages)
+  }
+
+  // --- two hands: fingers that landed on an overlay control ---
+
+  private val router = MirrorFingerRouter()
+
+  private fun routed(t: Long, onKey: (Float, Float) -> Boolean, vararg points: MirrorTouchPoint) =
+      policy.update(router.route(frame(t, *points), onKey)).messages
+
+  @Test
+  fun aThumbOnAControlPlusAFingerOnThePictureAreOneFingerNeverAScroll() {
+    policy.mode = MirrorTouchMode.HOVER
+    val onKey = { x: Float, _: Float -> x < 50f }
+    // The thumb lands on the control first; the picture sees it only as an already-down pointer.
+    val moves =
+        routed(0, onKey, point(0, 20f, 300f, down = true, wasDown = true), point(1, 400f, 400f, down = true, wasDown = false)) +
+            routed(10, onKey, point(0, 22f, 302f, down = true, wasDown = true), point(1, 450f, 420f, down = true, wasDown = true)) +
+            routed(20, onKey, point(0, 22f, 302f, down = true, wasDown = true), point(1, 500f, 450f, down = true, wasDown = true))
+    assertEquals(listOf(Pointer(400, 400, 0), Pointer(450, 420, 0), Pointer(500, 450, 0)), moves)
+    // A thumb landing on a control while the finger is down: the same.
+    val later =
+        routed(30, onKey, point(1, 500f, 450f, down = true, wasDown = true), point(2, 30f, 200f, down = true, wasDown = false)) +
+            routed(40, onKey, point(1, 520f, 470f, down = true, wasDown = true), point(2, 10f, 260f, down = true, wasDown = true))
+    assertEquals(listOf(Pointer(520, 470, 0)), later)
+    assertTrue((moves + later).none { it is Wheel })
+  }
+
+  @Test
+  fun aFingerKeepsTheOwnerItLandedWithWhereverItMoves() {
+    val onKey = { x: Float, _: Float -> x < 50f }
+    // Lands on the picture, slides over a control: still the picture's (a Direct drag).
+    assertEquals(listOf(Pointer(400, 400, 1)), routed(0, onKey, point(1, 400f, 400f, down = true, wasDown = false)))
+    assertEquals(listOf(Pointer(20, 400, 1)), routed(10, onKey, point(1, 20f, 400f, down = true, wasDown = true)))
+    assertEquals(listOf(Pointer(20, 400, 0)), routed(20, onKey, point(1, 20f, 400f, down = false, wasDown = true)))
+    // The same id landing on a control next time belongs to the control.
+    assertEquals(emptyList<MirrorMessage>(), routed(30, onKey, point(1, 20f, 400f, down = true, wasDown = false)))
+    assertFalse(policy.buttonHeld)
+  }
 }

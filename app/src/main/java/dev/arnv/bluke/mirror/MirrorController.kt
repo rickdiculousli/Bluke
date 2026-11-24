@@ -165,7 +165,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
             hasFrame = false
             slot.take()
             currentImage = null
-            _state.update { it.copy(phase = MirrorPhase.Off, fps = 0, latencyMs = null, notice = null) }
+            _state.update { it.copy(phase = MirrorPhase.Off, fps = 0, latencyMs = null, notice = null, keyHeld = false) }
         }
         main.removeCallbacks(tick)
         // Release any held button before the link goes, then close once the writer has sent it.
@@ -183,11 +183,22 @@ class MirrorController(context: Context) : MirrorFrameSource {
         }
     }
 
+    /** Switches Direct and Hover; whatever holds the button (the key or a finger) lets go first. */
     fun setTouchMode(mode: MirrorTouchMode) {
-        touchPolicy.cancel().messages.forEach { session?.send(it) }
-        touchPolicy.mode = mode
+        touchPolicy.changeMode(mode).messages.forEach { session?.send(it) }
         prefs.edit { putString(TOUCH_MODE_PREFERENCE, mode.name) }
-        _state.update { it.copy(touchMode = mode) }
+        _state.update { it.copy(touchMode = mode, keyHeld = false) }
+    }
+
+    /**
+     * The left-button key, on the main thread: [down] presses and holds at the last point sent
+     * this session (Hover only), up lets go. Returns what it did, for the haptics.
+     */
+    fun leftButton(down: Boolean): MirrorTouchUpdate {
+        val update = if (down) touchPolicy.pressKey() else touchPolicy.liftKey()
+        session?.let { target -> update.messages.forEach { target.send(it) } }
+        _state.update { it.copy(keyHeld = touchPolicy.keyHeld) }
+        return update
     }
 
     fun forgetCompanion() {
@@ -235,6 +246,8 @@ class MirrorController(context: Context) : MirrorFrameSource {
             "latencyMs" to ui.latencyMs,
             "imageBounds" to imageBoundsInWindow?.toList(),
             "linkQuiet" to ui.linkQuiet,
+            "touchMode" to ui.touchMode.name,
+            "keyHeld" to ui.keyHeld,
             "eventToTouchUs" to eventToTouchUs.toList(),
             "touchToFlushUs" to touchToFlushUs.toList(),
             "eventToFlushUs" to eventToFlushUs.toList(),
@@ -471,7 +484,10 @@ class MirrorController(context: Context) : MirrorFrameSource {
             current.closeAfterFlush()
             // The companion lets go of its own held button when the link drops; the fingers still
             // down send nothing more, even once a new session starts.
-            main.post { touchPolicy.abandon() }
+            main.post {
+                touchPolicy.abandon()
+                _state.update { it.copy(keyHeld = false) }
+            }
             synchronized(lock) {
                 if (session === current) {
                     session = null
