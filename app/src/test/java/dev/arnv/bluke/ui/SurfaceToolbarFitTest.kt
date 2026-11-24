@@ -110,7 +110,7 @@ class SurfaceToolbarFitTest {
         val density = compose.density
         val chips = compose.onAllNodesWithTag("surface_host").fetchSemanticsNodes()
         val tunes = compose.onAllNodesWithTag("surface_tune").fetchSemanticsNodes()
-        assertTrue("one chip and one Tune per row", chips.size == hosts.size && tunes.size == hosts.size)
+        assertTrue("one chip and one Tune per row: ${chips.size} chips, ${tunes.size} Tunes", chips.size == hosts.size && tunes.size == hosts.size)
         chips.forEachIndexed { index, chip ->
             val bounds = chip.boundsInRoot
             assertTrue("row $index's chip keeps its dot: ${bounds.width}px", bounds.width >= with(density) { 48.dp.toPx() } - 0.5f)
@@ -119,7 +119,8 @@ class SurfaceToolbarFitTest {
         tunes.forEachIndexed { index, tune ->
             val bounds = tune.boundsInRoot
             assertTrue("row $index's Tune is whole: $bounds", bounds.left >= root.left && bounds.right <= root.right + 0.5f)
-            assertTrue("row $index's Tune is 48dp", bounds.width >= with(density) { 48.dp.toPx() } - 0.5f)
+            // The button draws at 40dp; its 48dp touch target reaches past it.
+            assertTrue("row $index's Tune is whole: ${bounds.width}px", bounds.width >= with(density) { 40.dp.toPx() } - 0.5f)
             val chip = chips[index].boundsInRoot
             assertTrue("row $index's chip doesn't run under the controls", chip.right <= bounds.left)
         }

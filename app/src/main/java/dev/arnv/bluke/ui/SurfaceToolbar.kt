@@ -319,9 +319,11 @@ private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, compact: Boolea
                 reconnect()
             },
         ).testTag("surface_host")
-        else -> chip.semantics { liveRegion = LiveRegionMode.Polite }
-            .clearAndSetSemantics { contentDescription = content.description }
-            .testTag("surface_host")
+        // The tag goes first: clearAndSetSemantics drops what comes after it.
+        else -> chip.testTag("surface_host").clearAndSetSemantics {
+            liveRegion = LiveRegionMode.Polite
+            contentDescription = content.description
+        }
     }
     Row(
         modifier = chip.padding(horizontal = 12.dp),
