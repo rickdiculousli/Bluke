@@ -1,28 +1,19 @@
 package dev.arnv.bluke.ui
 
-import androidx.compose.animation.animateColorAsState
-import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
-import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
-import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.RowScope
-import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -32,107 +23,57 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Shape
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
-import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.dp
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Dp
-import dev.arnv.bluke.bluetooth.BluetoothKeyboardManager
-import dev.arnv.bluke.bluetooth.ConsumerControl
+import androidx.compose.ui.unit.dp
 
-@Composable
-internal fun ConsumerButton(
-    label: String,
-    icon: ImageVector,
-    control: ConsumerControl,
-    btManager: BluetoothKeyboardManager,
-    modifier: Modifier,
-    fillHeight: Boolean = false,
-) {
-    RemoteHoldButton(
-        label = label,
-        icon = icon,
-        modifier = modifier,
-        fillHeight = fillHeight,
-        onPressedChange = { pressed -> btManager.sendConsumerControl(if (pressed) control else null) },
-    )
-}
+/** A remote button's container and the content drawn on it: always a role and its on-role. */
+@Immutable
+internal data class RemoteButtonColors(val container: Color, val content: Color)
 
-@Composable
-internal fun KeyboardButton(
-    label: String,
-    keyCode: Int,
-    btManager: BluetoothKeyboardManager,
-    modifier: Modifier,
-    fillHeight: Boolean = false,
-) {
-    RemoteHoldButton(
-        label = label,
-        icon = null,
-        modifier = modifier,
-        fillHeight = fillHeight,
-        onPressedChange = { pressed -> btManager.sendKey(keyCode, pressed) },
-    )
-}
-
+/**
+ * A button held like a hardware key: [onPressedChange] gets true on touch-down and false on release,
+ * and [onPress] (the haptic) fires on touch-down. The pressed look comes straight from the pressed
+ * state, in the frame the finger lands. [description] is what TalkBack reads; [text] and [caption]
+ * are what the button shows, wrapping rather than truncating.
+ */
 @Composable
 internal fun RemoteHoldButton(
-    label: String,
-    icon: ImageVector?,
-    modifier: Modifier,
-    fillHeight: Boolean = false,
-    showLabel: Boolean = true,
-    contentRotation: Float = 0f,
-    cornerRadius: Dp = 16.dp,
-    showBorder: Boolean = true,
-    containerColor: Color? = null,
-    contentColor: Color? = null,
-    onPressFeedback: () -> Unit = {},
+    description: String,
+    colors: RemoteButtonColors,
+    shape: Shape,
+    modifier: Modifier = Modifier,
+    icons: List<ImageVector> = emptyList(),
+    iconSize: Dp = 24.dp,
+    text: String? = null,
+    caption: String? = null,
+    onPress: () -> Unit = {},
     onPressedChange: (Boolean) -> Unit,
 ) {
     val currentPressHandler by rememberUpdatedState(onPressedChange)
-    val currentPressFeedback by rememberUpdatedState(onPressFeedback)
-    val resolvedContainerColor = containerColor ?: MaterialTheme.colorScheme.secondaryContainer
-    val resolvedContentColor = contentColor ?: MaterialTheme.colorScheme.onSecondaryContainer
+    val currentPress by rememberUpdatedState(onPress)
     var isPressed by remember { mutableStateOf(false) }
-    val animatedContainerColor by animateColorAsState(
-        targetValue = if (isPressed) {
-            lerp(resolvedContainerColor, resolvedContentColor, 0.16f)
-        } else {
-            resolvedContainerColor
-        },
-        animationSpec = tween(durationMillis = 60),
-        label = "remoteButtonPressColor",
-    )
+    val container = if (isPressed) lerp(colors.container, colors.content, PRESSED_TINT) else colors.container
     Column(
         modifier = modifier
-            .then(if (fillHeight) Modifier.fillMaxHeight() else Modifier.height(62.dp))
-            .clip(RoundedCornerShape(cornerRadius))
-            .background(animatedContainerColor)
-            .then(
-                if (showBorder) {
-                    Modifier.border(
-                        1.dp,
-                        MaterialTheme.colorScheme.outlineVariant,
-                        RoundedCornerShape(cornerRadius),
-                    )
-                } else {
-                    Modifier
-                },
-            )
-            .semantics {
-                contentDescription = label
+            .widthIn(min = 48.dp)
+            .heightIn(min = 48.dp)
+            .clip(shape)
+            .background(container)
+            .clearAndSetSemantics {
+                contentDescription = description
                 role = Role.Button
                 onClick {
-                    currentPressFeedback()
+                    currentPress()
                     currentPressHandler(true)
                     currentPressHandler(false)
                     true
@@ -142,7 +83,7 @@ internal fun RemoteHoldButton(
                 detectTapGestures(
                     onPress = {
                         isPressed = true
-                        currentPressFeedback()
+                        currentPress()
                         currentPressHandler(true)
                         try {
                             tryAwaitRelease()
@@ -152,107 +93,34 @@ internal fun RemoteHoldButton(
                         }
                     },
                 )
-            },
-        verticalArrangement = Arrangement.Center,
+            }
+            .padding(horizontal = 4.dp, vertical = 4.dp),
+        verticalArrangement = Arrangement.spacedBy(2.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        if (icon != null) {
-            Icon(
-                icon,
-                null,
-                tint = resolvedContentColor,
-                modifier = Modifier
-                    .size(20.dp)
-                    .graphicsLayer { rotationZ = contentRotation },
-            )
-        }
-        if (showLabel) {
-            Text(
-                label,
-                modifier = Modifier.graphicsLayer { rotationZ = contentRotation },
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                color = resolvedContentColor,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis,
-            )
-        }
-    }
-}
-
-@Composable
-internal fun RemoteIconHoldButton(
-    label: String,
-    icon: ImageVector,
-    modifier: Modifier = Modifier,
-    emphasized: Boolean = false,
-    containerColor: Color? = null,
-    contentColor: Color? = null,
-    onPressedChange: (Boolean) -> Unit,
-) {
-    val currentPressHandler by rememberUpdatedState(onPressedChange)
-    val resolvedContainerColor = containerColor ?: if (emphasized) {
-        MaterialTheme.colorScheme.primary
-    } else {
-        MaterialTheme.colorScheme.surfaceContainerHighest
-    }
-    val resolvedContentColor = contentColor ?: if (emphasized) {
-        MaterialTheme.colorScheme.onPrimary
-    } else {
-        MaterialTheme.colorScheme.onSurfaceVariant
-    }
-    Box(
-        modifier = modifier
-            .clip(CircleShape)
-            .background(resolvedContainerColor)
-            .semantics {
-                contentDescription = label
-                role = Role.Button
-                onClick {
-                    currentPressHandler(true)
-                    currentPressHandler(false)
-                    true
-                }
+        if (icons.isNotEmpty()) {
+            Row(horizontalArrangement = Arrangement.spacedBy(2.dp)) {
+                icons.forEach { Icon(it, contentDescription = null, tint = colors.content, modifier = Modifier.size(iconSize)) }
             }
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onPress = {
-                        currentPressHandler(true)
-                        try {
-                            tryAwaitRelease()
-                        } finally {
-                            currentPressHandler(false)
-                        }
-                    },
-                )
-            },
-        contentAlignment = Alignment.Center,
-    ) {
-        Icon(icon, contentDescription = null, tint = resolvedContentColor, modifier = Modifier.size(24.dp))
+        }
+        if (text != null) {
+            Text(
+                text,
+                style = MaterialTheme.typography.labelLarge,
+                color = colors.content,
+                textAlign = TextAlign.Center,
+            )
+        }
+        if (caption != null) {
+            Text(
+                caption,
+                style = MaterialTheme.typography.labelSmall,
+                color = colors.content,
+                textAlign = TextAlign.Center,
+            )
+        }
     }
 }
 
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-internal fun ToolbarPill(
-    onClick: () -> Unit,
-    onLongClick: (() -> Unit)? = null,
-    content: @Composable RowScope.() -> Unit,
-) {
-    Row(
-        modifier = Modifier
-            .height(28.dp)
-            .clip(RoundedCornerShape(8.dp))
-            .background(Color.White.copy(alpha = 0.15f))
-            .then(
-                if (onLongClick == null) {
-                    Modifier.clickable(onClick = onClick)
-                } else {
-                    Modifier.combinedClickable(onClick = onClick, onLongClick = onLongClick)
-                },
-            )
-            .padding(horizontal = 9.dp),
-        verticalAlignment = Alignment.CenterVertically,
-        content = content,
-    )
-}
+/** How far a pressed button's container moves toward its content colour. */
+private const val PRESSED_TINT = 0.2f
