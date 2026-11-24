@@ -24,7 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dialpad
-import androidx.compose.material.icons.filled.KeyboardCommandKey
+import androidx.compose.material.icons.filled.KeyboardAlt
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -54,8 +54,11 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -195,9 +198,9 @@ fun TouchpadTuneContent(
             )
         }
     }
-    TuneSection("Modifier keys") {
+    TuneSection("Modifier keys", supporting = "Ctrl, Shift, Alt and the Win or Cmd key, beside the pad") {
         TuneChoice(
-            label = "Ctrl, Shift, Alt and Meta beside the pad",
+            label = null,
             options = TouchpadModifierPosition.entries,
             selected = state.modifierPosition,
             optionLabel = ::railLabel,
@@ -261,7 +264,7 @@ fun TouchpadView(
                 // On/off here; the side is a Tune setting, and on returns to the last side chosen.
                 val railOn = tune.modifierPosition != TouchpadModifierPosition.OFF
                 SurfaceToolbarIconButton(
-                    icon = Icons.Default.KeyboardCommandKey,
+                    icon = Icons.Default.KeyboardAlt,
                     contentDescription = "Modifier keys",
                     onClick = {
                         haptics.perform(HapticEvent.TICK)
@@ -303,9 +306,9 @@ fun TouchpadView(
         }
 
         SurfaceTuneSheet(visible = tuneOpen, title = "Touchpad", onDismiss = { tuneOpen = false }) {
-            TuneSection("This pad") {
+            TuneSection("Buttons", supporting = "How the pad's bottom edge clicks") {
                 TuneChoice(
-                    label = "Click buttons",
+                    label = null,
                     options = TrackpadButtonMode.entries,
                     selected = buttonMode,
                     optionLabel = { it.displayName },
@@ -395,11 +398,13 @@ private fun TouchpadModifierRail(
     btManager: BluetoothKeyboardManager,
     haptics: SurfaceHaptics,
 ) {
-    val guiLabel = if (modifierStyle == KeyboardModifierStyle.MAC) modifierStyle.guiLabel else "Meta"
+    // The keyboard's names for the same keys, so Alt and the GUI key read alike on both surfaces.
+    val alt = modifierStyle.altLabel
+    val gui = modifierStyle.guiLabel
     val keys = if (rightHandKeys) {
-        listOf("Ctrl" to 0xE4, "Shift" to 0xE5, modifierStyle.altLabel to 0xE6, guiLabel to 0xE7)
+        listOf("Ctrl" to 0xE4, "Shift" to 0xE5, alt to 0xE6, gui to 0xE7)
     } else {
-        listOf("Ctrl" to 0xE0, "Shift" to 0xE1, modifierStyle.altLabel to 0xE2, guiLabel to 0xE3)
+        listOf("Ctrl" to 0xE0, "Shift" to 0xE1, alt to 0xE2, gui to 0xE3)
     }
     Column(
         modifier = Modifier
@@ -430,10 +435,13 @@ private fun MechanicalModifierKey(
     btManager: BluetoothKeyboardManager,
     haptics: SurfaceHaptics,
 ) {
+    // Touch holds the key while the finger is down; TalkBack, which can't hold, latches it until activated again.
     var isPressed by remember { mutableStateOf(false) }
+    var latched by remember { mutableStateOf(false) }
+    val held = isPressed || latched
     DisposableEffect(btManager, keyCode) {
         onDispose {
-            if (isPressed) btManager.sendKey(keyCode, false)
+            if (isPressed || latched) btManager.sendKey(keyCode, false)
         }
     }
     KeyCap(
@@ -441,20 +449,29 @@ private fun MechanicalModifierKey(
         shiftedLegend = "",
         width = 68.dp,
         height = 68.dp,
-        isPressed = isPressed,
+        isPressed = held,
         keyBgColor = Color(style.backgroundArgb),
         legendColor = Color(style.legendArgb),
         legendScale = style.legendScale,
         baseUnitWidth = 68.dp,
         modifier = Modifier
             .semantics {
-                contentDescription = label
-                selected = isPressed
+                contentDescription = spokenModifierName(label)
+                role = Role.Switch
+                stateDescription = if (held) "Held" else "Released"
+                onClick {
+                    latched = !latched
+                    haptics.perform(HapticEvent.PRESS)
+                    btManager.sendKey(keyCode, latched)
+                    true
+                }
             }
             .testTag("touchpad_rail_key_$label")
             .pointerInput(keyCode) {
                 detectTapGestures(
                     onPress = {
+                        // A touch on a latched key takes it over: lifting the finger releases it.
+                        latched = false
                         isPressed = true
                         haptics.perform(HapticEvent.PRESS)
                         btManager.sendKey(keyCode, true)
@@ -468,6 +485,15 @@ private fun MechanicalModifierKey(
                 )
             },
     )
+}
+
+/** What TalkBack says for a rail legend: the key's full name, as the keyboard says it. */
+private fun spokenModifierName(legend: String): String = when (legend) {
+    "Ctrl" -> "Control"
+    KeyboardModifierStyle.MAC.altLabel -> "Option"
+    KeyboardModifierStyle.MAC.guiLabel -> "Command"
+    KeyboardModifierStyle.PC.guiLabel -> "Windows"
+    else -> legend
 }
 
 /** The numpad drawn on the pad: five columns of keys, lit on touch-down in the same frame. */
@@ -602,8 +628,7 @@ fun TouchGestureLayer(
         TouchpadTapDragGesture(
             gestureScope,
             sendButton = { sendMouseReport(it, 0, 0, 0) },
-            // 20 ms marked a double-tap's clicks landing; the 15 ms drag-start and drag-end buzzes go.
-            vibrate = { if (it == 20L) currentOnClick() },
+            onClick = { currentOnClick() },
         )
     }
 
@@ -903,10 +928,11 @@ private fun ButtonStrip(
 ) {
     val colors = MaterialTheme.colorScheme
     Column(modifier.fillMaxWidth().fillMaxHeight(BUTTON_STRIP_FRACTION)) {
-        Box(Modifier.fillMaxWidth().height(1.dp).background(colors.outlineVariant))
+        // Outline, not outlineVariant: these lines are the buttons' boundaries, so they need 3:1.
+        Box(Modifier.fillMaxWidth().height(1.dp).background(colors.outline))
         Row(Modifier.fillMaxSize()) {
             buttons.forEachIndexed { index, (label, mask) ->
-                if (index > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(colors.outlineVariant))
+                if (index > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(colors.outline))
                 val pressed = held == mask
                 Box(
                     modifier = Modifier

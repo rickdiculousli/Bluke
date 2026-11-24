@@ -9,7 +9,8 @@ import kotlinx.coroutines.launch
 internal class TouchpadTapDragGesture(
     private val scope: CoroutineScope,
     private val sendButton: (Byte) -> Unit,
-    private val vibrate: (Long) -> Unit,
+    /** Runs when a double tap's two clicks land, for the caller's click haptic. */
+    private val onClick: () -> Unit,
 ) {
     companion object {
         // Preserve main's single-click delay and second-landing tolerance.
@@ -38,7 +39,6 @@ internal class TouchpadTapDragGesture(
         if (release != null && !secondTap) click()
         isArmed = secondTap
         moved = false
-        if (secondTap) vibrate(15)
     }
 
     fun queueClick(timeMillis: Long, x: Float, y: Float) {
@@ -68,11 +68,10 @@ internal class TouchpadTapDragGesture(
         if (!isArmed) return false
         if (moved) {
             sendButton(0)
-            vibrate(15)
         } else {
             click()
             click()
-            vibrate(20)
+            onClick()
         }
         isArmed = false
         moved = false
