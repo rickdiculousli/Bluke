@@ -70,6 +70,14 @@ class ConnectionUiPolicyTest {
     }
 
     @Test
+    fun pairingWaitsOnAPersonSoTheCardHoldsStill() {
+        // A spinner under Android's pairing prompt never lets the screen go idle, and the prompt is the next step.
+        assertFalse(ui(target = ipad.address).card().busy)
+        assertFalse(ui(target = ipad.address, startedAt = 0, now = CONNECTION_STALL_MILLIS).card().busy)
+        assertTrue(ui(target = mac.address).card().busy)
+    }
+
+    @Test
     fun anIncomingConnectionWithoutATargetStillReadsConnecting() {
         assertEquals(ConnectionUi.Connecting(mac), ui(lifecycle = HidLifecycleState.Connecting(mac.address)))
     }

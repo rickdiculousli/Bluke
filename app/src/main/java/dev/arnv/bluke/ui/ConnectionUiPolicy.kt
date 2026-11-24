@@ -204,7 +204,8 @@ fun ConnectionUi.card(): ConnectionCard = when (this) {
     is ConnectionUi.Pairing -> ConnectionCard(
         "Pairing with ${host.displayName}",
         "Accept the pairing prompt on this phone and on ${host.displayName}.",
-        StatusTone.WORKING, busy = true, primary = ConnectionAction.Cancel,
+        // Pairing waits on a person, not on progress, so it holds still instead of spinning.
+        StatusTone.WORKING, busy = false, primary = ConnectionAction.Cancel,
     )
     is ConnectionUi.Connecting -> ConnectionCard(
         "Connecting to ${host.displayName}",
@@ -239,7 +240,7 @@ private fun ConnectionUi.Failed.failedCard(): ConnectionCard {
             } else {
                 "Check that it's on and nearby. If it's stuck, cancel and try again."
             },
-            StatusTone.WORKING, busy = true, primary = ConnectionAction.Cancel, secondary = ConnectionAction.Help,
+            StatusTone.WORKING, busy = !whilePairing, primary = ConnectionAction.Cancel, secondary = ConnectionAction.Help,
         )
         FailReason.HOST_REFUSED -> {
             val retry = host?.let { ConnectionAction.Retry(it) } ?: ConnectionAction.Scan

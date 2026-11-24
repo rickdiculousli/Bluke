@@ -65,9 +65,16 @@ class App:
     def tap_button(self, labels: tuple[str, ...]) -> bool:
         """Tap the first on-screen button whose text is one of labels (Android's pairing prompt)."""
         try:
-            self._run("shell", "uiautomator", "dump", "/sdcard/rig-ui.xml")
-        except RuntimeError:
-            return False  # dump fails while windows animate; the caller retries
+            # uiautomator waits for the UI to go idle before it dumps, so a screen that never idles makes it hang:
+            # give each dump its own short limit and let the caller try again.
+            out = subprocess.run(self.base + ["shell", "uiautomator", "dump", "/sdcard/rig-ui.xml"],
+                                 capture_output=True, text=True, timeout=15)
+            if out.returncode != 0 or "ERROR" in out.stdout:
+                print(f"uiautomator dump failed: {(out.stdout + out.stderr).strip()[:200]}", flush=True)
+                return False
+        except subprocess.TimeoutExpired:
+            print("uiautomator dump timed out after 15 s (the screen never went idle); trying again", flush=True)
+            return False
         xml = self._run("shell", "cat", "/sdcard/rig-ui.xml")
         for node in re.finditer(r"<node [^>]*>", xml):
             text = re.search(r'text="([^"]*)"', node.group(0))
