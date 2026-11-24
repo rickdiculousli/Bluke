@@ -43,6 +43,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -51,8 +52,10 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -309,10 +312,9 @@ private fun LandscapeRemote(remote: RemoteSender, tune: MultimediaTuneState, mod
                 }
             }
         }
-        Column(Modifier.weight(POINTER_SHARE).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
-            PointerPad(remote, tune, Modifier.weight(1f).fillMaxWidth())
-            ButtonRow(mouseActions, remote)
-            ButtonRow(pageActions, remote)
+        Column(Modifier.weight(POINTER_SHARE).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(GROUP_GAP)) {
+            PointerGroup(remote, tune, Modifier.weight(1f))
+            RemoteGroup("Slides") { ButtonRow(pageActions, remote) }
         }
     }
 }
@@ -334,12 +336,11 @@ private fun UprightRemote(remote: RemoteSender, tune: MultimediaTuneState, modif
             },
         )
         Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
-            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
-                PointerPad(remote, tune, Modifier.weight(1f).fillMaxWidth())
-                ButtonRow(mouseActions, remote)
-            }
-            Column(Modifier.width(UPRIGHT_PAGE_WIDTH).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
-                pageActions.forEach { RemoteActionButton(it, remote, neutralColors(), Modifier.fillMaxWidth().weight(1f)) }
+            PointerGroup(remote, tune, Modifier.weight(1f).fillMaxHeight())
+            RemoteGroup("Slides", Modifier.width(UPRIGHT_PAGE_WIDTH).fillMaxHeight()) {
+                Column(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
+                    pageActions.forEach { RemoteActionButton(it, remote, neutralColors(), Modifier.fillMaxWidth().weight(1f)) }
+                }
             }
         }
     }
@@ -420,6 +421,15 @@ private fun ButtonRow(actions: List<RemoteAction>, remote: RemoteSender, colors:
     }
 }
 
+/** The pointer pad over its Left, Middle and Right buttons, under a "Pointer" heading. */
+@Composable
+private fun PointerGroup(remote: RemoteSender, tune: MultimediaTuneState, modifier: Modifier) {
+    RemoteGroup("Pointer", modifier) {
+        PointerPad(remote, tune, Modifier.weight(1f).fillMaxWidth())
+        ButtonRow(mouseActions, remote)
+    }
+}
+
 /** The pointer pad: it moves the pointer and scrolls with the touchpad's scroll feel at this remote's speed. */
 @Composable
 private fun PointerPad(remote: RemoteSender, tune: MultimediaTuneState, modifier: Modifier) {
@@ -427,8 +437,17 @@ private fun PointerPad(remote: RemoteSender, tune: MultimediaTuneState, modifier
         modifier
             .clip(MaterialTheme.shapes.large)
             .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .semantics(mergeDescendants = true) { contentDescription = "Pointer pad" }
             .testTag("multimedia_touchpad"),
+        contentAlignment = Alignment.Center,
     ) {
+        Text(
+            "Tap to click · Two fingers to scroll",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(12.dp).testTag("multimedia_touchpad_hint"),
+        )
         val scrollFeel by rememberPreference(remote.prefs, *TouchpadScrollSettings.KEYS) { TouchpadScrollSettings.from(it) }
         TouchGestureLayer(
             btManager = remote.btManager,

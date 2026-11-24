@@ -9,6 +9,10 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.activity.ComponentActivity
 import android.graphics.Bitmap
 import androidx.core.view.drawToBitmap
+import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.isHeading
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
@@ -75,6 +79,21 @@ class MultimediaSurfaceTest {
             up()
         }
         compose.waitForIdle()
+    }
+
+    @Test
+    fun pointerPadIsNamedAndHeadedFlat() = assertPointerPadIsLabelled(MultimediaPosture.LANDSCAPE)
+
+    @Test
+    fun pointerPadIsNamedAndHeadedUpright() = assertPointerPadIsLabelled(MultimediaPosture.PORTRAIT_HELD)
+
+    private fun assertPointerPadIsLabelled(posture: MultimediaPosture) {
+        setRemote(posture = posture)
+
+        compose.onNodeWithContentDescription("Pointer pad").assertExists()
+            .assert(hasText("Tap to click · Two fingers to scroll"))
+        compose.onNode(hasText("Pointer") and isHeading()).assertExists()
+        compose.onNode(hasText("Slides") and isHeading()).assertExists()
     }
 
     @Test
