@@ -7,6 +7,8 @@ import androidx.compose.ui.test.runAndroidComposeUiTest
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.onNodeWithText
 import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.captureRoboImage
 import dev.arnv.bluke.bluetooth.BluetoothKeyboardManager
@@ -82,5 +84,8 @@ class KeyboardScreenshotTest {
         onNodeWithTag("surface_tune").performClick()
         waitForIdle()
         onRoot().captureRoboImage(filePath = "src/test/screenshots/keyboard-tune-open.png")
+        onNodeWithText("Edit themes").performScrollTo()
+        waitForIdle()
+        onRoot().captureRoboImage(filePath = "src/test/screenshots/keyboard-tune-theme.png")
     }
 }
