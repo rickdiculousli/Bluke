@@ -1,60 +1,113 @@
 package dev.arnv.bluke.ui
 
 import android.annotation.SuppressLint
-import android.content.Context
 import android.content.SharedPreferences
-import android.content.Intent
-import androidx.compose.ui.graphics.drawscope.Stroke
-import androidx.compose.ui.graphics.drawscope.withTransform
-import android.os.VibrationEffect
-import android.os.Vibrator
-import androidx.compose.animation.core.*
 import androidx.compose.foundation.Canvas
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
-import androidx.compose.foundation.gestures.*
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.calculatePan
+import androidx.compose.foundation.gestures.calculateZoom
+import androidx.compose.foundation.gestures.detectDragGestures
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.displayCutout
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.Android
+import androidx.compose.material.icons.filled.Check
+import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.Gamepad
+import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.IosShare
+import androidx.compose.material.icons.filled.Language
+import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.OpenInFull
+import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.SportsEsports
+import androidx.compose.material.icons.outlined.FilterNone
+import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.minimumInteractiveComponentSize
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.Stable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Rect
+import androidx.compose.ui.geometry.RoundRect
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.PathOperation
+import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.graphics.drawscope.DrawScope
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipPath
 import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.*
-import androidx.compose.ui.layout.onGloballyPositioned
-import androidx.compose.ui.layout.positionInWindow
+import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.input.pointer.PointerEvent
+import androidx.compose.ui.input.pointer.PointerId
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.res.painterResource
-import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.semantics.CustomAccessibilityAction
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.customActions
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.edit
-import dev.arnv.bluke.R
-import dev.arnv.bluke.ControllerSettingsActivity
-import dev.arnv.bluke.QuickCycleActivity
 import dev.arnv.bluke.bluetooth.BluetoothKeyboardManager
 import dev.arnv.bluke.bluetooth.GAMEPAD_DPAD_MODE_PREFERENCE
 import dev.arnv.bluke.bluetooth.GAMEPAD_GUIDE_BUTTON_INDEX
 import dev.arnv.bluke.bluetooth.GAMEPAD_SHARE_BUTTON_INDEX
-import dev.arnv.bluke.bluetooth.GAMEPAD_TOUCHPAD_BUTTON_INDEX
 import dev.arnv.bluke.bluetooth.GamepadDpadOutputMode
 import dev.arnv.bluke.data.LayoutRepository
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
@@ -62,12 +115,18 @@ import kotlin.math.roundToInt
 import kotlin.math.sqrt
 import kotlin.time.Duration.Companion.milliseconds
 
-// ── Console configuration ──
+// ── Consoles ──
 
+/** How a face button's symbol is drawn: a printed letter, or one of the four shapes. */
+private enum class FaceGlyph { LETTER, TRIANGLE, CIRCLE, CROSS, SQUARE }
+
+/** A button: its printed label, what TalkBack calls it, and its bit in the report's button mask. */
 private data class ButtonDef(
     val label: String,
+    val description: String,
     val mappingId: Int,
-    val color: Color = Color(0xFF3A3D42)
+    val faceColor: Color = Color.Unspecified,
+    val glyph: FaceGlyph = FaceGlyph.LETTER,
 )
 
 private data class ConsoleConfig(
@@ -83,352 +142,305 @@ private data class ConsoleConfig(
     val rightTrigger: ButtonDef,
     val selectButton: ButtonDef,
     val startButton: ButtonDef,
-    val guideButton: ButtonDef,
-    val shareButton: ButtonDef = ButtonDef("SHARE", GAMEPAD_SHARE_BUTTON_INDEX),
-    val leftStickAboveDpad: Boolean = true,
-    val hasTouchpad: Boolean = false,
-    val touchpadMappingId: Int = -1
+    val shareButton: ButtonDef = ButtonDef("SHARE", "Share", GAMEPAD_SHARE_BUTTON_INDEX),
+    val guideButton: ButtonDef = ButtonDef("GUIDE", "Guide", GAMEPAD_GUIDE_BUTTON_INDEX),
+    /** Xbox-style puts the left stick above the D-pad; PlayStation-style swaps them. */
+    val leftStickAboveDpad: Boolean,
 )
 
+/**
+ * The face buttons' printed colours. They are content, the same in every theme (like the keyboard's
+ * colourways), and each reads at least 3:1 on the unpressed cap.
+ */
+private object GamepadFaceColors {
+    val XboxY = Color(0xFFFFCA28)
+    val XboxB = Color(0xFFEF5350)
+    val XboxA = Color(0xFF66BB6A)
+    val XboxX = Color(0xFF42A5F5)
+    val PsTriangle = Color(0xFF4DB6AC)
+    val PsCircle = Color(0xFFEF5350)
+    val PsCross = Color(0xFF7986CB)
+    val PsSquare = Color(0xFFF06292)
+}
+
 private const val GAMEPAD_REPORT_INTERVAL_MILLIS = 8L
+private const val LEFT_STICK_BUTTON_INDEX = 10
+private const val RIGHT_STICK_BUTTON_INDEX = 11
 
 private val CONSOLES = listOf(
     ConsoleConfig(
         id = "xbox_series",
-        name = "Xbox Series",
-        faceTop = ButtonDef("Y", 3, Color(0xFFFFCA28)),
-        faceRight = ButtonDef("B", 1, Color(0xFFEF5350)),
-        faceBottom = ButtonDef("A", 0, Color(0xFF66BB6A)),
-        faceLeft = ButtonDef("X", 2, Color(0xFF42A5F5)),
-        leftBumper = ButtonDef("LB", 4),
-        rightBumper = ButtonDef("RB", 5),
-        leftTrigger = ButtonDef("LT", 6),
-        rightTrigger = ButtonDef("RT", 7),
-        selectButton = ButtonDef("VIEW", 8),
-        startButton = ButtonDef("MENU", 9),
-        guideButton = ButtonDef("XBOX", GAMEPAD_GUIDE_BUTTON_INDEX, Color(0xFF2E7D32)),
-        shareButton = ButtonDef("SHARE", GAMEPAD_SHARE_BUTTON_INDEX),
-        leftStickAboveDpad = true
+        name = "Xbox-style",
+        faceTop = ButtonDef("Y", "Y", 3, GamepadFaceColors.XboxY),
+        faceRight = ButtonDef("B", "B", 1, GamepadFaceColors.XboxB),
+        faceBottom = ButtonDef("A", "A", 0, GamepadFaceColors.XboxA),
+        faceLeft = ButtonDef("X", "X", 2, GamepadFaceColors.XboxX),
+        leftBumper = ButtonDef("LB", "Left bumper", 4),
+        rightBumper = ButtonDef("RB", "Right bumper", 5),
+        leftTrigger = ButtonDef("LT", "Left trigger", 6),
+        rightTrigger = ButtonDef("RT", "Right trigger", 7),
+        selectButton = ButtonDef("VIEW", "View", 8),
+        startButton = ButtonDef("MENU", "Menu", 9),
+        leftStickAboveDpad = true,
     ),
     ConsoleConfig(
         id = "playstation_5",
-        name = "PlayStation 5",
-        faceTop = ButtonDef("△", 3, Color(0xFF4DB6AC)),
-        faceRight = ButtonDef("◯", 1, Color(0xFFEF5350)),
-        faceBottom = ButtonDef("✕", 0, Color(0xFF5C6BC0)),
-        faceLeft = ButtonDef("☐", 2, Color(0xFFEC407A)),
-        leftBumper = ButtonDef("L1", 4),
-        rightBumper = ButtonDef("R1", 5),
-        leftTrigger = ButtonDef("L2", 6),
-        rightTrigger = ButtonDef("R2", 7),
-        selectButton = ButtonDef("CREATE", 8),
-        startButton = ButtonDef("OPTIONS", 9),
-        guideButton = ButtonDef("PS", GAMEPAD_GUIDE_BUTTON_INDEX, Color(0xFF1565C0)),
-        shareButton = ButtonDef("SHARE", GAMEPAD_SHARE_BUTTON_INDEX),
+        name = "PlayStation-style",
+        faceTop = ButtonDef("△", "Triangle", 3, GamepadFaceColors.PsTriangle, FaceGlyph.TRIANGLE),
+        faceRight = ButtonDef("◯", "Circle", 1, GamepadFaceColors.PsCircle, FaceGlyph.CIRCLE),
+        faceBottom = ButtonDef("✕", "Cross", 0, GamepadFaceColors.PsCross, FaceGlyph.CROSS),
+        faceLeft = ButtonDef("☐", "Square", 2, GamepadFaceColors.PsSquare, FaceGlyph.SQUARE),
+        leftBumper = ButtonDef("L1", "L1", 4),
+        rightBumper = ButtonDef("R1", "R1", 5),
+        leftTrigger = ButtonDef("L2", "L2", 6),
+        rightTrigger = ButtonDef("R2", "R2", 7),
+        selectButton = ButtonDef("CREATE", "Create", 8),
+        startButton = ButtonDef("OPTIONS", "Options", 9),
         leftStickAboveDpad = false,
-        hasTouchpad = true,
-        touchpadMappingId = GAMEPAD_TOUCHPAD_BUTTON_INDEX
-    )
+    ),
 )
 
-// ── Main View ──
+/** The console stored under [GAMEPAD_CONSOLE_PREFERENCE]; an unknown or missing id reads as the first. */
+private fun consoleFor(id: String?): ConsoleConfig = CONSOLES.firstOrNull { it.id == id } ?: CONSOLES.first()
+
+// ── Tune ──
+
+/** The gamepad's settings, as its Tune sheet and the Settings screen edit them. */
+internal data class GamepadTuneState(
+    val profile: GamepadDpadOutputMode = GamepadDpadOutputMode.NATIVE_HAT,
+) {
+    fun write(prefs: SharedPreferences) = prefs.edit {
+        putString(GAMEPAD_DPAD_MODE_PREFERENCE, profile.preferenceValue)
+    }
+
+    companion object {
+        val KEYS = arrayOf(GAMEPAD_DPAD_MODE_PREFERENCE)
+
+        fun read(prefs: SharedPreferences) = GamepadTuneState(
+            profile = GamepadDpadOutputMode.fromPreference(prefs.getString(GAMEPAD_DPAD_MODE_PREFERENCE, null)),
+        )
+    }
+}
+
+/** The gamepad's settings: which output profile the host's games get. Every profile shares one descriptor, so it switches live. */
+@Composable
+internal fun GamepadTuneContent(state: GamepadTuneState, onChange: (GamepadTuneState) -> Unit) {
+    TuneSection("Profile") {
+        TuneChoice(
+            label = "Match the games on the host",
+            options = GamepadDpadOutputMode.entries,
+            selected = state.profile,
+            optionLabel = { it.label },
+            onSelect = { onChange(state.copy(profile = it)) },
+        )
+        Text(
+            state.profile.description,
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+    }
+}
+
+private fun GamepadDpadOutputMode.icon(): ImageVector = when (this) {
+    GamepadDpadOutputMode.NATIVE_HAT -> Icons.Default.Gamepad
+    GamepadDpadOutputMode.ANDROID -> Icons.Default.Android
+    GamepadDpadOutputMode.WEB_BUTTONS -> Icons.Default.Language
+}
+
+// ── Layout ──
+
+/** The parts the user can move and resize. [key] names their stored offsets: `<console>_<key>_x|y|scale`. */
+private enum class GamepadPart(val key: String, val description: String) {
+    LEFT_TRIGGER("left_trigger", "left trigger"),
+    LEFT_BUMPER("left_bumper", "left bumper"),
+    RIGHT_TRIGGER("right_trigger", "right trigger"),
+    RIGHT_BUMPER("right_bumper", "right bumper"),
+    LEFT_STICK("left_stick", "left stick"),
+    RIGHT_STICK("right_stick", "right stick"),
+    DPAD("dpad", "D-pad"),
+    FACE_BUTTONS("face_buttons", "face buttons"),
+    GUIDE("guide", "Guide button"),
+    SELECT("select", "left center button"),
+    SHARE("share", "Share button"),
+    START("start", "right center button"),
+}
+
+/** How far the user moved a part from where the layout puts it, in dp, and how much they scaled it. */
+private data class PartTransform(val x: Float = 0f, val y: Float = 0f, val scale: Float = 1f)
+
+private const val SHOULDER_WIDTH_DP = 112f
+private const val EDGE_MARGIN_DP = 16f
+private const val SHOULDER_ROW_CENTER_DP = 32f
+private const val CLUSTER_TOP_DP = 64f
+/** Where the outer cluster (left stick or D-pad; face buttons) sits, from its side edge: under a resting thumb. */
+private const val OUTER_CLUSTER_DP = 128f
+/** Where the inner, lower cluster sits, from its side edge. */
+private const val INNER_CLUSTER_DP = 248f
+/** A stick part is wider than its well: its L3/R3 badge sits beside it on the outer side. */
+private const val STICK_BADGE_SHIFT_DP = 24f
+private const val CENTER_BUTTON_SPACING_DP = 60f
+
+/**
+ * Where each part's centre sits in a controls area [width]×[height] dp, before the user's edits.
+ * Shoulders run along the top edge; each side has an upper outer cluster under the resting thumb and
+ * a lower inner one, so both thumbs have the full height; Guide and the center buttons sit between.
+ */
+private fun baseLayout(config: ConsoleConfig, width: Float, height: Float): Map<GamepadPart, Offset> {
+    val area = height - CLUSTER_TOP_DP - 8f
+    val upperY = CLUSTER_TOP_DP + area * 0.34f
+    val lowerY = CLUSTER_TOP_DP + area * 0.76f
+    val outerLeft = Offset(OUTER_CLUSTER_DP, upperY)
+    val innerLeft = Offset(INNER_CLUSTER_DP, lowerY)
+    val leftStick = if (config.leftStickAboveDpad) outerLeft else innerLeft
+    val dpad = if (config.leftStickAboveDpad) innerLeft else outerLeft
+    val centerX = width / 2f
+    val guideY = CLUSTER_TOP_DP + area * 0.36f
+    val centerRowY = CLUSTER_TOP_DP + area * 0.68f
+    val triggerX = EDGE_MARGIN_DP + SHOULDER_WIDTH_DP / 2f
+    val bumperX = triggerX + SHOULDER_WIDTH_DP + 8f
+    return mapOf(
+        GamepadPart.LEFT_TRIGGER to Offset(triggerX, SHOULDER_ROW_CENTER_DP),
+        GamepadPart.LEFT_BUMPER to Offset(bumperX, SHOULDER_ROW_CENTER_DP),
+        GamepadPart.RIGHT_BUMPER to Offset(width - bumperX, SHOULDER_ROW_CENTER_DP),
+        GamepadPart.RIGHT_TRIGGER to Offset(width - triggerX, SHOULDER_ROW_CENTER_DP),
+        GamepadPart.LEFT_STICK to leftStick - Offset(STICK_BADGE_SHIFT_DP, 0f),
+        GamepadPart.DPAD to dpad,
+        GamepadPart.FACE_BUTTONS to Offset(width - OUTER_CLUSTER_DP, upperY),
+        GamepadPart.RIGHT_STICK to Offset(width - INNER_CLUSTER_DP + STICK_BADGE_SHIFT_DP, lowerY),
+        GamepadPart.GUIDE to Offset(centerX, guideY),
+        GamepadPart.SELECT to Offset(centerX - CENTER_BUTTON_SPACING_DP, centerRowY),
+        GamepadPart.SHARE to Offset(centerX, centerRowY),
+        GamepadPart.START to Offset(centerX + CENTER_BUTTON_SPACING_DP, centerRowY),
+    )
+}
+
+/**
+ * The user's edits to one console's layout. They persist in [LayoutRepository]; older builds kept them
+ * in app preferences under the same names, which seed a part until the repository answers.
+ */
+@Stable
+private class GamepadLayoutEdits(
+    private val consoleId: String,
+    private val prefs: SharedPreferences,
+    private val repository: LayoutRepository,
+    private val scope: CoroutineScope,
+) {
+    private val transforms = mutableStateMapOf<GamepadPart, PartTransform>().apply {
+        GamepadPart.entries.forEach { part ->
+            put(
+                part,
+                PartTransform(
+                    prefs.getFloat(name(part, "x"), 0f),
+                    prefs.getFloat(name(part, "y"), 0f),
+                    prefs.getFloat(name(part, "scale"), 1f),
+                ),
+            )
+        }
+    }
+    private val pending = mutableMapOf<String, Float>()
+
+    operator fun get(part: GamepadPart): PartTransform = transforms.getValue(part)
+
+    val isModified: Boolean get() = transforms.values.any { it != PartTransform() }
+
+    suspend fun load() {
+        val stored = repository.load(consoleId)
+        GamepadPart.entries.forEach { part ->
+            val current = transforms.getValue(part)
+            transforms[part] = PartTransform(
+                stored[name(part, "x")] ?: current.x,
+                stored[name(part, "y")] ?: current.y,
+                stored[name(part, "scale")] ?: current.scale,
+            )
+        }
+    }
+
+    fun update(part: GamepadPart, transform: PartTransform) {
+        transforms[part] = transform
+        pending[name(part, "x")] = transform.x
+        pending[name(part, "y")] = transform.y
+        pending[name(part, "scale")] = transform.scale
+    }
+
+    fun commit() {
+        val values = pending.toMap()
+        pending.clear()
+        scope.launch { repository.save(values) }
+    }
+
+    fun reset() {
+        GamepadPart.entries.forEach { transforms[it] = PartTransform() }
+        pending.clear()
+        prefs.edit {
+            GamepadPart.entries.forEach { part -> listOf("x", "y", "scale").forEach { remove(name(part, it)) } }
+        }
+        scope.launch { repository.clear(consoleId) }
+    }
+
+    private fun name(part: GamepadPart, field: String) = "${consoleId}_${part.key}_$field"
+}
+
+/**
+ * Places this element with its centre at [center] (dp, in the parent's coordinates), given the size of
+ * the area it is placed in (dp, the parent's maximum constraints). Read at placement, so moving a part
+ * only re-places it.
+ */
+private fun Modifier.centeredAt(center: (area: Size) -> Offset) = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+    layout(placeable.width, placeable.height) {
+        val c = center(Size(constraints.maxWidth.toDp().value, constraints.maxHeight.toDp().value))
+        placeable.place(c.x.dp.roundToPx() - placeable.width / 2, c.y.dp.roundToPx() - placeable.height / 2)
+    }
+}
+
+// ── Main view ──
 
 @SuppressLint("MissingPermission")
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun GamepadView(
     btManager: BluetoothKeyboardManager,
     chrome: SurfaceChrome,
     sharedPrefs: SharedPreferences,
-    @Suppress("UNUSED_PARAMETER") caseBrush: Brush
+    @Suppress("UNUSED_PARAMETER") caseBrush: Brush,
+    initialEditMode: Boolean = false,
+    initialTuneOpen: Boolean = false,
 ) {
-    // Shim until this surface adopts SurfaceToolbar: the old toolbar's inputs, from the chrome.
-    val onClose = chrome.onClose
-    val launchMode = chrome.mode.id
-    val onModeChange: (Int) -> Unit = { chrome.onNextMode() }
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
+    val haptics = rememberSurfaceHaptics(sharedPrefs)
+    val colors = MaterialTheme.colorScheme
+
+    val consoleId by rememberPreference(sharedPrefs, GAMEPAD_CONSOLE_PREFERENCE) {
+        it.getString(GAMEPAD_CONSOLE_PREFERENCE, null)
+    }
+    val config = consoleFor(consoleId)
+    val selectConsole = { next: ConsoleConfig ->
+        if (next.id != config.id) {
+            haptics.perform(HapticEvent.MODE_SWITCH)
+            sharedPrefs.edit { putString(GAMEPAD_CONSOLE_PREFERENCE, next.id) }
+        }
+    }
+    val tune by rememberPreference(sharedPrefs, *GamepadTuneState.KEYS) { GamepadTuneState.read(it) }
+    val applyTune = { next: GamepadTuneState ->
+        if (next.profile != tune.profile && btManager.changeGamepadMode(next.profile)) {
+            haptics.perform(HapticEvent.TICK)
+        }
+    }
+
+    var isEditMode by rememberSaveable { mutableStateOf(initialEditMode) }
+    var tuneOpen by rememberSaveable { mutableStateOf(initialTuneOpen) }
+
     val layoutRepository = remember(context) { LayoutRepository(context) }
-    val pendingLayoutValues = remember { mutableMapOf<String, Float>() }
-
-    var selectedIndex by rememberSaveable { mutableIntStateOf(0) }
-    val config = CONSOLES[selectedIndex]
-
-    var isEditMode by rememberSaveable { mutableStateOf(false) }
-
-    var isVibrationEnabled by remember(sharedPrefs) {
-        mutableStateOf(sharedPrefs.getBoolean("gamepad_vibration_enabled", true))
+    val edits = remember(config.id, sharedPrefs, layoutRepository) {
+        GamepadLayoutEdits(config.id, sharedPrefs, layoutRepository, scope)
     }
-    var dpadOutputMode by remember(sharedPrefs) {
-        mutableStateOf(
-            GamepadDpadOutputMode.fromPreference(
-                sharedPrefs.getString(GAMEPAD_DPAD_MODE_PREFERENCE, null)
-            )
-        )
-    }
+    LaunchedEffect(edits) { edits.load() }
 
-    DisposableEffect(sharedPrefs) {
-        val listener = SharedPreferences.OnSharedPreferenceChangeListener { preferences, key ->
-            if (key == GAMEPAD_DPAD_MODE_PREFERENCE) {
-                dpadOutputMode = GamepadDpadOutputMode.fromPreference(
-                    preferences.getString(GAMEPAD_DPAD_MODE_PREFERENCE, null)
-                )
-            }
-        }
-        sharedPrefs.registerOnSharedPreferenceChangeListener(listener)
-        onDispose { sharedPrefs.unregisterOnSharedPreferenceChangeListener(listener) }
-    }
-
-    val triggerVibration = { milliseconds: Long ->
-        if (isVibrationEnabled) {
-            @Suppress("DEPRECATION")
-            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            vibrator?.vibrate(VibrationEffect.createOneShot(milliseconds, VibrationEffect.DEFAULT_AMPLITUDE))
-        }
-    }
-
-    val saveLayoutPref = { key: String, value: Float ->
-        pendingLayoutValues[key] = value
-    }
-    val commitLayoutPrefs = {
-        val values = pendingLayoutValues.toMap()
-        pendingLayoutValues.clear()
-        scope.launch { layoutRepository.save(values) }
-        Unit
-    }
-
-    // Positions & Scales loaded dynamically per console layout (Xbox Series / PlayStation 5)
-    var dpadOffsetX by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_dpad_x", if (config.id == "playstation_5") -24f else 32f)) }
-    var dpadOffsetY by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_dpad_y", if (config.id == "playstation_5") 0f else 20f)) }
-    var dpadScale by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_dpad_scale", 1f)) }
-
-    var leftStickOffsetX by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_left_stick_x", if (config.id == "playstation_5") 45f else 0f)) }
-    var leftStickOffsetY by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_left_stick_y", if (config.id == "playstation_5") 20f else 0f)) }
-    var leftStickScale by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_left_stick_scale", 1f)) }
-
-    var rightStickOffsetX by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_right_stick_x", -45f)) }
-    var rightStickOffsetY by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_right_stick_y", 20f)) }
-    var rightStickScale by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_right_stick_scale", 1f)) }
-
-    var faceButtonsOffsetX by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_face_buttons_x", 0f)) }
-    var faceButtonsOffsetY by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_face_buttons_y", 0f)) }
-    var faceButtonsScale by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_face_buttons_scale", 1f)) }
-
-    var leftTriggerOffsetX by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_left_trigger_x", 0f)) }
-    var leftTriggerOffsetY by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_left_trigger_y", 0f)) }
-    var leftTriggerScale by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_left_trigger_scale", 1f)) }
-
-    var leftBumperOffsetX by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_left_bumper_x", 0f)) }
-    var leftBumperOffsetY by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_left_bumper_y", 0f)) }
-    var leftBumperScale by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_left_bumper_scale", 1f)) }
-
-    var rightTriggerOffsetX by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_right_trigger_x", 0f)) }
-    var rightTriggerOffsetY by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_right_trigger_y", 0f)) }
-    var rightTriggerScale by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_right_trigger_scale", 1f)) }
-
-    var rightBumperOffsetX by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_right_bumper_x", 0f)) }
-    var rightBumperOffsetY by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_right_bumper_y", 0f)) }
-    var rightBumperScale by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_right_bumper_scale", 1f)) }
-
-    var guideOffsetX by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_guide_x", 0f)) }
-    var guideOffsetY by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_guide_y", 0f)) }
-    var guideScale by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_guide_scale", 1f)) }
-
-    var selectOffsetX by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_select_x", 0f)) }
-    var selectOffsetY by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_select_y", 0f)) }
-    var selectScale by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_select_scale", 1f)) }
-
-    var shareOffsetX by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_share_x", 0f)) }
-    var shareOffsetY by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_share_y", 0f)) }
-    var shareScale by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_share_scale", 1f)) }
-
-    var startOffsetX by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_start_x", 0f)) }
-    var startOffsetY by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_start_y", 0f)) }
-    var startScale by remember(config.id) { mutableFloatStateOf(sharedPrefs.getFloat("${config.id}_start_scale", 1f)) }
-
-    LaunchedEffect(config.id, layoutRepository) {
-        val values = layoutRepository.load(config.id)
-        fun stored(suffix: String, current: Float) = values["${config.id}_$suffix"] ?: current
-        dpadOffsetX = stored("dpad_x", dpadOffsetX)
-        dpadOffsetY = stored("dpad_y", dpadOffsetY)
-        dpadScale = stored("dpad_scale", dpadScale)
-        leftStickOffsetX = stored("left_stick_x", leftStickOffsetX)
-        leftStickOffsetY = stored("left_stick_y", leftStickOffsetY)
-        leftStickScale = stored("left_stick_scale", leftStickScale)
-        rightStickOffsetX = stored("right_stick_x", rightStickOffsetX)
-        rightStickOffsetY = stored("right_stick_y", rightStickOffsetY)
-        rightStickScale = stored("right_stick_scale", rightStickScale)
-        faceButtonsOffsetX = stored("face_buttons_x", faceButtonsOffsetX)
-        faceButtonsOffsetY = stored("face_buttons_y", faceButtonsOffsetY)
-        faceButtonsScale = stored("face_buttons_scale", faceButtonsScale)
-        leftTriggerOffsetX = stored("left_trigger_x", leftTriggerOffsetX)
-        leftTriggerOffsetY = stored("left_trigger_y", leftTriggerOffsetY)
-        leftTriggerScale = stored("left_trigger_scale", leftTriggerScale)
-        leftBumperOffsetX = stored("left_bumper_x", leftBumperOffsetX)
-        leftBumperOffsetY = stored("left_bumper_y", leftBumperOffsetY)
-        leftBumperScale = stored("left_bumper_scale", leftBumperScale)
-        rightTriggerOffsetX = stored("right_trigger_x", rightTriggerOffsetX)
-        rightTriggerOffsetY = stored("right_trigger_y", rightTriggerOffsetY)
-        rightTriggerScale = stored("right_trigger_scale", rightTriggerScale)
-        rightBumperOffsetX = stored("right_bumper_x", rightBumperOffsetX)
-        rightBumperOffsetY = stored("right_bumper_y", rightBumperOffsetY)
-        rightBumperScale = stored("right_bumper_scale", rightBumperScale)
-        guideOffsetX = stored("guide_x", guideOffsetX)
-        guideOffsetY = stored("guide_y", guideOffsetY)
-        guideScale = stored("guide_scale", guideScale)
-        selectOffsetX = stored("select_x", selectOffsetX)
-        selectOffsetY = stored("select_y", selectOffsetY)
-        selectScale = stored("select_scale", selectScale)
-        shareOffsetX = stored("share_x", shareOffsetX)
-        shareOffsetY = stored("share_y", shareOffsetY)
-        shareScale = stored("share_scale", shareScale)
-        startOffsetX = stored("start_x", startOffsetX)
-        startOffsetY = stored("start_y", startOffsetY)
-        startScale = stored("start_scale", startScale)
-    }
-
-    val isModified = remember(
-        config.id,
-        dpadOffsetX, dpadOffsetY, dpadScale,
-        leftStickOffsetX, leftStickOffsetY, leftStickScale,
-        rightStickOffsetX, rightStickOffsetY, rightStickScale,
-        faceButtonsOffsetX, faceButtonsOffsetY, faceButtonsScale,
-        leftTriggerOffsetX, leftTriggerOffsetY, leftTriggerScale,
-        leftBumperOffsetX, leftBumperOffsetY, leftBumperScale,
-        rightTriggerOffsetX, rightTriggerOffsetY, rightTriggerScale,
-        rightBumperOffsetX, rightBumperOffsetY, rightBumperScale,
-        guideOffsetX, guideOffsetY, guideScale,
-        selectOffsetX, selectOffsetY, selectScale,
-        shareOffsetX, shareOffsetY, shareScale,
-        startOffsetX, startOffsetY, startScale
-    ) {
-        val defaultDpadX = if (config.id == "playstation_5") -24f else 32f
-        val defaultDpadY = if (config.id == "playstation_5") 0f else 20f
-        val defaultLeftX = if (config.id == "playstation_5") 45f else 0f
-        val defaultLeftY = if (config.id == "playstation_5") 20f else 0f
-        val defaultRightX = -45f
-        val defaultRightY = 20f
-
-        dpadOffsetX != defaultDpadX || dpadOffsetY != defaultDpadY || dpadScale != 1f ||
-        leftStickOffsetX != defaultLeftX || leftStickOffsetY != defaultLeftY || leftStickScale != 1f ||
-        rightStickOffsetX != defaultRightX || rightStickOffsetY != defaultRightY || rightStickScale != 1f ||
-        faceButtonsOffsetX != 0f || faceButtonsOffsetY != 0f || faceButtonsScale != 1f ||
-        leftTriggerOffsetX != 0f || leftTriggerOffsetY != 0f || leftTriggerScale != 1f ||
-        leftBumperOffsetX != 0f || leftBumperOffsetY != 0f || leftBumperScale != 1f ||
-        rightTriggerOffsetX != 0f || rightTriggerOffsetY != 0f || rightTriggerScale != 1f ||
-        rightBumperOffsetX != 0f || rightBumperOffsetY != 0f || rightBumperScale != 1f ||
-        guideOffsetX != 0f || guideOffsetY != 0f || guideScale != 1f ||
-        selectOffsetX != 0f || selectOffsetY != 0f || selectScale != 1f ||
-        shareOffsetX != 0f || shareOffsetY != 0f || shareScale != 1f ||
-        startOffsetX != 0f || startOffsetY != 0f || startScale != 1f
-    }
-
-    val resetDefaults = {
-        val defaultDpadX = if (config.id == "playstation_5") -24f else 32f
-        val defaultDpadY = if (config.id == "playstation_5") 0f else 20f
-        val defaultLeftX = if (config.id == "playstation_5") 45f else 0f
-        val defaultLeftY = if (config.id == "playstation_5") 20f else 0f
-        val defaultRightX = -45f
-        val defaultRightY = 20f
-        val defaultFaceX = 0f
-        val defaultFaceY = 0f
-        
-        dpadOffsetX = defaultDpadX
-        dpadOffsetY = defaultDpadY
-        dpadScale = 1f
-        
-        leftStickOffsetX = defaultLeftX
-        leftStickOffsetY = defaultLeftY
-        leftStickScale = 1f
-        
-        rightStickOffsetX = defaultRightX
-        rightStickOffsetY = defaultRightY
-        rightStickScale = 1f
-        
-        faceButtonsOffsetX = defaultFaceX
-        faceButtonsOffsetY = defaultFaceY
-        faceButtonsScale = 1f
-
-        leftTriggerOffsetX = 0f
-        leftTriggerOffsetY = 0f
-        leftTriggerScale = 1f
-
-        leftBumperOffsetX = 0f
-        leftBumperOffsetY = 0f
-        leftBumperScale = 1f
-
-        rightTriggerOffsetX = 0f
-        rightTriggerOffsetY = 0f
-        rightTriggerScale = 1f
-
-        rightBumperOffsetX = 0f
-        rightBumperOffsetY = 0f
-        rightBumperScale = 1f
-
-        guideOffsetX = 0f
-        guideOffsetY = 0f
-         selectOffsetX = 0f
-        selectOffsetY = 0f
-        selectScale = 1f
-        shareOffsetX = 0f
-        shareOffsetY = 0f
-        shareScale = 1f
-        startOffsetX = 0f
-        startOffsetY = 0f
-        startScale = 1f
-        
-        sharedPrefs.edit {
-            remove("${config.id}_dpad_x")
-            remove("${config.id}_dpad_y")
-            remove("${config.id}_dpad_scale")
-            remove("${config.id}_left_stick_x")
-            remove("${config.id}_left_stick_y")
-            remove("${config.id}_left_stick_scale")
-            remove("${config.id}_right_stick_x")
-            remove("${config.id}_right_stick_y")
-            remove("${config.id}_right_stick_scale")
-            remove("${config.id}_face_buttons_x")
-            remove("${config.id}_face_buttons_y")
-            remove("${config.id}_face_buttons_scale")
-            remove("${config.id}_left_trigger_x")
-            remove("${config.id}_left_trigger_y")
-            remove("${config.id}_left_trigger_scale")
-            remove("${config.id}_left_bumper_x")
-            remove("${config.id}_left_bumper_y")
-            remove("${config.id}_left_bumper_scale")
-            remove("${config.id}_right_trigger_x")
-            remove("${config.id}_right_trigger_y")
-            remove("${config.id}_right_trigger_scale")
-            remove("${config.id}_right_bumper_x")
-            remove("${config.id}_right_bumper_y")
-            remove("${config.id}_right_bumper_scale")
-            remove("${config.id}_guide_x")
-            remove("${config.id}_guide_y")
-            remove("${config.id}_guide_scale")
-            remove("${config.id}_select_x")
-            remove("${config.id}_select_y")
-            remove("${config.id}_select_scale")
-            remove("${config.id}_share_x")
-            remove("${config.id}_share_y")
-            remove("${config.id}_share_scale")
-            remove("${config.id}_start_x")
-            remove("${config.id}_start_y")
-            remove("${config.id}_start_scale")
-        }
-        pendingLayoutValues.clear()
-        scope.launch { layoutRepository.clear(config.id) }
-            
-        triggerVibration(50)
-    }
-
-    val connectedDevNow by btManager.connectedDevice.collectAsState()
-    val isConnected = connectedDevNow != null
-    val deviceName = (connectedDevNow ?: btManager.getReconnectTarget())?.name ?: "No Host"
-
+    // ── Report state: what reaches btManager. Unchanged by the look. ──
     var buttonMask by remember { mutableIntStateOf(0) }
     var dpadMask by remember { mutableIntStateOf(0) }
     var isGamepadDirty by remember { mutableStateOf(false) }
-    
+
     var leftStickX by remember { mutableFloatStateOf(0f) }
     var leftStickY by remember { mutableFloatStateOf(0f) }
     var rightStickX by remember { mutableFloatStateOf(0f) }
@@ -490,1778 +502,640 @@ fun GamepadView(
         }
     }
 
-    val pressButton = { bitIndex: Int ->
-        buttonMask = buttonMask or (1 shl bitIndex)
+    val setButton = { bitIndex: Int, down: Boolean ->
+        buttonMask = if (down) buttonMask or (1 shl bitIndex) else buttonMask and (1 shl bitIndex).inv()
         transmitGamepadState(true)
-        triggerVibration(15)
     }
-    val releaseButton = { bitIndex: Int ->
-        buttonMask = buttonMask and (1 shl bitIndex).inv()
+    // A press plays its haptic on touch-down; a release plays nothing.
+    val pressButton = { bitIndex: Int ->
+        haptics.perform(HapticEvent.PRESS)
+        setButton(bitIndex, true)
+    }
+    val releaseButton = { bitIndex: Int -> setButton(bitIndex, false) }
+    val onDpadChange = { mask: Int ->
+        if (mask and dpadMask.inv() != 0) haptics.perform(HapticEvent.PRESS)
+        dpadMask = mask
         transmitGamepadState(true)
+    }
+    val stickClick = { bitIndex: Int ->
+        scope.launch {
+            setButton(bitIndex, true)
+            delay(100L.milliseconds)
+            setButton(bitIndex, false)
+        }
+        Unit
+    }
+    val stickHold = { bitIndex: Int, hold: Boolean ->
+        haptics.perform(HapticEvent.PRESS)
+        setButton(bitIndex, hold)
     }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xFF28282A))
+            .background(colors.surface)
             .navigationBarsPadding()
             .testTag("gamepad_view_root")
     ) {
-        Column(modifier = Modifier.fillMaxSize()) {
-
-            // ── Top Settings Bar ──
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(38.dp)
-                    .background(Color.Black.copy(alpha = 0.45f))
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Close
-                    Row(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.15f))
-                            .clickable { onClose() }
-                            .padding(horizontal = 8.dp)
-                            .testTag("exit_gamepad_btn"),
-                        verticalAlignment = Alignment.CenterVertically
+        Column(Modifier.fillMaxSize()) {
+            SurfaceToolbar(chrome = chrome, haptics = haptics, onTune = { tuneOpen = true }) {
+                if (isEditMode) {
+                    TextButton(
+                        onClick = edits::reset,
+                        enabled = edits.isModified,
+                        modifier = Modifier.testTag("gamepad_edit_reset"),
                     ) {
-                        Icon(Icons.Default.Close, "Exit", tint = Color.White, modifier = Modifier.size(10.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text("Close", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("Reset", modifier = Modifier.padding(start = 8.dp))
                     }
-
-                    // Mode cycle
-                    Row(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.15f))
-                            .combinedClickable(
-                                onClickLabel = "Next input mode",
-                                onLongClickLabel = "Configure input mode cycle",
-                                onClick = {
-                                    val enabledModes = sharedPrefs.enabledInputModes().map(InputMode::id)
-                                    val idx = enabledModes.indexOf(launchMode)
-                                    onModeChange(enabledModes[(idx + 1) % enabledModes.size])
-                                    triggerVibration(25)
-                                },
-                                onLongClick = {
-                                    context.startActivity(Intent(context, QuickCycleActivity::class.java))
-                                },
-                            )
-                            .padding(horizontal = 8.dp)
-                            .testTag("gamepad_mode_cycle_btn"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    FilledTonalButton(
+                        onClick = { isEditMode = false },
+                        modifier = Modifier.testTag("gamepad_edit_done"),
                     ) {
-                        Icon(Icons.Default.SportsEsports, "Switch Mode", tint = Color.White, modifier = Modifier.size(11.dp))
-                        Text("Gamepad Mode", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                        Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Text("Done", modifier = Modifier.padding(start = 8.dp))
                     }
-
-                    // Connection status
-                    Box(Modifier.size(6.dp).clip(CircleShape).background(if (isConnected) Color(0xFF39FF14) else Color(0xFFFF9800)))
-                    Text(deviceName, color = Color.White, fontSize = 11.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.SansSerif)
-                    ReconnectHostButton(btManager, iconOnly = true)
-                }
-
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Output profile selector. All profiles share one descriptor, so
-                    // Native, Android and Web switch live without HID re-registration.
-                    Row(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.15f))
-                            .combinedClickable(
-                                onClickLabel = "Switch controller compatibility",
-                                onLongClickLabel = "Configure controller compatibility",
-                                onClick = {
-                                    val newMode = dpadOutputMode.next()
-                                    if (btManager.changeGamepadMode(newMode)) triggerVibration(15)
-                                },
-                                onLongClick = {
-                                    context.startActivity(Intent(context, ControllerSettingsActivity::class.java))
-                                },
-                            )
-                            .padding(horizontal = 8.dp)
-                            .testTag("dpad_output_mode_toggle"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = when (dpadOutputMode) {
-                                GamepadDpadOutputMode.WEB_BUTTONS -> Icons.Default.Language
-                                GamepadDpadOutputMode.ANDROID -> Icons.Default.Android
-                                GamepadDpadOutputMode.NATIVE_HAT -> Icons.Default.Gamepad
-                            },
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(11.dp)
-                        )
-                        Text(
-                            text = "Mode: ${dpadOutputMode.label}",
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    // Reset Defaults (only shown when edit mode is active and there are layout changes)
-                    if (isEditMode && isModified) {
-                        Row(
-                            modifier = Modifier
-                                .height(28.dp)
-                                .clip(RoundedCornerShape(6.dp))
-                                .background(Color(0xFFEF5350).copy(alpha = 0.35f))
-                                .clickable { resetDefaults() }
-                                .padding(horizontal = 8.dp)
-                                .testTag("reset_layout_defaults_btn"),
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.spacedBy(4.dp)
-                        ) {
-                            Icon(Icons.Default.Refresh, "Reset Defaults", tint = Color.White, modifier = Modifier.size(11.dp))
-                            Text("Reset Defaults", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                        }
-                    }
-
-                    // Edit Layout toggle
-                    Row(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.15f))
-                            .clickable {
-                                isEditMode = !isEditMode
-                                triggerVibration(30)
-                            }
-                            .padding(horizontal = 8.dp)
-                            .testTag("edit_layout_toggle_btn"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (isEditMode) Icons.Default.Check else Icons.Default.Edit,
-                            contentDescription = "Edit Layout",
-                            tint = Color.White,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Text(
-                            text = if (isEditMode) "Done" else "Edit Layout",
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    // Console layout selector
-                    Row(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.15f))
-                            .clickable {
-                                selectedIndex = (selectedIndex + 1) % CONSOLES.size
-                                triggerVibration(15)
-                            }
-                            .padding(horizontal = 8.dp)
-                            .testTag("console_selector_pill"),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(Icons.Default.SportsEsports, "Consoles", tint = Color.White, modifier = Modifier.size(11.dp))
-                        Spacer(Modifier.width(4.dp))
-                        Text(config.name, color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                    }
-
-                    // Vibration toggle
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.15f))
-                            .clickable {
-                                val active = !isVibrationEnabled
-                                isVibrationEnabled = active
-                                sharedPrefs.edit { putBoolean("gamepad_vibration_enabled", active) }
-                                if (active) triggerVibration(50)
-                            }
-                            .testTag("vibration_gamepad_toggle"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (isVibrationEnabled) {
-                            Icon(Icons.Default.Vibration, "Haptics", tint = Color.White, modifier = Modifier.size(12.dp))
-                        } else {
-                            Icon(painterResource(R.drawable.ic_vibration_off), "Haptics", tint = Color.White, modifier = Modifier.size(12.dp))
-                        }
-                    }
+                } else {
+                    ConsoleControl(config, onClick = { selectConsole(CONSOLES[(CONSOLES.indexOf(config) + 1) % CONSOLES.size]) })
+                    SurfaceToolbarIconButton(
+                        icon = Icons.Default.Edit,
+                        contentDescription = "Edit layout",
+                        onClick = { isEditMode = true },
+                        selected = false,
+                        modifier = Modifier.testTag("edit_layout_toggle_btn"),
+                    )
                 }
             }
 
-            // ── Main Controls Body ──
+            // Parts find their place from the area's size when they are placed (see centeredAt), so the
+            // controls area needs no subcomposition to know its size.
             Box(
-                modifier = Modifier
+                Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
             ) {
+                @Composable
+                fun Part(part: GamepadPart, content: @Composable () -> Unit) {
+                    EditablePart(
+                        part = part,
+                        isEditMode = isEditMode,
+                        transform = edits[part],
+                        originIn = { area -> baseLayout(config, area.width, area.height).getValue(part) },
+                        onTransform = { edits.update(part, it) },
+                        onTransformEnd = edits::commit,
+                        content = content,
+                    )
+                }
 
-                Row(
-                    modifier = Modifier
-                        .fillMaxSize()
-                        .padding(horizontal = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically
+                Part(GamepadPart.LEFT_TRIGGER) { ShoulderButton(config.leftTrigger, triggerShape(isLeft = true), pressButton, releaseButton) }
+                Part(GamepadPart.LEFT_BUMPER) { ShoulderButton(config.leftBumper, BumperShape, pressButton, releaseButton) }
+                Part(GamepadPart.RIGHT_BUMPER) { ShoulderButton(config.rightBumper, BumperShape, pressButton, releaseButton) }
+                Part(GamepadPart.RIGHT_TRIGGER) { ShoulderButton(config.rightTrigger, triggerShape(isLeft = false), pressButton, releaseButton) }
+                Part(GamepadPart.LEFT_STICK) {
+                    AnalogStick(
+                        description = "Left stick",
+                        holdLabel = "L3",
+                        badgeOnStart = true,
+                        held = buttonMask and (1 shl LEFT_STICK_BUTTON_INDEX) != 0,
+                        onMove = { x, y -> leftStickX = x; leftStickY = y; transmitGamepadState(false) },
+                        onStickClick = { stickClick(LEFT_STICK_BUTTON_INDEX) },
+                        onToggleHold = { stickHold(LEFT_STICK_BUTTON_INDEX, it) },
+                    )
+                }
+                Part(GamepadPart.DPAD) { Dpad(onDpadChange) }
+                Part(GamepadPart.FACE_BUTTONS) { FaceButtons(config, pressButton, releaseButton) }
+                Part(GamepadPart.RIGHT_STICK) {
+                    AnalogStick(
+                        description = "Right stick",
+                        holdLabel = "R3",
+                        badgeOnStart = false,
+                        held = buttonMask and (1 shl RIGHT_STICK_BUTTON_INDEX) != 0,
+                        onMove = { x, y -> rightStickX = x; rightStickY = y; transmitGamepadState(false) },
+                        onStickClick = { stickClick(RIGHT_STICK_BUTTON_INDEX) },
+                        onToggleHold = { stickHold(RIGHT_STICK_BUTTON_INDEX, it) },
+                    )
+                }
+                Part(GamepadPart.GUIDE) { GuideButton(config.guideButton, pressButton, releaseButton) }
+                Part(GamepadPart.SELECT) { CenterButton(config.selectButton, Icons.Outlined.FilterNone, pressButton, releaseButton) }
+                Part(GamepadPart.SHARE) { CenterButton(config.shareButton, Icons.Default.IosShare, pressButton, releaseButton) }
+                Part(GamepadPart.START) { CenterButton(config.startButton, Icons.Default.Menu, pressButton, releaseButton) }
+
+                // The status slot between the shoulder pairs: the output profile, or how editing works.
+                Box(Modifier.centeredAt { area -> Offset(area.width / 2f, SHOULDER_ROW_CENTER_DP) }) {
+                    if (isEditMode) EditHint() else ProfileChip(tune.profile, onClick = { tuneOpen = true })
+                }
+            }
+        }
+
+        SurfaceTuneSheet(visible = tuneOpen, title = "Gamepad", onDismiss = { tuneOpen = false }) {
+            TuneSection("Console") {
+                TuneChoice(
+                    label = "Button layout",
+                    options = CONSOLES,
+                    selected = config,
+                    optionLabel = { it.name },
+                    onSelect = selectConsole,
+                )
+            }
+            GamepadTuneContent(tune, applyTune)
+            TuneSection("Layout") {
+                TuneAction("Edit layout", Icons.Default.Edit, onClick = {
+                    tuneOpen = false
+                    isEditMode = true
+                })
+                TuneAction("Reset layout", Icons.Default.RestartAlt, onClick = edits::reset)
+            }
+        }
+    }
+}
+
+// ── Chrome on the surface ──
+
+/** The console toggle in the toolbar: shows the current console and switches to the next. */
+@Composable
+private fun ConsoleControl(config: ConsoleConfig, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .heightIn(min = 40.dp)
+            .clip(CircleShape)
+            .border(1.dp, colors.outlineVariant, CircleShape)
+            .clickable(onClickLabel = "Switch console", role = Role.Button, onClick = onClick)
+            .semantics { stateDescription = config.name }
+            .padding(start = 12.dp, end = 16.dp)
+            .testTag("console_selector_pill"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(Icons.Default.SportsEsports, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
+        Text(config.name, style = MaterialTheme.typography.labelLarge, color = colors.onSurface, maxLines = 1)
+    }
+}
+
+/** Which output profile the host gets, always in view; a tap opens Tune to change it. */
+@Composable
+private fun ProfileChip(profile: GamepadDpadOutputMode, onClick: () -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    Row(
+        modifier = Modifier
+            .minimumInteractiveComponentSize()
+            .heightIn(min = 40.dp)
+            .clip(CircleShape)
+            .background(colors.surfaceContainerHigh)
+            .clickable(onClickLabel = "Change profile", role = Role.Button, onClick = onClick)
+            .padding(start = 12.dp, end = 16.dp)
+            .testTag("gamepad_profile"),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Icon(profile.icon(), contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
+        Text("${profile.label} profile", style = MaterialTheme.typography.labelLarge, color = colors.onSurface, maxLines = 1)
+    }
+}
+
+@Composable
+private fun EditHint() {
+    val colors = MaterialTheme.colorScheme
+    Column(
+        modifier = Modifier
+            .clip(RoundedCornerShape(16.dp))
+            .background(colors.primaryContainer)
+            .padding(horizontal = 16.dp, vertical = 4.dp)
+            .testTag("gamepad_edit_hint"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Text("Drag a control to move it", style = MaterialTheme.typography.labelMedium, color = colors.onPrimaryContainer, maxLines = 1)
+        Text("Drag its corner to resize", style = MaterialTheme.typography.labelMedium, color = colors.onPrimaryContainer, maxLines = 1)
+    }
+}
+
+/**
+ * One movable part at its place in the controls area. In edit mode an outline covers it: dragging it
+ * moves the part, pinching or dragging the corner handle resizes it, and the part itself takes no input.
+ */
+@Composable
+private fun EditablePart(
+    part: GamepadPart,
+    isEditMode: Boolean,
+    transform: PartTransform,
+    originIn: (area: Size) -> Offset,
+    onTransform: (PartTransform) -> Unit,
+    onTransformEnd: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    val density = LocalDensity.current.density
+    val current by rememberUpdatedState(transform)
+    // Where the part sits and the area it sits in, as last placed; dragging clamps against them.
+    val placed = remember { PlacedArea() }
+    val currentOnTransform by rememberUpdatedState(onTransform)
+    val currentOnTransformEnd by rememberUpdatedState(onTransformEnd)
+    val colors = MaterialTheme.colorScheme
+
+    // Keep the part's centre inside the controls area.
+    fun clamped(next: PartTransform) = next.copy(
+        x = next.x.coerceIn(-placed.origin.x, placed.area.width - placed.origin.x),
+        y = next.y.coerceIn(-placed.origin.y, placed.area.height - placed.origin.y),
+        scale = next.scale.coerceIn(0.6f, 1.8f),
+    )
+
+    Box(
+        modifier = Modifier
+            .centeredAt { area ->
+                val origin = originIn(area)
+                placed.origin = origin
+                placed.area = area
+                Offset(origin.x + current.x, origin.y + current.y)
+            }
+            .graphicsLayer {
+                scaleX = current.scale
+                scaleY = current.scale
+            }
+            .testTag("gamepad_part_${part.key}"),
+        contentAlignment = Alignment.Center,
+    ) {
+        content()
+        if (isEditMode) {
+            val shape = RoundedCornerShape(12.dp)
+            Box(
+                Modifier
+                    .matchParentSize()
+                    .background(colors.primary.copy(alpha = 0.16f), shape)
+                    .border(2.dp, colors.primary, shape)
+                    .semantics { contentDescription = "Move ${part.description}" }
+                    .pointerInput(Unit) {
+                        awaitEachGesture {
+                            awaitFirstDown(requireUnconsumed = false)
+                            var event: PointerEvent
+                            do {
+                                event = awaitPointerEvent()
+                                val pan = event.calculatePan()
+                                val zoom = event.calculateZoom()
+                                val t = current
+                                currentOnTransform(
+                                    clamped(
+                                        PartTransform(
+                                            x = t.x + pan.x * t.scale / density,
+                                            y = t.y + pan.y * t.scale / density,
+                                            scale = t.scale * zoom,
+                                        ),
+                                    ),
+                                )
+                                event.changes.forEach { it.consume() }
+                            } while (event.changes.any { it.pressed })
+                            currentOnTransformEnd()
+                        }
+                    }
+            )
+            // The resize handle: a 48dp target centred on the bottom-end corner.
+            Box(
+                Modifier
+                    .align(Alignment.BottomEnd)
+                    .offset(x = 24.dp, y = 24.dp)
+                    .size(48.dp)
+                    .semantics { contentDescription = "Resize ${part.description}" }
+                    .pointerInput(Unit) {
+                        detectDragGestures(
+                            onDragEnd = { currentOnTransformEnd() },
+                            onDragCancel = { currentOnTransformEnd() },
+                            onDrag = { change, dragAmount ->
+                                change.consume()
+                                val t = current
+                                currentOnTransform(clamped(t.copy(scale = t.scale + (dragAmount.x + dragAmount.y) / 150f)))
+                            },
+                        )
+                    },
+                contentAlignment = Alignment.Center,
+            ) {
+                Box(
+                    Modifier
+                        .size(28.dp)
+                        .clip(CircleShape)
+                        .background(colors.primary),
+                    contentAlignment = Alignment.Center,
                 ) {
-                if (config.leftStickAboveDpad) {
-                    // ── XBOX-STYLE OFFSET LAYOUT ──
-                    // Left column: Left Stick (top), Dpad (bottom)
-                    Column(
-                        modifier = Modifier.weight(0.3f).fillMaxHeight(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Top
-                    ) {
-                        Spacer(Modifier.height(38.dp))
-                        EditableComponentWrapper(
-                            isEditMode = isEditMode,
-                            offsetX = leftStickOffsetX,
-                            offsetY = leftStickOffsetY,
-                            scale = leftStickScale,
-                            onOffsetChange = { x, y -> leftStickOffsetX = x; leftStickOffsetY = y; saveLayoutPref("${config.id}_left_stick_x", x); saveLayoutPref("${config.id}_left_stick_y", y) },
-                            onScaleChange = { s -> leftStickScale = s; saveLayoutPref("${config.id}_left_stick_scale", s) },
-                            onTransformEnd = commitLayoutPrefs
-                        ) {
-                            GamepadAnalogStick(
-                                label = "L",
-                                isClicked = { (buttonMask and (1 shl 10)) != 0 },
-                                isHeld = { (buttonMask and (1 shl 10)) != 0 },
-                                onMove = { x, y -> leftStickX = x; leftStickY = y; transmitGamepadState(false) },
-                                onStickClick = { scope.launch { pressButton(10); delay(100L.milliseconds); releaseButton(10) } },
-                                onToggleHold = { hold -> if (hold) pressButton(10) else releaseButton(10) }
-                            )
-                        }
-                        Spacer(Modifier.height(16.dp))
-                        EditableComponentWrapper(
-                            isEditMode = isEditMode,
-                            offsetX = dpadOffsetX,
-                            offsetY = dpadOffsetY,
-                            scale = dpadScale,
-                            onOffsetChange = { x, y -> dpadOffsetX = x; dpadOffsetY = y; saveLayoutPref("${config.id}_dpad_x", x); saveLayoutPref("${config.id}_dpad_y", y) },
-                            onScaleChange = { s -> dpadScale = s; saveLayoutPref("${config.id}_dpad_scale", s) },
-                            onTransformEnd = commitLayoutPrefs
-                        ) {
-                            GamepadDpad(
-                                isXboxStyle = true,
-                                onDpadChange = { mask ->
-                                    dpadMask = mask
-                                    transmitGamepadState(true)
-                                    if (mask != 0) triggerVibration(15)
-                                }
-                            )
-                        }
-                    }
-
-                    // Center column: Logo, Center Buttons, Triggers/Bumpers
-                    Column(
-                        modifier = Modifier.weight(0.4f).fillMaxHeight(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Top
-                    ) {
-                        Spacer(Modifier.height(14.dp))
-                        // Triggers/Bumpers vertically stacked at the top
-                        Row(
-                            modifier = Modifier.fillMaxWidth(0.95f),
-                            horizontalArrangement = Arrangement.SpaceBetween
-                        ) {
-                            // Left stack: LB above LT
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                EditableComponentWrapper(
-                                    isEditMode = isEditMode,
-                                    offsetX = leftTriggerOffsetX,
-                                    offsetY = leftTriggerOffsetY,
-                                    scale = leftTriggerScale,
-                                    onOffsetChange = { x, y -> leftTriggerOffsetX = x; leftTriggerOffsetY = y; saveLayoutPref("${config.id}_left_trigger_x", x); saveLayoutPref("${config.id}_left_trigger_y", y) },
-                                    onScaleChange = { s -> leftTriggerScale = s; saveLayoutPref("${config.id}_left_trigger_scale", s) },
-                                    onTransformEnd = commitLayoutPrefs
-                                ) {
-                                    GamepadTriggerButton(config.leftTrigger, true, pressButton, releaseButton)
-                                }
-                                Spacer(Modifier.height(4.dp))
-                                EditableComponentWrapper(
-                                    isEditMode = isEditMode,
-                                    offsetX = leftBumperOffsetX,
-                                    offsetY = leftBumperOffsetY,
-                                    scale = leftBumperScale,
-                                    onOffsetChange = { x, y -> leftBumperOffsetX = x; leftBumperOffsetY = y; saveLayoutPref("${config.id}_left_bumper_x", x); saveLayoutPref("${config.id}_left_bumper_y", y) },
-                                    onScaleChange = { s -> leftBumperScale = s; saveLayoutPref("${config.id}_left_bumper_scale", s) },
-                                    onTransformEnd = commitLayoutPrefs
-                                ) {
-                                    GamepadBumperButton(config.leftBumper, true, pressButton, releaseButton)
-                                }
-                            }
-                            // Right stack: RB above RT
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                EditableComponentWrapper(
-                                    isEditMode = isEditMode,
-                                    offsetX = rightTriggerOffsetX,
-                                    offsetY = rightTriggerOffsetY,
-                                    scale = rightTriggerScale,
-                                    onOffsetChange = { x, y -> rightTriggerOffsetX = x; rightTriggerOffsetY = y; saveLayoutPref("${config.id}_right_trigger_x", x); saveLayoutPref("${config.id}_right_trigger_y", y) },
-                                    onScaleChange = { s -> rightTriggerScale = s; saveLayoutPref("${config.id}_right_trigger_scale", s) },
-                                    onTransformEnd = commitLayoutPrefs
-                                ) {
-                                    GamepadTriggerButton(config.rightTrigger, false, pressButton, releaseButton)
-                                }
-                                Spacer(Modifier.height(4.dp))
-                                EditableComponentWrapper(
-                                    isEditMode = isEditMode,
-                                    offsetX = rightBumperOffsetX,
-                                    offsetY = rightBumperOffsetY,
-                                    scale = rightBumperScale,
-                                    onOffsetChange = { x, y -> rightBumperOffsetX = x; rightBumperOffsetY = y; saveLayoutPref("${config.id}_right_bumper_x", x); saveLayoutPref("${config.id}_right_bumper_y", y) },
-                                    onScaleChange = { s -> rightBumperScale = s; saveLayoutPref("${config.id}_right_bumper_scale", s) },
-                                    onTransformEnd = commitLayoutPrefs
-                                ) {
-                                    GamepadBumperButton(config.rightBumper, false, pressButton, releaseButton)
-                                }
-                            }
-                        }
-
-                        Spacer(Modifier.height(12.dp))
-
-                        // Large Xbox Guide button
-                        EditableComponentWrapper(
-                            isEditMode = isEditMode,
-                            offsetX = guideOffsetX,
-                            offsetY = guideOffsetY,
-                            scale = guideScale,
-                            onOffsetChange = { x, y -> guideOffsetX = x; guideOffsetY = y; saveLayoutPref("${config.id}_guide_x", x); saveLayoutPref("${config.id}_guide_y", y) },
-                            onScaleChange = { s -> guideScale = s; saveLayoutPref("${config.id}_guide_scale", s) },
-                            onTransformEnd = commitLayoutPrefs
-                        ) {
-                            XboxLogoGuideButton(config.guideButton, pressButton, releaseButton)
-                        }
-
-                        Spacer(Modifier.height(12.dp))
-
-                        // Center buttons (Select, Share, Start) flanking the area below Guide
-                        Row(
-                            modifier = Modifier.fillMaxWidth(0.75f),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            EditableComponentWrapper(
-                                isEditMode = isEditMode,
-                                offsetX = selectOffsetX,
-                                offsetY = selectOffsetY,
-                                scale = selectScale,
-                                onOffsetChange = { x, y -> selectOffsetX = x; selectOffsetY = y; saveLayoutPref("${config.id}_select_x", x); saveLayoutPref("${config.id}_select_y", y) },
-                                onScaleChange = { s -> selectScale = s; saveLayoutPref("${config.id}_select_scale", s) },
-                                onTransformEnd = commitLayoutPrefs
-                            ) {
-                                GamepadCenterButton(config.selectButton, pressButton, releaseButton)
-                            }
-                            EditableComponentWrapper(
-                                isEditMode = isEditMode,
-                                offsetX = shareOffsetX,
-                                offsetY = shareOffsetY,
-                                scale = shareScale,
-                                onOffsetChange = { x, y -> shareOffsetX = x; shareOffsetY = y; saveLayoutPref("${config.id}_share_x", x); saveLayoutPref("${config.id}_share_y", y) },
-                                onScaleChange = { s -> shareScale = s; saveLayoutPref("${config.id}_share_scale", s) },
-                                onTransformEnd = commitLayoutPrefs
-                            ) {
-                                GamepadCenterButton(config.shareButton, pressButton, releaseButton)
-                            }
-                            EditableComponentWrapper(
-                                isEditMode = isEditMode,
-                                offsetX = startOffsetX,
-                                offsetY = startOffsetY,
-                                scale = startScale,
-                                onOffsetChange = { x, y -> startOffsetX = x; startOffsetY = y; saveLayoutPref("${config.id}_start_x", x); saveLayoutPref("${config.id}_start_y", y) },
-                                onScaleChange = { s -> startScale = s; saveLayoutPref("${config.id}_start_scale", s) },
-                                onTransformEnd = commitLayoutPrefs
-                            ) {
-                                GamepadCenterButton(config.startButton, pressButton, releaseButton)
-                            }
-                        }
-                        Spacer(Modifier.weight(1f))
-                    }
-
-                    // Right column: Face Buttons (top), Right Stick (bottom)
-                    Column(
-                        modifier = Modifier.weight(0.3f).fillMaxHeight(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Top
-                    ) {
-                        Spacer(Modifier.height(16.dp))
-                        EditableComponentWrapper(
-                            isEditMode = isEditMode,
-                            offsetX = faceButtonsOffsetX,
-                            offsetY = faceButtonsOffsetY,
-                            scale = faceButtonsScale,
-                            onOffsetChange = { x, y -> faceButtonsOffsetX = x; faceButtonsOffsetY = y; saveLayoutPref("${config.id}_face_buttons_x", x); saveLayoutPref("${config.id}_face_buttons_y", y) },
-                            onScaleChange = { s -> faceButtonsScale = s; saveLayoutPref("${config.id}_face_buttons_scale", s) },
-                            onTransformEnd = commitLayoutPrefs
-                        ) {
-                            FaceButtonsDiamond(
-                                config = config,
-                                isXboxStyle = true,
-                                onPress = pressButton,
-                                onRelease = releaseButton
-                            )
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        EditableComponentWrapper(
-                            isEditMode = isEditMode,
-                            offsetX = rightStickOffsetX,
-                            offsetY = rightStickOffsetY,
-                            scale = rightStickScale,
-                            onOffsetChange = { x, y -> rightStickOffsetX = x; rightStickOffsetY = y; saveLayoutPref("${config.id}_right_stick_x", x); saveLayoutPref("${config.id}_right_stick_y", y) },
-                            onScaleChange = { s -> rightStickScale = s; saveLayoutPref("${config.id}_right_stick_scale", s) },
-                            onTransformEnd = commitLayoutPrefs
-                        ) {
-                            GamepadAnalogStick(
-                                label = "R",
-                                isClicked = { (buttonMask and (1 shl 11)) != 0 },
-                                isHeld = { (buttonMask and (1 shl 11)) != 0 },
-                                onMove = { x, y -> rightStickX = x; rightStickY = y; transmitGamepadState(false) },
-                                onStickClick = { scope.launch { pressButton(11); delay(100L.milliseconds); releaseButton(11) } },
-                                onToggleHold = { hold -> if (hold) pressButton(11) else releaseButton(11) }
-                            )
-                        }
-                        Spacer(Modifier.height(12.dp))
-                    }
-                } else {
-                    // ── PLAYSTATION-STYLE SYMMETRICAL LAYOUT ──
-                    // Left Column: split Dpad (top), Left Stick (bottom)
-                    Column(
-                        modifier = Modifier.weight(0.3f).fillMaxHeight(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Top
-                    ) {
-                        Spacer(Modifier.height(26.dp))
-                        EditableComponentWrapper(
-                            isEditMode = isEditMode,
-                            offsetX = dpadOffsetX,
-                            offsetY = dpadOffsetY,
-                            scale = dpadScale,
-                            onOffsetChange = { x, y -> dpadOffsetX = x; dpadOffsetY = y; saveLayoutPref("${config.id}_dpad_x", x); saveLayoutPref("${config.id}_dpad_y", y) },
-                            onScaleChange = { s -> dpadScale = s; saveLayoutPref("${config.id}_dpad_scale", s) },
-                            onTransformEnd = commitLayoutPrefs
-                        ) {
-                            GamepadDpad(
-                                isXboxStyle = false,
-                                onDpadChange = { mask ->
-                                    dpadMask = mask
-                                    transmitGamepadState(true)
-                                    if (mask != 0) triggerVibration(15)
-                                }
-                            )
-                        }
-                        Spacer(Modifier.height(16.dp))
-                        EditableComponentWrapper(
-                            isEditMode = isEditMode,
-                            offsetX = leftStickOffsetX,
-                            offsetY = leftStickOffsetY,
-                            scale = leftStickScale,
-                            onOffsetChange = { x, y -> leftStickOffsetX = x; leftStickOffsetY = y; saveLayoutPref("${config.id}_left_stick_x", x); saveLayoutPref("${config.id}_left_stick_y", y) },
-                            onScaleChange = { s -> leftStickScale = s; saveLayoutPref("${config.id}_left_stick_scale", s) },
-                            onTransformEnd = commitLayoutPrefs
-                        ) {
-                            GamepadAnalogStick(
-                                label = "L",
-                                isClicked = { (buttonMask and (1 shl 10)) != 0 },
-                                isHeld = { (buttonMask and (1 shl 10)) != 0 },
-                                onMove = { x, y -> leftStickX = x; leftStickY = y; transmitGamepadState(false) },
-                                onStickClick = { scope.launch { pressButton(10); delay(100L.milliseconds); releaseButton(10) } },
-                                onToggleHold = { hold -> if (hold) pressButton(10) else releaseButton(10) }
-                            )
-                        }
-                    }
-
-                    // Center Column: PS Button + L1/L2 R1/R2, Right Stick/Left Stick spacing
-                    Column(
-                        modifier = Modifier.weight(0.4f).fillMaxHeight(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Top
-                    ) {
-                        Spacer(Modifier.height(16.dp))
-                        // Bumper/Trigger stacks
-                        Row(
-                            modifier = Modifier.fillMaxWidth().padding(horizontal = 6.dp),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                EditableComponentWrapper(
-                                    isEditMode = isEditMode,
-                                    offsetX = leftTriggerOffsetX,
-                                    offsetY = leftTriggerOffsetY,
-                                    scale = leftTriggerScale,
-                                    onOffsetChange = { x, y -> leftTriggerOffsetX = x; leftTriggerOffsetY = y; saveLayoutPref("${config.id}_left_trigger_x", x); saveLayoutPref("${config.id}_left_trigger_y", y) },
-                                    onScaleChange = { s -> leftTriggerScale = s; saveLayoutPref("${config.id}_left_trigger_scale", s) },
-                                    onTransformEnd = commitLayoutPrefs
-                                ) {
-                                    GamepadTriggerButton(config.leftTrigger, true, pressButton, releaseButton)
-                                }
-                                Spacer(Modifier.height(4.dp))
-                                EditableComponentWrapper(
-                                    isEditMode = isEditMode,
-                                    offsetX = leftBumperOffsetX,
-                                    offsetY = leftBumperOffsetY,
-                                    scale = leftBumperScale,
-                                    onOffsetChange = { x, y -> leftBumperOffsetX = x; leftBumperOffsetY = y; saveLayoutPref("${config.id}_left_bumper_x", x); saveLayoutPref("${config.id}_left_bumper_y", y) },
-                                    onScaleChange = { s -> leftBumperScale = s; saveLayoutPref("${config.id}_left_bumper_scale", s) },
-                                    onTransformEnd = commitLayoutPrefs
-                                ) {
-                                    GamepadBumperButton(config.leftBumper, true, pressButton, releaseButton)
-                                }
-                            }
-                            
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                EditableComponentWrapper(
-                                    isEditMode = isEditMode,
-                                    offsetX = rightTriggerOffsetX,
-                                    offsetY = rightTriggerOffsetY,
-                                    scale = rightTriggerScale,
-                                    onOffsetChange = { x, y -> rightTriggerOffsetX = x; rightTriggerOffsetY = y; saveLayoutPref("${config.id}_right_trigger_x", x); saveLayoutPref("${config.id}_right_trigger_y", y) },
-                                    onScaleChange = { s -> rightTriggerScale = s; saveLayoutPref("${config.id}_right_trigger_scale", s) },
-                                    onTransformEnd = commitLayoutPrefs
-                                ) {
-                                    GamepadTriggerButton(config.rightTrigger, false, pressButton, releaseButton)
-                                }
-                                Spacer(Modifier.height(4.dp))
-                                EditableComponentWrapper(
-                                    isEditMode = isEditMode,
-                                    offsetX = rightBumperOffsetX,
-                                    offsetY = rightBumperOffsetY,
-                                    scale = rightBumperScale,
-                                    onOffsetChange = { x, y -> rightBumperOffsetX = x; rightBumperOffsetY = y; saveLayoutPref("${config.id}_right_bumper_x", x); saveLayoutPref("${config.id}_right_bumper_y", y) },
-                                    onScaleChange = { s -> rightBumperScale = s; saveLayoutPref("${config.id}_right_bumper_scale", s) },
-                                    onTransformEnd = commitLayoutPrefs
-                                ) {
-                                    GamepadBumperButton(config.rightBumper, false, pressButton, releaseButton)
-                                }
-                            }
-                        }
-
-                        Spacer(Modifier.height(14.dp))
-
-                        // PlayStation Guide button
-                        EditableComponentWrapper(
-                            isEditMode = isEditMode,
-                            offsetX = guideOffsetX,
-                            offsetY = guideOffsetY,
-                            scale = guideScale,
-                            onOffsetChange = { x, y -> guideOffsetX = x; guideOffsetY = y; saveLayoutPref("${config.id}_guide_x", x); saveLayoutPref("${config.id}_guide_y", y) },
-                            onScaleChange = { s -> guideScale = s; saveLayoutPref("${config.id}_guide_scale", s) },
-                            onTransformEnd = commitLayoutPrefs
-                        ) {
-                            PlayStationLogoButton(config.guideButton, pressButton, releaseButton)
-                        }
-
-                        Spacer(Modifier.height(12.dp))
-
-                        // Center buttons (Select, Share, Start) flanking the area below Guide
-                        Row(
-                            modifier = Modifier.fillMaxWidth(0.75f),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            EditableComponentWrapper(
-                                isEditMode = isEditMode,
-                                offsetX = selectOffsetX,
-                                offsetY = selectOffsetY,
-                                scale = selectScale,
-                                onOffsetChange = { x, y -> selectOffsetX = x; selectOffsetY = y; saveLayoutPref("${config.id}_select_x", x); saveLayoutPref("${config.id}_select_y", y) },
-                                onScaleChange = { s -> selectScale = s; saveLayoutPref("${config.id}_select_scale", s) },
-                                onTransformEnd = commitLayoutPrefs
-                            ) {
-                                GamepadCenterButton(config.selectButton, pressButton, releaseButton)
-                            }
-                            EditableComponentWrapper(
-                                isEditMode = isEditMode,
-                                offsetX = shareOffsetX,
-                                offsetY = shareOffsetY,
-                                scale = shareScale,
-                                onOffsetChange = { x, y -> shareOffsetX = x; shareOffsetY = y; saveLayoutPref("${config.id}_share_x", x); saveLayoutPref("${config.id}_share_y", y) },
-                                onScaleChange = { s -> shareScale = s; saveLayoutPref("${config.id}_share_scale", s) },
-                                onTransformEnd = commitLayoutPrefs
-                            ) {
-                                GamepadCenterButton(config.shareButton, pressButton, releaseButton)
-                            }
-                            EditableComponentWrapper(
-                                isEditMode = isEditMode,
-                                offsetX = startOffsetX,
-                                offsetY = startOffsetY,
-                                scale = startScale,
-                                onOffsetChange = { x, y -> startOffsetX = x; startOffsetY = y; saveLayoutPref("${config.id}_start_x", x); saveLayoutPref("${config.id}_start_y", y) },
-                                onScaleChange = { s -> startScale = s; saveLayoutPref("${config.id}_start_scale", s) },
-                                onTransformEnd = commitLayoutPrefs
-                            ) {
-                                GamepadCenterButton(config.startButton, pressButton, releaseButton)
-                            }
-                        }
-                        Spacer(Modifier.weight(1f))
-                    }
-
-                    // Right Column: Face Buttons (top), Right Stick (bottom)
-                    Column(
-                        modifier = Modifier.weight(0.3f).fillMaxHeight(),
-                        horizontalAlignment = Alignment.CenterHorizontally,
-                        verticalArrangement = Arrangement.Top
-                    ) {
-                        Spacer(Modifier.height(16.dp))
-                        EditableComponentWrapper(
-                            isEditMode = isEditMode,
-                            offsetX = faceButtonsOffsetX,
-                            offsetY = faceButtonsOffsetY,
-                            scale = faceButtonsScale,
-                            onOffsetChange = { x, y -> faceButtonsOffsetX = x; faceButtonsOffsetY = y; saveLayoutPref("${config.id}_face_buttons_x", x); saveLayoutPref("${config.id}_face_buttons_y", y) },
-                            onScaleChange = { s -> faceButtonsScale = s; saveLayoutPref("${config.id}_face_buttons_scale", s) },
-                            onTransformEnd = commitLayoutPrefs
-                        ) {
-                            FaceButtonsDiamond(
-                                config = config,
-                                isXboxStyle = false,
-                                onPress = pressButton,
-                                onRelease = releaseButton
-                            )
-                        }
-                        Spacer(Modifier.height(6.dp))
-                        EditableComponentWrapper(
-                            isEditMode = isEditMode,
-                            offsetX = rightStickOffsetX,
-                            offsetY = rightStickOffsetY,
-                            scale = rightStickScale,
-                            onOffsetChange = { x, y -> rightStickOffsetX = x; rightStickOffsetY = y; saveLayoutPref("${config.id}_right_stick_x", x); saveLayoutPref("${config.id}_right_stick_y", y) },
-                            onScaleChange = { s -> rightStickScale = s; saveLayoutPref("${config.id}_right_stick_scale", s) },
-                            onTransformEnd = commitLayoutPrefs
-                        ) {
-                            GamepadAnalogStick(
-                                label = "R",
-                                isClicked = { (buttonMask and (1 shl 11)) != 0 },
-                                isHeld = { (buttonMask and (1 shl 11)) != 0 },
-                                onMove = { x, y -> rightStickX = x; rightStickY = y; transmitGamepadState(false) },
-                                onStickClick = { scope.launch { pressButton(11); delay(100L.milliseconds); releaseButton(11) } },
-                                onToggleHold = { hold -> if (hold) pressButton(11) else releaseButton(11) }
-                            )
-                        }
-                    }
+                    Icon(Icons.Default.OpenInFull, contentDescription = null, tint = colors.onPrimary, modifier = Modifier.size(16.dp))
                 }
             }
         }
     }
 }
+
+/** A part's last placement: not state, since only the drag handler reads it. */
+private class PlacedArea {
+    var origin: Offset = Offset.Zero
+    var area: Size = Size.Zero
 }
 
-// ── Sub-Components ──
+// ── Controls ──
 
-@Composable
-fun Modifier.gamepadButtonTouch(
-    onPress: () -> Unit,
-    onRelease: () -> Unit,
-    onPressedStateChange: (Boolean) -> Unit
-): Modifier {
-    val currentOnPress by rememberUpdatedState(onPress)
-    val currentOnRelease by rememberUpdatedState(onRelease)
-    val currentOnPressedStateChange by rememberUpdatedState(onPressedStateChange)
-    return this.pointerInput(Unit) {
+/**
+ * A gamepad button's touch and TalkBack handling: it presses on touch-down and releases on lift, and a
+ * TalkBack activation sends a press and a release.
+ */
+private fun Modifier.gamepadButton(
+    button: ButtonDef,
+    onPress: (Int) -> Unit,
+    onRelease: (Int) -> Unit,
+    onPressedChange: (Boolean) -> Unit,
+): Modifier = this
+    .semantics {
+        contentDescription = button.description
+        role = Role.Button
+        onClick {
+            onPress(button.mappingId)
+            onRelease(button.mappingId)
+            true
+        }
+    }
+    .pointerInput(button.mappingId) {
         awaitEachGesture {
             val down = awaitFirstDown(requireUnconsumed = false)
             val targetPointerId = down.id
-            currentOnPressedStateChange(true)
-            currentOnPress()
+            onPressedChange(true)
+            onPress(button.mappingId)
             down.consume()
             while (true) {
                 val event = awaitPointerEvent()
                 val change = event.changes.firstOrNull { it.id == targetPointerId } ?: break
                 if (!change.pressed) {
-                    currentOnPressedStateChange(false)
-                    currentOnRelease()
+                    onPressedChange(false)
+                    onRelease(button.mappingId)
                     break
                 }
                 change.consume()
             }
         }
     }
+
+/** A cap's fill and its label colour, straight from the pressed state: the pressed look lands with the touch. */
+@Composable
+private fun capColors(pressed: Boolean): Pair<Color, Color> {
+    val colors = MaterialTheme.colorScheme
+    return if (pressed) colors.secondaryContainer to colors.onSecondaryContainer
+    else colors.surfaceContainerHighest to colors.onSurface
+}
+
+private val BumperShape = RoundedCornerShape(24.dp)
+
+private fun triggerShape(isLeft: Boolean): Shape = if (isLeft) {
+    RoundedCornerShape(topStart = 24.dp, topEnd = 8.dp, bottomEnd = 8.dp, bottomStart = 8.dp)
+} else {
+    RoundedCornerShape(topStart = 8.dp, topEnd = 24.dp, bottomEnd = 8.dp, bottomStart = 8.dp)
 }
 
 @Composable
-private fun GamepadBumperButton(
-    button: ButtonDef,
-    isLeft: Boolean,
-    onPress: (Int) -> Unit,
-    onRelease: (Int) -> Unit
-) {
-    var isPressed by remember { mutableStateOf(false) }
-    val pressOffsetY by animateDpAsState(
-        targetValue = if (isPressed) (-0.6).dp else 0.dp,
-        animationSpec = tween(durationMillis = 70, easing = LinearEasing),
-        label = "bumperPress"
-    )
-    val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.985f else 1.0f,
-        animationSpec = tween(durationMillis = 70, easing = LinearEasing),
-        label = "bumperScale"
-    )
-
-    val outerShape = if (isLeft) {
-        RoundedCornerShape(topStart = 14.dp, topEnd = 6.dp, bottomStart = 6.dp, bottomEnd = 10.dp)
-    } else {
-        RoundedCornerShape(topStart = 6.dp, topEnd = 14.dp, bottomStart = 10.dp, bottomEnd = 6.dp)
-    }
-    
-    val innerShape = if (isLeft) {
-        RoundedCornerShape(topStart = 12.dp, topEnd = 4.dp, bottomStart = 4.dp, bottomEnd = 8.dp)
-    } else {
-        RoundedCornerShape(topStart = 4.dp, topEnd = 12.dp, bottomStart = 8.dp, bottomEnd = 4.dp)
-    }
-
-    // Outer well container (widened to 120.dp)
+private fun ShoulderButton(button: ButtonDef, shape: Shape, onPress: (Int) -> Unit, onRelease: (Int) -> Unit) {
+    var pressed by remember { mutableStateOf(false) }
+    val (fill, content) = capColors(pressed)
+    val currentOnPress by rememberUpdatedState(onPress)
+    val currentOnRelease by rememberUpdatedState(onRelease)
     Box(
         modifier = Modifier
-            .width(120.dp)
-            .height(34.dp)
-            .background(Color(0xFF1B1B1C), outerShape)
-            .border(1.2.dp, Color.Black.copy(alpha = 0.5f), outerShape),
-        contentAlignment = Alignment.Center
+            .size(width = SHOULDER_WIDTH_DP.dp, height = 48.dp)
+            .clip(shape)
+            .background(fill)
+            .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
+            .gamepadButton(button, { currentOnPress(it) }, { currentOnRelease(it) }) { pressed = it }
+            .testTag("gamepad_button_${button.mappingId}"),
+        contentAlignment = Alignment.Center,
     ) {
-        // Inner button cap
+        Text(button.label, style = MaterialTheme.typography.labelLarge, color = content)
+    }
+}
+
+@Composable
+private fun CenterButton(button: ButtonDef, icon: ImageVector, onPress: (Int) -> Unit, onRelease: (Int) -> Unit) {
+    var pressed by remember { mutableStateOf(false) }
+    val (fill, content) = capColors(pressed)
+    val currentOnPress by rememberUpdatedState(onPress)
+    val currentOnRelease by rememberUpdatedState(onRelease)
+    Box(
+        modifier = Modifier
+            .size(48.dp)
+            .gamepadButton(button, { currentOnPress(it) }, { currentOnRelease(it) }) { pressed = it }
+            .testTag("gamepad_button_${button.mappingId}"),
+        contentAlignment = Alignment.Center,
+    ) {
         Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(2.dp) // Well padding
-                .offset(y = pressOffsetY)
-                .graphicsLayer {
-                    scaleY = pressScale
-                }
-                .clip(innerShape)
-                .background(
-                    Brush.verticalGradient(
-                        colors = if (isPressed) {
-                            listOf(Color(0xFF202022), Color(0xFF19191B))
-                        } else {
-                            listOf(Color(0xFF38383B), Color(0xFF2D2D30))
-                        }
-                    )
-                )
-                .border(
-                    0.8.dp,
-                    Brush.verticalGradient(
-                        colors = listOf(Color.White.copy(alpha = 0.15f), Color.Transparent)
-                    ),
-                    innerShape
-                )
-                .gamepadButtonTouch(
-                    onPress = { onPress(button.mappingId) },
-                    onRelease = { onRelease(button.mappingId) },
-                    onPressedStateChange = { isPressed = it }
-                ),
-            contentAlignment = Alignment.Center
+            Modifier
+                .size(40.dp)
+                .clip(CircleShape)
+                .background(fill)
+                .border(1.dp, MaterialTheme.colorScheme.outlineVariant, CircleShape),
+            contentAlignment = Alignment.Center,
         ) {
-            Text(
-                text = button.label,
-                color = Color.White.copy(alpha = 0.85f),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.SansSerif
-            )
+            Icon(icon, contentDescription = null, tint = content, modifier = Modifier.size(20.dp))
         }
     }
 }
 
+/** Guide: a house, which reads as Home/Guide on either console without borrowing a maker's logo. */
 @Composable
-private fun GamepadTriggerButton(
-    button: ButtonDef,
-    isLeft: Boolean,
-    onPress: (Int) -> Unit,
-    onRelease: (Int) -> Unit
-) {
-    var isPressed by remember { mutableStateOf(false) }
-    val pressOffsetY by animateDpAsState(
-        targetValue = if (isPressed) 0.6.dp else 0.dp,
-        animationSpec = tween(durationMillis = 80, easing = LinearEasing),
-        label = "triggerPress"
-    )
-    val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.985f else 1.0f,
-        animationSpec = tween(durationMillis = 80, easing = LinearEasing),
-        label = "triggerScale"
-    )
-
-    val outerShape = if (isLeft) {
-        RoundedCornerShape(topStart = 10.dp, topEnd = 6.dp, bottomStart = 14.dp, bottomEnd = 8.dp)
-    } else {
-        RoundedCornerShape(topStart = 6.dp, topEnd = 10.dp, bottomStart = 8.dp, bottomEnd = 14.dp)
-    }
-
-    val innerShape = if (isLeft) {
-        RoundedCornerShape(topStart = 8.dp, topEnd = 4.dp, bottomStart = 12.dp, bottomEnd = 6.dp)
-    } else {
-        RoundedCornerShape(topStart = 4.dp, topEnd = 8.dp, bottomStart = 6.dp, bottomEnd = 12.dp)
-    }
-
-    // Outer well container (widened to 120.dp)
+private fun GuideButton(button: ButtonDef, onPress: (Int) -> Unit, onRelease: (Int) -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    var pressed by remember { mutableStateOf(false) }
+    val currentOnPress by rememberUpdatedState(onPress)
+    val currentOnRelease by rememberUpdatedState(onRelease)
     Box(
         modifier = Modifier
-            .width(120.dp)
-            .height(48.dp)
-            .background(Color(0xFF1B1B1C), outerShape)
-            .border(1.2.dp, Color.Black.copy(alpha = 0.5f), outerShape),
-        contentAlignment = Alignment.Center
+            .size(56.dp)
+            .clip(CircleShape)
+            .background(if (pressed) colors.primary else colors.surfaceContainerHighest)
+            .border(2.dp, colors.primary, CircleShape)
+            .gamepadButton(button, { currentOnPress(it) }, { currentOnRelease(it) }) { pressed = it }
+            .testTag("gamepad_guide"),
+        contentAlignment = Alignment.Center,
     ) {
-        // Inner button cap
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(2.dp) // Well padding
-                .offset(y = pressOffsetY)
-                .graphicsLayer {
-                    scaleY = pressScale
-                }
-                .clip(innerShape)
-                .background(
-                    Brush.verticalGradient(
-                        colors = if (isPressed) {
-                            listOf(Color(0xFF202022), Color(0xFF19191B))
-                        } else {
-                            listOf(Color(0xFF38383B), Color(0xFF2D2D30))
-                        }
-                    )
-                )
-                .border(
-                    0.8.dp,
-                    Brush.verticalGradient(
-                        colors = listOf(Color.White.copy(alpha = 0.15f), Color.Transparent)
-                    ),
-                    innerShape
-                )
-                .gamepadButtonTouch(
-                    onPress = { onPress(button.mappingId) },
-                    onRelease = { onRelease(button.mappingId) },
-                    onPressedStateChange = { isPressed = it }
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Text(
-                text = button.label,
-                color = Color.White.copy(alpha = 0.85f),
-                fontSize = 10.sp,
-                fontWeight = FontWeight.Bold,
-                fontFamily = FontFamily.SansSerif
-            )
-        }
+        Icon(Icons.Default.Home, contentDescription = null, tint = if (pressed) colors.onPrimary else colors.onSurface, modifier = Modifier.size(28.dp))
     }
 }
 
-private fun Color.gpDarker(factor: Float = 0.22f): Color {
-    return Color(
-        red = (this.red * (1f - factor)).coerceIn(0f, 1f),
-        green = (this.green * (1f - factor)).coerceIn(0f, 1f),
-        blue = (this.blue * (1f - factor)).coerceIn(0f, 1f),
-        alpha = this.alpha
-    )
-}
+private const val FACE_SPACING_DP = 46f
 
-private fun Color.gpLighter(factor: Float = 0.25f): Color {
-    return Color(
-        red = (this.red + (1f - this.red) * factor).coerceIn(0f, 1f),
-        green = (this.green + (1f - this.green) * factor).coerceIn(0f, 1f),
-        blue = (this.blue + (1f - this.blue) * factor).coerceIn(0f, 1f),
-        alpha = this.alpha
-    )
-}
-
+/**
+ * The four face buttons. One touch handler covers the cluster so a thumb resting between two buttons
+ * presses both, as on a real pad.
+ */
 @Composable
-private fun GamepadFaceButton(
-    button: ButtonDef,
-    isXboxStyle: Boolean,
-    onPress: (Int) -> Unit,
-    onRelease: (Int) -> Unit,
-    modifier: Modifier = Modifier,
-    externalIsPressed: Boolean = false
-) {
-    var internalIsPressed by remember { mutableStateOf(false) }
-    val isPressed = internalIsPressed || externalIsPressed
-
-    val pressOffsetY by animateDpAsState(
-        targetValue = if (isPressed) 0.6.dp else 0.dp,
-        animationSpec = tween(durationMillis = 65, easing = LinearEasing),
-        label = "pressOffset"
-    )
-    val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.985f else 1.0f,
-        animationSpec = tween(durationMillis = 65, easing = LinearEasing),
-        label = "pressScale"
+private fun FaceButtons(config: ConsoleConfig, onPress: (Int) -> Unit, onRelease: (Int) -> Unit) {
+    val active = remember { mutableStateListOf<Int>() }
+    val currentOnPress by rememberUpdatedState(onPress)
+    val currentOnRelease by rememberUpdatedState(onRelease)
+    val slots = listOf(
+        config.faceTop to Offset(0f, -1f),
+        config.faceRight to Offset(1f, 0f),
+        config.faceBottom to Offset(0f, 1f),
+        config.faceLeft to Offset(-1f, 0f),
     )
 
-    // Base color of the disk itself (dark gray, themed to the background #28282A)
-    val baseColor = Color(0xFF333336)
-    
-    // Label/Symbol color (A, B, X, Y or △, ◯, ✕, ☐)
-    val labelColor = button.color
-
-    // Gap clearance reduced to 1.5.dp (well size 48.dp, cap size 45.dp)
     Box(
-        modifier = modifier
-            .size(48.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        // 1. Button Well (physical hole in casing with shadow)
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(CircleShape)
-                .background(Color(0xFF1B1B1C))
-                .border(0.8.dp, Color.Black.copy(alpha = 0.25f), CircleShape)
-        )
+        modifier = Modifier
+            .size(148.dp)
+            .pointerInput(config.id) {
+                val spacingPx = FACE_SPACING_DP.dp.toPx()
+                // Proximity radius covering multi-button thumb presses.
+                val touchRadiusPx = 35.dp.toPx()
 
-        // 2. Button Cap (presses down into the well)
-        Box(
-            modifier = Modifier
-                .size(45.dp)
-                .offset(y = pressOffsetY)
-                .graphicsLayer {
-                    scaleX = pressScale
-                    scaleY = pressScale
-                }
-                .clip(CircleShape)
-                .gamepadButtonTouch(
-                    onPress = { onPress(button.mappingId) },
-                    onRelease = { onRelease(button.mappingId) },
-                    onPressedStateChange = { internalIsPressed = it }
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val r = size.width / 2f
-
-                val maxOffset = 0.6.dp.toPx()
-                val edgeOffset = if (isPressed) 0.3f.dp.toPx() else 1.8f.dp.toPx()
-                val faceOffset = if (isPressed) 0f else maxOffset
-
-                // Calculate radii to fit perfectly within the clip boundaries
-                val edgeR = r - edgeOffset / 2f - 0.5.dp.toPx()
-                val faceR = r - maxOffset - 0.5.dp.toPx()
-
-                // Draw 3D side edge of the disk (darker than the face)
-                drawCircle(
-                    color = Color(0xFF1F1F21),
-                    radius = edgeR,
-                    center = Offset(r, r + edgeOffset / 2f)
-                )
-
-                // Top face of the disk (themed to the background, soft vertical gradient)
-                val faceColor = if (isPressed) Color(0xFF232325) else baseColor
-                drawCircle(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(faceColor.gpLighter(0.08f), faceColor.gpDarker(0.12f))
-                    ),
-                    radius = faceR,
-                    center = Offset(r, r - faceOffset)
-                )
-
-                // Flat face bevel edge highlight
-                drawCircle(
-                    color = Color.White.copy(alpha = if (isPressed) 0.05f else 0.15f),
-                    radius = faceR - 0.5.dp.toPx(),
-                    center = Offset(r, r - faceOffset),
-                    style = Stroke(width = 0.8.dp.toPx())
-                )
-
-                // Bezel shadow
-                drawCircle(
-                    color = Color.Black.copy(alpha = if (isPressed) 0.10f else 0.25f),
-                    radius = faceR,
-                    center = Offset(r, r - faceOffset),
-                    style = Stroke(width = 0.8.dp.toPx())
-                )
-            }
-
-            // Offset the content slightly to match the unpressed/pressed 3D displacement
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .offset(y = if (isPressed) 0.dp else (-0.6).dp),
-                contentAlignment = Alignment.Center
-            ) {
-                if (isXboxStyle) {
-                    Text(
-                        text = button.label,
-                        color = labelColor,
-                        fontSize = 18.sp,
-                        fontWeight = FontWeight.Black,
-                        fontFamily = FontFamily.SansSerif,
-                        textAlign = TextAlign.Center,
-                        style = androidx.compose.ui.text.TextStyle(
-                            platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
-                        )
-                    )
-                } else {
-                    Canvas(modifier = Modifier.fillMaxSize().padding(12.dp)) {
-                        val cx = size.width / 2f
-                        val cy = size.height / 2f
-                        val strokeW = 2.8.dp.toPx()
-                        val radius = 6.5.dp.toPx()
-                        
-                        when (button.label) {
-                            "△" -> {
-                                val path = androidx.compose.ui.graphics.Path().apply {
-                                    moveTo(cx, cy - radius)
-                                    lineTo(cx + radius, cy + radius * 0.5f)
-                                    lineTo(cx - radius, cy + radius * 0.5f)
-                                    close()
-                                }
-                                drawPath(path, labelColor, style = Stroke(width = strokeW))
-                            }
-                            "◯" -> {
-                                drawCircle(labelColor, radius = radius, center = Offset(cx, cy), style = Stroke(width = strokeW))
-                            }
-                            "✕" -> {
-                                drawLine(labelColor, start = Offset(cx - radius, cy - radius), end = Offset(cx + radius, cy + radius), strokeWidth = strokeW)
-                                drawLine(labelColor, start = Offset(cx + radius, cy - radius), end = Offset(cx - radius, cy + radius), strokeWidth = strokeW)
-                            }
-                            "☐" -> {
-                                val side = radius * 1.5f
-                                drawRect(
-                                    labelColor,
-                                    topLeft = Offset(cx - side/2f, cy - side/2f),
-                                    size = androidx.compose.ui.geometry.Size(side, side),
-                                    style = Stroke(width = strokeW)
-                                )
-                            }
+                fun update(pointers: Collection<Offset>) {
+                    val center = Offset(size.width / 2f, size.height / 2f)
+                    val touched = slots.mapNotNull { (button, direction) ->
+                        val buttonCenter = center + direction * spacingPx
+                        button.mappingId.takeIf {
+                            pointers.any { (it - buttonCenter).getDistance() <= touchRadiusPx }
                         }
+                    }.toSet()
+                    touched.filterNot(active::contains).forEach {
+                        active.add(it)
+                        currentOnPress(it)
+                    }
+                    active.filterNot(touched::contains).forEach {
+                        active.remove(it)
+                        currentOnRelease(it)
                     }
                 }
-            }
-        }
-    }
-}
 
-@Composable
-private fun FaceButtonsDiamond(
-    config: ConsoleConfig,
-    @Suppress("UNUSED_PARAMETER") isXboxStyle: Boolean,
-    onPress: (Int) -> Unit,
-    onRelease: (Int) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val spacing = 40.dp
-    val density = LocalDensity.current.density
-
-    // Track active pressed button mapping IDs via proximity multi-touch
-    val activePressedButtons = remember { mutableStateListOf<Int>() }
-
-    val updateProximityPresses = { pointerPositions: List<Offset>, containerSizePx: Float ->
-        val centerPx = containerSizePx / 2f
-        val spacingPx = 40f * density
-        val touchRadiusPx = 35f * density // Proximity radius covering multi-button thumb presses
-
-        val topCenter = Offset(centerPx, centerPx - spacingPx)
-        val rightCenter = Offset(centerPx + spacingPx, centerPx)
-        val bottomCenter = Offset(centerPx, centerPx + spacingPx)
-        val leftCenter = Offset(centerPx - spacingPx, centerPx)
-
-        val buttonCenters = listOf(
-            config.faceTop.mappingId to topCenter,
-            config.faceRight.mappingId to rightCenter,
-            config.faceBottom.mappingId to bottomCenter,
-            config.faceLeft.mappingId to leftCenter
-        )
-
-        val newlyActive = mutableSetOf<Int>()
-        for (pos in pointerPositions) {
-            for ((mappingId, btnCenter) in buttonCenters) {
-                val dx = pos.x - btnCenter.x
-                val dy = pos.y - btnCenter.y
-                val dist = sqrt(dx * dx + dy * dy)
-                if (dist <= touchRadiusPx) {
-                    newlyActive.add(mappingId)
-                }
-            }
-        }
-
-        // Press newly touched buttons
-        for (mappingId in newlyActive) {
-            if (!activePressedButtons.contains(mappingId)) {
-                activePressedButtons.add(mappingId)
-                onPress(mappingId)
-            }
-        }
-
-        // Release buttons no longer under any active finger
-        val toRemove = mutableListOf<Int>()
-        for (mappingId in activePressedButtons) {
-            if (!newlyActive.contains(mappingId)) {
-                toRemove.add(mappingId)
-                onRelease(mappingId)
-            }
-        }
-        activePressedButtons.removeAll(toRemove.toSet())
-    }
-
-    Box(
-        modifier = modifier
-            .size(134.dp)
-            .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
-                    val activePositions = mutableMapOf<PointerId, Offset>()
-                    activePositions[down.id] = down.position
-                    updateProximityPresses(activePositions.values.toList(), size.width.toFloat())
-
+                    val positions = mutableMapOf<PointerId, Offset>(down.id to down.position)
+                    update(positions.values)
                     while (true) {
                         val event = awaitPointerEvent()
                         for (change in event.changes) {
-                            if (change.pressed) {
-                                activePositions[change.id] = change.position
-                            } else {
-                                activePositions.remove(change.id)
-                            }
+                            if (change.pressed) positions[change.id] = change.position else positions.remove(change.id)
                         }
-                        if (activePositions.isEmpty()) {
-                            for (id in activePressedButtons.toList()) {
-                                onRelease(id)
-                            }
-                            activePressedButtons.clear()
+                        if (positions.isEmpty()) {
+                            active.toList().forEach(currentOnRelease)
+                            active.clear()
                             break
                         }
-                        updateProximityPresses(activePositions.values.toList(), size.width.toFloat())
+                        update(positions.values)
                     }
                 }
             },
-        contentAlignment = Alignment.Center
+        contentAlignment = Alignment.Center,
     ) {
-        GamepadFaceButton(config.faceTop, isXboxStyle, onPress, onRelease, Modifier.offset(y = -spacing), externalIsPressed = activePressedButtons.contains(config.faceTop.mappingId))
-        GamepadFaceButton(config.faceRight, isXboxStyle, onPress, onRelease, Modifier.offset(x = spacing), externalIsPressed = activePressedButtons.contains(config.faceRight.mappingId))
-        GamepadFaceButton(config.faceBottom, isXboxStyle, onPress, onRelease, Modifier.offset(y = spacing), externalIsPressed = activePressedButtons.contains(config.faceBottom.mappingId))
-        GamepadFaceButton(config.faceLeft, isXboxStyle, onPress, onRelease, Modifier.offset(x = -spacing), externalIsPressed = activePressedButtons.contains(config.faceLeft.mappingId))
-    }
-}
-
-@Composable
-private fun GamepadCenterButton(
-    button: ButtonDef,
-    onPress: (Int) -> Unit,
-    onRelease: (Int) -> Unit
-) {
-    var isPressed by remember { mutableStateOf(false) }
-    val pressOffsetY by animateDpAsState(
-        targetValue = if (isPressed) 0.6.dp else 0.dp,
-        animationSpec = tween(durationMillis = 65, easing = LinearEasing),
-        label = "centerBtnPress"
-    )
-    val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.985f else 1.0f,
-        animationSpec = tween(durationMillis = 65, easing = LinearEasing),
-        label = "centerBtnScale"
-    )
-
-    // Well size 32.dp, cap size 29.dp (1.5.dp gap)
-    Box(
-        modifier = Modifier
-            .size(32.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        // Button well
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(CircleShape)
-                .background(Color(0xFF1B1B1C))
-                .border(0.8.dp, Color.Black.copy(alpha = 0.25f), CircleShape)
-        )
-
-        // Button Cap (Flat Disk)
-        Box(
-            modifier = Modifier
-                .size(29.dp)
-                .offset(y = pressOffsetY)
-                .graphicsLayer {
-                    scaleX = pressScale
-                    scaleY = pressScale
-                }
-                .clip(CircleShape)
-                .gamepadButtonTouch(
-                    onPress = { onPress(button.mappingId) },
-                    onRelease = { onRelease(button.mappingId) },
-                    onPressedStateChange = { isPressed = it }
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            val baseColor = Color(0xFF333336)
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val r = size.width / 2f
-
-                val maxOffset = 0.6.dp.toPx()
-                val edgeOffset = if (isPressed) 0.3f.dp.toPx() else 1.5f.dp.toPx()
-                val faceOffset = if (isPressed) 0f else maxOffset
-
-                // Calculate radii to fit perfectly within the clip boundaries
-                val edgeR = r - edgeOffset / 2f - 0.5.dp.toPx()
-                val faceR = r - maxOffset - 0.5.dp.toPx()
-
-                // 3D side edge
-                drawCircle(
-                    color = Color(0xFF1F1F21),
-                    radius = edgeR,
-                    center = Offset(r, r + edgeOffset / 2f)
-                )
-
-                // Top face
-                val faceColor = if (isPressed) Color(0xFF232325) else baseColor
-                drawCircle(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(faceColor.gpLighter(0.08f), faceColor.gpDarker(0.12f))
-                    ),
-                    radius = faceR,
-                    center = Offset(r, r - faceOffset)
-                )
-
-                // Bevel highlight (vertical gradient brush for better shading)
-                drawCircle(
-                    brush = Brush.verticalGradient(
-                        colors = if (isPressed) {
-                            listOf(Color.White.copy(alpha = 0.05f), Color.Transparent)
-                        } else {
-                            listOf(Color.White.copy(alpha = 0.15f), Color.Transparent)
-                        }
-                    ),
-                    radius = faceR - 0.5.dp.toPx(),
-                    center = Offset(r, r - faceOffset),
-                    style = Stroke(width = 0.8.dp.toPx())
-                )
-            }
-
-            // Offset the icon content to match the 3D displacement
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .offset(y = if (isPressed) 0.dp else (-0.6).dp),
-                contentAlignment = Alignment.Center
-            ) {
-                if (button.label == "VIEW" || button.label == "CREATE") {
-                    Canvas(modifier = Modifier.size(11.dp)) {
-                        val w = size.width
-                        val h = size.height
-                        val strokeW = 1.5.dp.toPx()
-                        
-                        // Back window
-                        drawRect(
-                            color = Color.White.copy(alpha = 0.75f),
-                            topLeft = Offset(w * 0.25f, 0f),
-                            size = androidx.compose.ui.geometry.Size(w * 0.75f, h * 0.75f),
-                            style = Stroke(strokeW)
-                        )
-                        // Front window
-                        drawRect(
-                            color = Color.White.copy(alpha = 0.75f),
-                            topLeft = Offset(0f, h * 0.25f),
-                            size = androidx.compose.ui.geometry.Size(w * 0.75f, h * 0.75f),
-                            style = Stroke(strokeW)
-                        )
-                    }
-                } else if (button.label == "SHARE") {
-                    Icon(
-                        imageVector = Icons.Default.IosShare,
-                        contentDescription = "Share",
-                        tint = Color.White.copy(alpha = 0.75f),
-                        modifier = Modifier.size(11.dp)
-                    )
-                } else {
-                    Column(
-                        modifier = Modifier.size(10.dp),
-                        verticalArrangement = Arrangement.SpaceBetween,
-                        horizontalAlignment = Alignment.CenterHorizontally
-                    ) {
-                        repeat(3) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(1.6.dp)
-                                    .background(Color.White.copy(alpha = 0.75f))
-                            )
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-@Composable
-private fun GamepadShareButton(
-    onPress: (Int) -> Unit,
-    onRelease: (Int) -> Unit
-) {
-    var isPressed by remember { mutableStateOf(false) }
-    val pressOffsetY by animateDpAsState(
-        targetValue = if (isPressed) 0.6.dp else 0.dp,
-        animationSpec = tween(durationMillis = 65, easing = LinearEasing),
-        label = "shareBtnPress"
-    )
-    val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.985f else 1.0f,
-        animationSpec = tween(durationMillis = 65, easing = LinearEasing),
-        label = "shareBtnScale"
-    )
-
-    Box(
-        modifier = Modifier
-            .width(38.dp)
-            .height(28.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        val outerShape = RoundedCornerShape(8.dp)
-        val innerShape = RoundedCornerShape(6.dp)
-        
-        // Button well
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .background(Color(0xFF1B1B1C), outerShape)
-                .border(1.2.dp, Color.Black.copy(alpha = 0.5f), outerShape)
-        )
-
-        // Button Cap (Flat Disk 3D) - Gap clearance reduced to 1.5.dp
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(1.5.dp) // Gap clearance
-                .offset(y = pressOffsetY)
-                .graphicsLayer {
-                    scaleX = pressScale
-                    scaleY = pressScale
-                }
-                .clip(innerShape)
-                .gamepadButtonTouch(
-                    onPress = { onPress(18) },
-                    onRelease = { onRelease(18) },
-                    onPressedStateChange = { isPressed = it }
-                ),
-            contentAlignment = Alignment.Center
-        ) {
-            val baseColor = Color(0xFF333336)
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val w = size.width
-                val h = size.height
-                
-                val maxOffset = 0.6.dp.toPx()
-                val edgeOffset = if (isPressed) 0.3f.dp.toPx() else 1.5f.dp.toPx()
-                val faceOffset = if (isPressed) maxOffset else 0f
-
-                // 3D side edge
-                drawRoundRect(
-                    color = Color(0xFF1F1F21),
-                    topLeft = Offset(0f, edgeOffset),
-                    size = androidx.compose.ui.geometry.Size(w, h - edgeOffset),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx(), 6.dp.toPx())
-                )
-
-                // Top face
-                val faceColor = if (isPressed) Color(0xFF232325) else baseColor
-                drawRoundRect(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(faceColor.gpLighter(0.08f), faceColor.gpDarker(0.12f))
-                    ),
-                    topLeft = Offset(0f, faceOffset),
-                    size = androidx.compose.ui.geometry.Size(w, h - maxOffset),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(6.dp.toPx(), 6.dp.toPx())
-                )
-
-                // Bevel highlight
-                drawRoundRect(
-                    color = Color.White.copy(alpha = if (isPressed) 0.05f else 0.15f),
-                    topLeft = Offset(0.5.dp.toPx(), faceOffset + 0.5.dp.toPx()),
-                    size = androidx.compose.ui.geometry.Size(w - 1.dp.toPx(), h - maxOffset - 1.dp.toPx()),
-                    cornerRadius = androidx.compose.ui.geometry.CornerRadius(5.5.dp.toPx(), 5.5.dp.toPx()),
-                    style = Stroke(width = 0.8.dp.toPx())
-                )
-            }
-
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .offset(y = if (isPressed) 0.6.dp else 0.dp),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.IosShare,
-                    contentDescription = "Share",
-                    tint = Color.White.copy(alpha = 0.75f),
-                    modifier = Modifier.size(12.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun XboxLogoGuideButton(
-    button: ButtonDef,
-    onPress: (Int) -> Unit,
-    onRelease: (Int) -> Unit
-) {
-    var isPressed by remember { mutableStateOf(false) }
-    val pressOffsetY by animateDpAsState(
-        targetValue = if (isPressed) 0.6.dp else 0.dp,
-        animationSpec = tween(durationMillis = 65, easing = LinearEasing),
-        label = "xboxLogoPress"
-    )
-    val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.985f else 1.0f,
-        animationSpec = tween(durationMillis = 65, easing = LinearEasing),
-        label = "xboxLogoScale"
-    )
-
-    // Well size 50.dp, cap size 47.dp (1.5.dp gap)
-    Box(
-        modifier = Modifier
-            .size(50.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        // 1. Button well
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(CircleShape)
-                .background(Color(0xFF1B1B1C))
-                .border(0.8.dp, Color.Black.copy(alpha = 0.25f), CircleShape)
-        )
-
-        // 2. Button Cap (Flat Disk)
-        Box(
-            modifier = Modifier
-                .size(47.dp)
-                .offset(y = pressOffsetY)
-                .graphicsLayer {
-                    scaleX = pressScale
-                    scaleY = pressScale
-                }
-                .clip(CircleShape)
-                .gamepadButtonTouch(
-                    onPress = { onPress(button.mappingId) },
-                    onRelease = { onRelease(button.mappingId) },
-                    onPressedStateChange = { isPressed = it }
-                )
-        ) {
-            val baseColor = Color(0xFF333336)
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val r = size.width / 2f
-
-                val maxOffset = 0.6.dp.toPx()
-                val edgeOffset = if (isPressed) 0.3f.dp.toPx() else 1.8f.dp.toPx()
-                val faceOffset = if (isPressed) 0f else maxOffset
-
-                // Calculate radii to fit perfectly within the clip boundaries
-                val edgeR = r - edgeOffset / 2f - 0.5.dp.toPx()
-                val faceR = r - maxOffset - 0.5.dp.toPx()
-
-                // 3D side edge
-                drawCircle(
-                    color = Color(0xFF1F1F21),
-                    radius = edgeR,
-                    center = Offset(r, r + edgeOffset / 2f)
-                )
-
-                // Top face
-                val faceColor = if (isPressed) Color(0xFF232325) else baseColor
-                drawCircle(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(faceColor.gpLighter(0.08f), faceColor.gpDarker(0.12f))
-                    ),
-                    radius = faceR,
-                    center = Offset(r, r - faceOffset)
-                )
-
-                // Bevel highlight border (vertical gradient brush for better shading)
-                drawCircle(
-                    brush = Brush.verticalGradient(
-                        colors = if (isPressed) {
-                            listOf(Color.White.copy(alpha = 0.05f), Color.Transparent)
-                        } else {
-                            listOf(Color.White.copy(alpha = 0.15f), Color.Transparent)
-                        }
-                    ),
-                    radius = faceR - 0.5.dp.toPx(),
-                    center = Offset(r, r - faceOffset),
-                    style = Stroke(width = 0.8.dp.toPx())
-                )
-            }
-            
-            // Developer logo overlay centered on top face
-            val faceOffset = if (isPressed) 0.dp else 0.6.dp
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .offset(y = -faceOffset),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    painter = painterResource(id = R.drawable.ic_launcher_foreground),
-                    contentDescription = "Logo",
-                    tint = Color.White.copy(alpha = 0.85f),
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun PlayStationLogoButton(
-    button: ButtonDef,
-    onPress: (Int) -> Unit,
-    onRelease: (Int) -> Unit
-) {
-    var isPressed by remember { mutableStateOf(false) }
-    val pressOffsetY by animateDpAsState(
-        targetValue = if (isPressed) 0.6.dp else 0.dp,
-        animationSpec = tween(durationMillis = 65, easing = LinearEasing),
-        label = "psLogoPress"
-    )
-    val pressScale by animateFloatAsState(
-        targetValue = if (isPressed) 0.985f else 1.0f,
-        animationSpec = tween(durationMillis = 65, easing = LinearEasing),
-        label = "psLogoScale"
-    )
-
-    // Well size 50.dp, cap size 47.dp (1.5.dp gap)
-    Box(
-        modifier = Modifier
-            .size(50.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        // Button well
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(CircleShape)
-                .background(Color(0xFF1B1B1C))
-                .border(0.8.dp, Color.Black.copy(alpha = 0.25f), CircleShape)
-        )
-
-        // Button Cap (Flat Disk)
-        Box(
-            modifier = Modifier
-                .size(47.dp)
-                .offset(y = pressOffsetY)
-                .graphicsLayer {
-                    scaleX = pressScale
-                    scaleY = pressScale
-                }
-                .clip(CircleShape)
-                .gamepadButtonTouch(
-                    onPress = { onPress(button.mappingId) },
-                    onRelease = { onRelease(button.mappingId) },
-                    onPressedStateChange = { isPressed = it }
-                )
-        ) {
-            val baseColor = Color(0xFF333336)
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val r = size.width / 2f
-
-                val maxOffset = 0.6.dp.toPx()
-                val edgeOffset = if (isPressed) 0.3f.dp.toPx() else 1.8f.dp.toPx()
-                val faceOffset = if (isPressed) 0f else maxOffset
-
-                // Calculate radii to fit perfectly within the clip boundaries
-                val edgeR = r - edgeOffset / 2f - 0.5.dp.toPx()
-                val faceR = r - maxOffset - 0.5.dp.toPx()
-
-                // 3D side edge
-                drawCircle(
-                    color = Color(0xFF1F1F21),
-                    radius = edgeR,
-                    center = Offset(r, r + edgeOffset / 2f)
-                )
-
-                // Top face
-                val faceColor = if (isPressed) Color(0xFF232325) else baseColor
-                drawCircle(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(faceColor.gpLighter(0.08f), faceColor.gpDarker(0.12f))
-                    ),
-                    radius = faceR,
-                    center = Offset(r, r - faceOffset)
-                )
-                
-                // Bevel highlight (vertical gradient brush for better shading)
-                drawCircle(
-                    brush = Brush.verticalGradient(
-                        colors = if (isPressed) {
-                            listOf(Color.White.copy(alpha = 0.05f), Color.Transparent)
-                        } else {
-                            listOf(Color.White.copy(alpha = 0.15f), Color.Transparent)
-                        }
-                    ),
-                    radius = faceR - 0.5.dp.toPx(),
-                    center = Offset(r, r - faceOffset),
-                    style = Stroke(width = 0.8.dp.toPx())
-                )
-            }
-            
-            // Developer logo overlay centered on top face
-            val faceOffset = if (isPressed) 0.dp else 0.6.dp
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .offset(y = -faceOffset),
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    painter = painterResource(id = R.drawable.ic_launcher_foreground),
-                    contentDescription = "Logo",
-                    tint = Color.White.copy(alpha = 0.85f),
-                    modifier = Modifier.size(32.dp)
-                )
-            }
-        }
-    }
-}
-
-
-
-@Composable
-private fun GamepadStickHoldButton(
-    label: String,
-    isHeld: Boolean,
-    onToggle: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val pressOffsetY by animateDpAsState(
-        targetValue = if (isHeld) 0.6.dp else 0.dp,
-        animationSpec = tween(durationMillis = 65, easing = LinearEasing),
-        label = "stickHoldPress"
-    )
-    val pressScale by animateFloatAsState(
-        targetValue = if (isHeld) 0.95f else 1.0f,
-        animationSpec = tween(durationMillis = 65, easing = LinearEasing),
-        label = "stickHoldScale"
-    )
-
-    // Well size 30.dp, Cap size 26.dp (Hole / Inset shadow effect)
-    Box(
-        modifier = modifier
-            .size(30.dp),
-        contentAlignment = Alignment.Center
-    ) {
-        // 1. Dark Button Well (Hole Inset)
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .clip(CircleShape)
-                .background(Color(0xFF171718))
-                .border(0.8.dp, Color.Black.copy(alpha = 0.5f), CircleShape)
-        )
-
-        // 2. 3D Circular Button Cap
-        Box(
-            modifier = Modifier
-                .size(26.dp)
-                .offset(y = pressOffsetY)
-                .graphicsLayer {
-                    scaleX = pressScale
-                    scaleY = pressScale
-                }
-                .clip(CircleShape)
-                .clickable { onToggle(!isHeld) },
-            contentAlignment = Alignment.Center
-        ) {
-            val baseColor = if (isHeld) Color(0xFF3A3A3E) else Color(0xFF28282B)
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val r = size.width / 2f
-
-                val maxOffset = 0.6.dp.toPx()
-                val edgeOffset = if (isHeld) 0.2.dp.toPx() else 1.5.dp.toPx()
-                val faceOffset = if (isHeld) 0f else maxOffset
-
-                val edgeR = r - edgeOffset / 2f - 0.5.dp.toPx()
-                val faceR = r - maxOffset - 0.5.dp.toPx()
-
-                // 3D Side shadow edge
-                drawCircle(
-                    color = Color(0xFF161618),
-                    radius = edgeR,
-                    center = Offset(r, r + edgeOffset / 2f)
-                )
-
-                // Top face gradient
-                drawCircle(
-                    brush = Brush.verticalGradient(
-                        colors = listOf(baseColor.gpLighter(0.10f), baseColor.gpDarker(0.12f))
-                    ),
-                    radius = faceR,
-                    center = Offset(r, r - faceOffset)
-                )
-
-                // Top bevel highlight / active border
-                drawCircle(
-                    color = if (isHeld) Color(0xFFE5E5EA) else Color.White.copy(alpha = 0.15f),
-                    radius = faceR - 0.5.dp.toPx(),
-                    center = Offset(r, r - faceOffset),
-                    style = Stroke(width = if (isHeld) 1.dp.toPx() else 0.8.dp.toPx())
-                )
-            }
-
-            // Centered Text "L3" / "R3"
-            Text(
-                text = label,
-                color = if (isHeld) Color(0xFFFFFFFF) else Color.White.copy(alpha = 0.70f),
-                fontSize = 9.5.sp,
-                fontWeight = FontWeight.ExtraBold,
-                fontFamily = FontFamily.SansSerif,
-                textAlign = TextAlign.Center
+        slots.forEach { (button, direction) ->
+            FaceButton(
+                button = button,
+                pressed = button.mappingId in active,
+                onAccessibilityClick = {
+                    currentOnPress(button.mappingId)
+                    currentOnRelease(button.mappingId)
+                },
+                modifier = Modifier.offset(x = (direction.x * FACE_SPACING_DP).dp, y = (direction.y * FACE_SPACING_DP).dp),
             )
         }
     }
 }
 
 @Composable
-private fun GamepadAnalogStick(
-    label: String,
-    isClicked: () -> Boolean,
-    modifier: Modifier = Modifier,
-    isHeld: () -> Boolean = { false },
+private fun FaceButton(button: ButtonDef, pressed: Boolean, onAccessibilityClick: () -> Unit, modifier: Modifier) {
+    val colors = MaterialTheme.colorScheme
+    // Pressed, the cap fills with its printed colour and the symbol cuts out of it.
+    val fill = if (pressed) button.faceColor else colors.surfaceContainerHighest
+    val symbol = if (pressed) colors.surface else button.faceColor
+    Box(
+        modifier = modifier
+            .size(52.dp)
+            .clip(CircleShape)
+            .background(fill)
+            .border(1.dp, if (pressed) button.faceColor else colors.outlineVariant, CircleShape)
+            .semantics {
+                contentDescription = button.description
+                role = Role.Button
+                stateDescription = if (pressed) "Pressed" else "Released"
+                onClick {
+                    onAccessibilityClick()
+                    true
+                }
+            }
+            .testTag("gamepad_face_${button.description}"),
+        contentAlignment = Alignment.Center,
+    ) {
+        if (button.glyph == FaceGlyph.LETTER) {
+            Text(
+                button.label,
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.Black,
+                color = symbol,
+                textAlign = TextAlign.Center,
+            )
+        } else {
+            Canvas(Modifier.size(22.dp)) { drawFaceShape(button.glyph, symbol) }
+        }
+    }
+}
+
+private fun DrawScope.drawFaceShape(glyph: FaceGlyph, color: Color) {
+    val stroke = Stroke(width = 2.5.dp.toPx())
+    val c = center
+    val r = size.minDimension / 2f - stroke.width / 2f
+    when (glyph) {
+        FaceGlyph.TRIANGLE -> drawPath(
+            Path().apply {
+                moveTo(c.x, c.y - r)
+                lineTo(c.x + r, c.y + r * 0.7f)
+                lineTo(c.x - r, c.y + r * 0.7f)
+                close()
+            },
+            color,
+            style = stroke,
+        )
+        FaceGlyph.CIRCLE -> drawCircle(color, radius = r, center = c, style = stroke)
+        FaceGlyph.CROSS -> {
+            val d = r * 0.85f
+            drawLine(color, Offset(c.x - d, c.y - d), Offset(c.x + d, c.y + d), strokeWidth = stroke.width)
+            drawLine(color, Offset(c.x + d, c.y - d), Offset(c.x - d, c.y + d), strokeWidth = stroke.width)
+        }
+        FaceGlyph.SQUARE -> {
+            val side = r * 1.6f
+            drawRect(color, topLeft = Offset(c.x - side / 2f, c.y - side / 2f), size = Size(side, side), style = stroke)
+        }
+        FaceGlyph.LETTER -> Unit
+    }
+}
+
+private const val STICK_WELL_DP = 104f
+private const val STICK_CAP_DP = 72f
+/** How far the thumb must travel from the centre for full deflection. */
+private const val STICK_INPUT_RADIUS_DP = 32f
+/** How far the cap travels on screen. */
+private const val STICK_VISUAL_RADIUS_DP = 20f
+
+/**
+ * An analog stick with its L3/R3 hold badge beside it on the outer side, clear of the well so the cap
+ * never covers it. A quick tap clicks the stick; the badge holds the click down until tapped again.
+ */
+@Composable
+private fun AnalogStick(
+    description: String,
+    holdLabel: String,
+    badgeOnStart: Boolean,
+    held: Boolean,
     onMove: (Float, Float) -> Unit,
     onStickClick: () -> Unit,
-    onToggleHold: ((Boolean) -> Unit)? = null
+    onToggleHold: (Boolean) -> Unit,
 ) {
-    val clicked = isClicked()
-    val held = isHeld()
+    val colors = MaterialTheme.colorScheme
     var stickOffsetX by remember { mutableFloatStateOf(0f) }
     var stickOffsetY by remember { mutableFloatStateOf(0f) }
-
     val currentIsHeld by rememberUpdatedState(held)
     val currentOnStickClick by rememberUpdatedState(onStickClick)
     val currentOnMove by rememberUpdatedState(onMove)
 
-    val stickScale by animateFloatAsState(
-        targetValue = if (clicked || held) 0.90f else 1.0f,
-        animationSpec = spring(stiffness = Spring.StiffnessMedium),
-        label = "stickScale"
-    )
-
-    Box(
-        modifier = modifier.size(108.dp),
-        contentAlignment = Alignment.Center
-    ) {
+    Box(Modifier.size(width = (STICK_WELL_DP + 2 * STICK_BADGE_SHIFT_DP + 8f).dp, height = 112.dp)) {
         Box(
             modifier = Modifier
-                .size(90.dp)
+                .align(if (badgeOnStart) Alignment.CenterEnd else Alignment.CenterStart)
+                .padding(horizontal = 4.dp)
+                .size(STICK_WELL_DP.dp)
+                .semantics { contentDescription = description }
                 .pointerInput(Unit) {
                     val centerPx = size.width / 2f
-                    val maxInputRadius = 32.dp.toPx()  // Wide linear touch response radius
-                    val maxVisualRadius = 22.dp.toPx() // Clean visual cap travel boundary
+                    val maxInputRadius = STICK_INPUT_RADIUS_DP.dp.toPx()
+                    val maxVisualRadius = STICK_VISUAL_RADIUS_DP.dp.toPx()
                     val tapSlopPx = 8f
 
                     awaitEachGesture {
@@ -2298,9 +1172,7 @@ private fun GamepadAnalogStick(
                             val change = event.changes.firstOrNull { it.id == pointerId } ?: break
 
                             if (!change.pressed) {
-                                val dragDistance = sqrt((change.position.x - down.position.x) * (change.position.x - down.position.x) + 
-                                                        (change.position.y - down.position.y) * (change.position.y - down.position.y))
-
+                                val dragDistance = (change.position - down.position).getDistance()
                                 if (dragDistance < tapSlopPx && System.currentTimeMillis() - downTime < 250) {
                                     if (!currentIsHeld) {
                                         currentOnStickClick()
@@ -2317,186 +1189,116 @@ private fun GamepadAnalogStick(
                         }
                     }
                 },
-            contentAlignment = Alignment.Center
+            contentAlignment = Alignment.Center,
         ) {
-        // 1. Analog Stick Base Well (neumorphic molding & concentric rings)
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val w = size.width
-
-            // Neumorphic outer lip molding (top-left highlight, bottom-right shadow)
-            drawCircle(
-                brush = Brush.linearGradient(
-                    colors = listOf(Color(0xFF3B3B3E), Color(0xFF1B1B1C)),
-                    start = Offset(0f, 0f),
-                    end = Offset(w, w)
-                ),
-                radius = w / 2f + 3.dp.toPx()
-            )
-            drawCircle(
-                color = Color(0xFF121213),
-                radius = w / 2f + 3.dp.toPx(),
-                style = Stroke(width = 0.8.dp.toPx())
-            )
-            
-            // Recessed well background
-            drawCircle(
-                brush = Brush.verticalGradient(
-                    colors = listOf(Color(0xFF141416), Color(0xFF222224))
-                ),
-                radius = w / 2f - 1.dp.toPx()
-            )
-            
-            // Soft inner shadow ring inside the well for depth
-            drawCircle(
-                color = Color.Black.copy(alpha = 0.45f),
-                radius = w / 2f - 2.dp.toPx(),
-                style = Stroke(width = 3.dp.toPx())
-            )
-        }
-
-        // 2. Parallax 3D Shadow Layer (floats under the cap, shifts slightly less)
-        Canvas(
-            modifier = Modifier
-                .offset { IntOffset((stickOffsetX * 0.6f).roundToInt(), (stickOffsetY * 0.6f).roundToInt()) }
-                .size(82.dp)
-        ) {
-            drawCircle(
-                brush = Brush.radialGradient(
-                    colors = listOf(Color.Black.copy(alpha = 0.6f), Color.Black.copy(alpha = 0.2f), Color.Transparent),
-                    center = Offset(size.width / 2f, size.height / 2f),
-                    radius = size.width / 2f
-                ),
-                radius = size.width / 2f
-            )
-        }
-            
-        // 3. Analog Stick Thumb (rendered on top, NOT clipped, with 3D tilt & press)
-        Box(
-            modifier = Modifier
-                .offset { IntOffset(stickOffsetX.roundToInt(), stickOffsetY.roundToInt()) }
-                .size(76.dp) // Large thumb cap (narrow gap to well)
-                .clip(CircleShape)
-                .graphicsLayer {
-                    // Quick press/sink scaling when clicked (no shape distortion when moving)
-                    scaleX = stickScale
-                    scaleY = stickScale
+            // The well: a recess with an outline that reads at 3:1 on the surface.
+            Canvas(Modifier.fillMaxSize()) {
+                drawCircle(colors.surfaceContainerLowest)
+                drawCircle(colors.outline, radius = size.minDimension / 2f - 1.dp.toPx(), style = Stroke(2.dp.toPx()))
+            }
+            Box(
+                Modifier
+                    .offset { IntOffset(stickOffsetX.roundToInt(), stickOffsetY.roundToInt()) }
+                    .size(STICK_CAP_DP.dp)
+            ) {
+                val (cap, _) = capColors(held)
+                Canvas(Modifier.fillMaxSize()) {
+                    val r = size.minDimension / 2f
+                    drawCircle(cap, radius = r)
+                    drawCircle(colors.outlineVariant, radius = r - 0.5.dp.toPx(), style = Stroke(1.dp.toPx()))
+                    // The thumb dish.
+                    drawCircle(if (held) colors.onSecondaryContainer.copy(alpha = 0.24f) else colors.surfaceContainerHigh, radius = r * 0.6f)
+                    drawCircle(colors.outlineVariant, radius = r * 0.6f, style = Stroke(1.dp.toPx()))
                 }
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val w = size.width
-                val cx = w / 2f
-                val cy = w / 2f
-                val r = w / 2f
-                
-                // Outer base edge (very dark ring)
-                drawCircle(
-                    color = Color(0xFF161719),
-                    radius = r
-                )
-                
-                // Outer ring highlight/shadow
-                drawCircle(
-                    color = Color.White.copy(alpha = 0.08f),
-                    radius = r - 0.5.dp.toPx(),
-                    style = Stroke(width = 1.dp.toPx())
-                )
-                
-                // Shifting central elements for 3D parallax deflection and press look
-                val pressShift = if (clicked) 1.2.dp.toPx() else 0f
-                val cupCx = cx + stickOffsetX * 0.12f
-                val cupCy = cy + stickOffsetY * 0.12f + pressShift
-                
-                // Create paths for the knurled dome slope (between outer ring and inner cup)
-                val pathOuter = androidx.compose.ui.graphics.Path().apply {
-                    addOval(androidx.compose.ui.geometry.Rect(center = Offset(cx, cy), radius = r - 1.dp.toPx()))
-                }
-                val pathInner = androidx.compose.ui.graphics.Path().apply {
-                    addOval(androidx.compose.ui.geometry.Rect(center = Offset(cupCx, cupCy), radius = r * 0.58f))
-                }
-                val ringPath = androidx.compose.ui.graphics.Path.combine(
-                    androidx.compose.ui.graphics.PathOperation.Difference,
-                    pathOuter,
-                    pathInner
-                )
-                
-                // Fill the dome slope with a soft vertical gradient for a flatter look
-                drawPath(
-                    path = ringPath,
-                    brush = Brush.verticalGradient(
-                        colors = listOf(Color(0xFF38383B), Color(0xFF232325))
-                    )
-                )
-                
-                // Flatter recessed cup gradient (no radial concentration in center)
-                val cupRadius = r * 0.58f
-                val concaveBrush = Brush.verticalGradient(
-                    colors = listOf(Color(0xFF1B1C1E), Color(0xFF292A2E))
-                )
-                
-                // 3D Inner cup recessed background
-                drawCircle(
-                    brush = concaveBrush,
-                    radius = cupRadius,
-                    center = Offset(cupCx, cupCy)
-                )
-                
-                // Bevel ring border (simple dark separator)
-                drawCircle(
-                    color = Color(0xFF141517),
-                    radius = cupRadius,
-                    center = Offset(cupCx, cupCy),
-                    style = Stroke(width = 1.2.dp.toPx())
-                )
-                
-                // Bevel highlight (simple soft outline ring)
-                drawCircle(
-                    color = Color.White.copy(alpha = 0.09f),
-                    radius = cupRadius - 0.6.dp.toPx(),
-                    center = Offset(cupCx, cupCy),
-                    style = Stroke(width = 0.8.dp.toPx())
-                )
             }
         }
-        }
 
-        // 2. L3 / R3 Hold Toggle positioned at TOP-LEFT of joystick
-        if (onToggleHold != null) {
-            GamepadStickHoldButton(
-                label = if (label == "L") "L3" else "R3",
-                isHeld = held,
-                onToggle = onToggleHold,
-                modifier = Modifier
-                    .align(Alignment.TopStart)
-                    .offset(x = (-10).dp, y = (-10).dp)
-            )
-        }
+        StickHoldBadge(
+            label = holdLabel,
+            held = held,
+            onToggle = onToggleHold,
+            modifier = Modifier.align(if (badgeOnStart) Alignment.BottomStart else Alignment.BottomEnd),
+        )
     }
 }
 
 @Composable
-private fun GamepadDpad(
-    @Suppress("UNUSED_PARAMETER") isXboxStyle: Boolean,
-    onDpadChange: (Int) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    var activeDirection by remember { mutableIntStateOf(0) }
-    val currentOnDpadChange by rememberUpdatedState(onDpadChange)
-    
-    // Physical tilt based on pressed direction (pure pivot rotation)
-    var targetRotX = 0f
-    var targetRotY = 0f
-    
-    if (activeDirection and 1 != 0) targetRotX = 12f  // UP: depresses top, raises bottom
-    if (activeDirection and 2 != 0) targetRotX = -12f // DOWN: depresses bottom, raises top
-    if (activeDirection and 4 != 0) targetRotY = -12f // LEFT: depresses left, raises right
-    if (activeDirection and 8 != 0) targetRotY = 12f  // RIGHT: depresses right, raises left
-    
-    val rotX by animateFloatAsState(targetValue = targetRotX, animationSpec = spring(stiffness = Spring.StiffnessHigh))
-    val rotY by animateFloatAsState(targetValue = targetRotY, animationSpec = spring(stiffness = Spring.StiffnessHigh))
-
+private fun StickHoldBadge(label: String, held: Boolean, onToggle: (Boolean) -> Unit, modifier: Modifier) {
+    val colors = MaterialTheme.colorScheme
+    val currentHeld by rememberUpdatedState(held)
+    val currentOnToggle by rememberUpdatedState(onToggle)
     Box(
         modifier = modifier
-            .size(114.dp) // Large D-pad size
+            .size(48.dp)
+            .semantics {
+                contentDescription = "Hold $label"
+                role = Role.Switch
+                stateDescription = if (held) "Held" else "Released"
+                onClick {
+                    currentOnToggle(!currentHeld)
+                    true
+                }
+            }
+            // Toggles on touch-down, like every other button here.
+            .pointerInput(Unit) {
+                awaitEachGesture {
+                    awaitFirstDown(requireUnconsumed = false).consume()
+                    currentOnToggle(!currentHeld)
+                }
+            }
+            .testTag("gamepad_hold_$label"),
+        contentAlignment = Alignment.Center,
+    ) {
+        Box(
+            Modifier
+                .size(34.dp)
+                .clip(CircleShape)
+                .background(if (held) colors.primary else colors.surfaceContainerHigh)
+                .border(1.dp, if (held) colors.primary else colors.outline, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(label, style = MaterialTheme.typography.labelMedium, color = if (held) colors.onPrimary else colors.onSurfaceVariant)
+        }
+    }
+}
+
+private const val DPAD_UP = 1
+private const val DPAD_DOWN = 2
+private const val DPAD_LEFT = 4
+private const val DPAD_RIGHT = 8
+
+private fun plusPath(width: Float, bar: Float, inset: Float, corner: Float): Path {
+    val start = (width - bar) / 2f
+    val horizontal = Path().apply {
+        addRoundRect(RoundRect(inset, start, width - inset, start + bar, CornerRadius(corner)))
+    }
+    val vertical = Path().apply {
+        addRoundRect(RoundRect(start, inset, start + bar, width - inset, CornerRadius(corner)))
+    }
+    return Path.combine(PathOperation.Union, horizontal, vertical)
+}
+
+/** The D-pad. A pressed arm fills on touch-down; there is no tilt or other motion on repeated input. */
+@Composable
+private fun Dpad(onDpadChange: (Int) -> Unit) {
+    val colors = MaterialTheme.colorScheme
+    var activeDirection by remember { mutableIntStateOf(0) }
+    val currentOnDpadChange by rememberUpdatedState(onDpadChange)
+    val directions = listOf(DPAD_UP to "Up", DPAD_DOWN to "Down", DPAD_LEFT to "Left", DPAD_RIGHT to "Right")
+
+    Box(
+        modifier = Modifier
+            .size(120.dp)
+            .semantics {
+                contentDescription = "D-pad"
+                customActions = directions.map { (bit, name) ->
+                    CustomAccessibilityAction(name) {
+                        currentOnDpadChange(bit)
+                        currentOnDpadChange(0)
+                        true
+                    }
+                }
+            }
             .pointerInput(Unit) {
                 awaitEachGesture {
                     val down = awaitFirstDown(requireUnconsumed = false)
@@ -2533,359 +1335,46 @@ private fun GamepadDpad(
                     }
                 }
             }
+            .testTag("gamepad_dpad"),
     ) {
-        // 1. Stationary Background Well (Casing hole remains static)
-        Canvas(modifier = Modifier.fillMaxSize()) {
+        Canvas(Modifier.fillMaxSize()) {
             val w = size.width
-            val barWWell = w * 0.36f
-            val startOffWell = (w - barWWell) / 2f
-            
-            val path1 = androidx.compose.ui.graphics.Path().apply {
-                addRoundRect(
-                    androidx.compose.ui.geometry.RoundRect(
-                        left = w * 0.02f,
-                        top = startOffWell,
-                        right = w * 0.98f,
-                        bottom = startOffWell + barWWell,
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx())
-                    )
-                )
-            }
-            val path2 = androidx.compose.ui.graphics.Path().apply {
-                addRoundRect(
-                    androidx.compose.ui.geometry.RoundRect(
-                        left = startOffWell,
-                        top = w * 0.02f,
-                        right = startOffWell + barWWell,
-                        bottom = w * 0.98f,
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(8.dp.toPx())
-                    )
-                )
-            }
-            val wellPath = androidx.compose.ui.graphics.Path.combine(
-                androidx.compose.ui.graphics.PathOperation.Union,
-                path1,
-                path2
-            )
-            
-            // Fill plus-shaped well
-            drawPath(
-                path = wellPath,
-                color = Color(0xFF1B1B1C)
-            )
-            // Well border
-            drawPath(
-                path = wellPath,
-                color = Color.Black.copy(alpha = 0.5f),
-                style = Stroke(width = 1.2.dp.toPx())
-            )
-            // Inner shadow for depth
-            drawPath(
-                path = wellPath,
-                color = Color.Black.copy(alpha = 0.2f),
-                style = Stroke(width = 3.dp.toPx())
-            )
-        }
+            val c = center
+            val well = plusPath(w, bar = w * 0.38f, inset = 1.dp.toPx(), corner = 10.dp.toPx())
+            drawPath(well, colors.surfaceContainerLowest)
+            drawPath(well, colors.outline, style = Stroke(1.5.dp.toPx()))
 
-        // 2. Stationary Drop Shadow Layer (does NOT rotate in 3D, shifts dynamically opposite to tilt)
-        Canvas(modifier = Modifier.fillMaxSize()) {
-            val w = size.width
-            val barW = w * 0.28f
-            val startOff = (w - barW) / 2f
-            
-            val cross1 = androidx.compose.ui.graphics.Path().apply {
-                addRoundRect(
-                    androidx.compose.ui.geometry.RoundRect(
-                        left = w * 0.06f,
-                        top = startOff,
-                        right = w * 0.94f,
-                        bottom = startOff + barW,
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx())
-                    )
+            val bar = w * 0.30f
+            val start = (w - bar) / 2f
+            val cross = plusPath(w, bar = bar, inset = w * 0.05f, corner = 6.dp.toPx())
+            drawPath(cross, colors.surfaceContainerHighest)
+            clipPath(cross) {
+                val arms = mapOf(
+                    DPAD_UP to Rect(start, 0f, start + bar, c.y),
+                    DPAD_DOWN to Rect(start, c.y, start + bar, w),
+                    DPAD_LEFT to Rect(0f, start, c.x, start + bar),
+                    DPAD_RIGHT to Rect(c.x, start, w, start + bar),
                 )
-            }
-            val cross2 = androidx.compose.ui.graphics.Path().apply {
-                addRoundRect(
-                    androidx.compose.ui.geometry.RoundRect(
-                        left = startOff,
-                        top = w * 0.06f,
-                        right = startOff + barW,
-                        bottom = w * 0.94f,
-                        cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx())
-                    )
-                )
-            }
-            val crossPath = androidx.compose.ui.graphics.Path.combine(
-                androidx.compose.ui.graphics.PathOperation.Union,
-                cross1,
-                cross2
-            )
-            
-            // Dynamic D-pad drop shadow offset (shifts in opposite direction of tilt)
-            var shadowOffsetX = 0f
-            var shadowOffsetY = 1.5f.dp.toPx()
-            
-            if (activeDirection and 1 != 0) shadowOffsetY += 2f.dp.toPx()  // UP: shifts shadow down
-            if (activeDirection and 2 != 0) shadowOffsetY -= 2f.dp.toPx()  // DOWN: shifts shadow up
-            if (activeDirection and 4 != 0) shadowOffsetX += 2f.dp.toPx()  // LEFT: shifts shadow right
-            if (activeDirection and 8 != 0) shadowOffsetX -= 2f.dp.toPx()  // RIGHT: shifts shadow left
-            
-            withTransform({
-                translate(left = shadowOffsetX, top = shadowOffsetY)
-            }) {
-                drawPath(
-                    path = crossPath,
-                    color = Color.Black.copy(alpha = 0.4f)
-                )
-            }
-        }
-
-        // 3. Animated D-pad Cross Body (Applying rotation to inner cross only)
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .graphicsLayer {
-                    rotationX = rotX
-                    rotationY = rotY
-                    cameraDistance = 8f * density
+                arms.forEach { (bit, rect) ->
+                    if (activeDirection and bit != 0) drawRect(colors.secondaryContainer, rect.topLeft, rect.size)
                 }
-        ) {
-            Canvas(modifier = Modifier.fillMaxSize()) {
-                val w = size.width
-                val cx = w / 2f
-                val cy = w / 2f
-                
-                val barW = w * 0.28f
-                val startOff = (w - barW) / 2f
-                
-                val cross1 = androidx.compose.ui.graphics.Path().apply {
-                    addRoundRect(
-                        androidx.compose.ui.geometry.RoundRect(
-                            left = w * 0.06f,
-                            top = startOff,
-                            right = w * 0.94f,
-                            bottom = startOff + barW,
-                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx())
-                        )
-                    )
-                }
-                val cross2 = androidx.compose.ui.graphics.Path().apply {
-                    addRoundRect(
-                        androidx.compose.ui.geometry.RoundRect(
-                            left = startOff,
-                            top = w * 0.06f,
-                            right = startOff + barW,
-                            bottom = w * 0.94f,
-                            cornerRadius = androidx.compose.ui.geometry.CornerRadius(4.dp.toPx())
-                        )
-                    )
-                }
-                val crossPath = androidx.compose.ui.graphics.Path.combine(
-                    androidx.compose.ui.graphics.PathOperation.Union,
-                    cross1,
-                    cross2
-                )
-
-                // Draw cross body (matte vertical gradient remains static/unpressed color on tap)
-                val bodyBrush = Brush.verticalGradient(
-                    colors = listOf(Color(0xFF38383B), Color(0xFF2D2D30))
-                )
-                drawPath(
-                    path = crossPath,
-                    brush = bodyBrush
-                )
-
-                // Beveled highlight stroke remains static/unpressed on tap
-                val highlightBrush = Brush.verticalGradient(
-                    colors = listOf(Color.White.copy(alpha = 0.15f), Color.Transparent)
-                )
-                drawPath(
-                    path = crossPath,
-                    brush = highlightBrush,
-                    style = Stroke(width = 0.8.dp.toPx())
-                )
-                // Outer dark border stroke remains static on tap
-                drawPath(
-                    path = crossPath,
-                    color = Color.Black.copy(alpha = 0.35f),
-                    style = Stroke(width = 1.2.dp.toPx())
-                )
-
-                // Central depressed dish (concave look)
-                drawCircle(
-                    brush = Brush.radialGradient(
-                        colors = listOf(Color(0xFF1B1B1D), Color(0xFF2C2C30)),
-                        center = Offset(cx, cy),
-                        radius = barW / 1.5f
-                    ),
-                    radius = barW / 1.8f
-                )
-                // Soft outline for dish
-                drawCircle(
-                    color = Color.White.copy(alpha = 0.04f),
-                    radius = barW / 1.8f,
-                    style = Stroke(width = 0.8.dp.toPx())
-                )
-
-                // Elegant, thin directional markers/arrows (static subtle white/grey)
-                val arrowColor = { directionBit: Int ->
-                    if (activeDirection and directionBit != 0) Color.White.copy(alpha = 0.45f) else Color.White.copy(alpha = 0.15f)
-                }
-                val arrowDist = w * 0.34f
-                val arrowSize = w * 0.04f
-
-                // Up Arrow
-                val pathU = androidx.compose.ui.graphics.Path().apply {
-                    moveTo(cx, cy - arrowDist)
-                    lineTo(cx - arrowSize, cy - arrowDist + arrowSize * 1.1f)
-                    lineTo(cx + arrowSize, cy - arrowDist + arrowSize * 1.1f)
-                    close()
-                }
-                drawPath(pathU, arrowColor(1))
-
-                // Down Arrow
-                val pathD = androidx.compose.ui.graphics.Path().apply {
-                    moveTo(cx, cy + arrowDist)
-                    lineTo(cx - arrowSize, cy + arrowDist - arrowSize * 1.1f)
-                    lineTo(cx + arrowSize, cy + arrowDist - arrowSize * 1.1f)
-                    close()
-                }
-                drawPath(pathD, arrowColor(2))
-
-                // Left Arrow
-                val pathL = androidx.compose.ui.graphics.Path().apply {
-                    moveTo(cx - arrowDist, cy)
-                    lineTo(cx - arrowDist + arrowSize * 1.1f, cy - arrowSize)
-                    lineTo(cx - arrowDist + arrowSize * 1.1f, cy + arrowSize)
-                    close()
-                }
-                drawPath(pathL, arrowColor(4))
-
-                // Right Arrow
-                val pathR = androidx.compose.ui.graphics.Path().apply {
-                    moveTo(cx + arrowDist, cy)
-                    lineTo(cx + arrowDist - arrowSize * 1.1f, cy - arrowSize)
-                    lineTo(cx + arrowDist - arrowSize * 1.1f, cy + arrowSize)
-                    close()
-                }
-                drawPath(pathR, arrowColor(8))
             }
-        }
-    }
-}
+            drawPath(cross, colors.outlineVariant, style = Stroke(1.dp.toPx()))
+            drawCircle(colors.surfaceContainerHigh, radius = bar * 0.36f, center = c)
 
-@Composable
-private fun EditableComponentWrapper(
-    isEditMode: Boolean,
-    offsetX: Float,
-    offsetY: Float,
-    scale: Float,
-    onOffsetChange: (Float, Float) -> Unit,
-    onScaleChange: (Float) -> Unit,
-    onTransformEnd: () -> Unit,
-    content: @Composable () -> Unit
-) {
-    val density = LocalDensity.current.density
-    
-    val currentOffsetX by rememberUpdatedState(offsetX)
-    val currentOffsetY by rememberUpdatedState(offsetY)
-    val currentScale by rememberUpdatedState(scale)
-    val currentOnOffsetChange by rememberUpdatedState(onOffsetChange)
-    val currentOnScaleChange by rememberUpdatedState(onScaleChange)
-    val currentOnTransformEnd by rememberUpdatedState(onTransformEnd)
-    
-    var layoutTopInWindowPx by remember { mutableFloatStateOf(0f) }
-    
-    Box(
-        modifier = Modifier
-            .onGloballyPositioned { coordinates ->
-                layoutTopInWindowPx = coordinates.positionInWindow().y
+            val arrowDist = w * 0.36f
+            val arrow = w * 0.055f
+            fun arrowColor(bit: Int) = if (activeDirection and bit != 0) colors.onSecondaryContainer else colors.onSurfaceVariant
+            fun triangle(tip: Offset, back: Offset, side: Offset) = Path().apply {
+                moveTo(tip.x, tip.y)
+                lineTo(back.x + side.x, back.y + side.y)
+                lineTo(back.x - side.x, back.y - side.y)
+                close()
             }
-            .offset {
-                val layoutTopInWindow = layoutTopInWindowPx / density
-                val constrainedOffsetY = if (layoutTopInWindow > 0) {
-                    val minY = 38f + 4f - layoutTopInWindow
-                    currentOffsetY.coerceAtLeast(minY)
-                } else {
-                    currentOffsetY
-                }
-                IntOffset((currentOffsetX * density).roundToInt(), (constrainedOffsetY * density).roundToInt())
-            }
-            .graphicsLayer {
-                scaleX = currentScale
-                scaleY = currentScale
-            },
-        contentAlignment = Alignment.Center
-    ) {
-        content()
-        
-        if (isEditMode) {
-            // 1. Overlay container with border that intercepts gestures for moving and pinch zoom
-            Box(
-                modifier = Modifier
-                    .matchParentSize()
-                    .graphicsLayer {
-                        scaleX = 1.08f
-                        scaleY = 1.08f
-                    }
-                    .border(
-                        width = 1.2.dp,
-                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.8f),
-                        shape = RoundedCornerShape(8.dp)
-                    )
-                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.08f), shape = RoundedCornerShape(8.dp))
-                    .pointerInput(isEditMode) {
-                        awaitEachGesture {
-                            awaitFirstDown(requireUnconsumed = false)
-                            var event: PointerEvent
-                            do {
-                                event = awaitPointerEvent()
-                                val pan = event.calculatePan()
-                                val zoom = event.calculateZoom()
-                            // 1. Update scale via pinch zoom
-                            val newScale = (currentScale * zoom).coerceIn(0.6f, 1.8f)
-                            currentOnScaleChange(newScale)
-                            
-                            // 2. Update offset with scale factor correction and topbar constraint
-                            val minY = 38f + 4f - layoutTopInWindowPx / density
-                            val newX = currentOffsetX + (pan.x * currentScale) / density
-                            val newY = (currentOffsetY + (pan.y * currentScale) / density).coerceAtLeast(minY)
-                            currentOnOffsetChange(newX, newY)
-                                event.changes.forEach { it.consume() }
-                            } while (event.changes.any { it.pressed })
-                            currentOnTransformEnd()
-                        }
-                    }
-            )
-            
-            // 2. Drag resize handle in bottom-right corner (Alternative scaling option)
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 6.dp, y = 6.dp)
-                    .size(22.dp)
-                    .clip(CircleShape)
-                    .background(MaterialTheme.colorScheme.primary)
-                    .pointerInput(Unit) {
-                        detectDragGestures(
-                            onDragEnd = currentOnTransformEnd,
-                            onDragCancel = currentOnTransformEnd,
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                val deltaScale = (dragAmount.x + dragAmount.y) / 150f
-                                currentOnScaleChange((currentScale + deltaScale).coerceIn(0.6f, 1.8f))
-                            },
-                        )
-                    },
-                contentAlignment = Alignment.Center
-            ) {
-                Icon(
-                    imageVector = Icons.Default.OpenInFull,
-                    contentDescription = "Resize",
-                    tint = Color.White,
-                    modifier = Modifier.size(11.dp)
-                )
-            }
+            drawPath(triangle(Offset(c.x, c.y - arrowDist), Offset(c.x, c.y - arrowDist + arrow * 1.2f), Offset(arrow, 0f)), arrowColor(DPAD_UP))
+            drawPath(triangle(Offset(c.x, c.y + arrowDist), Offset(c.x, c.y + arrowDist - arrow * 1.2f), Offset(arrow, 0f)), arrowColor(DPAD_DOWN))
+            drawPath(triangle(Offset(c.x - arrowDist, c.y), Offset(c.x - arrowDist + arrow * 1.2f, c.y), Offset(0f, arrow)), arrowColor(DPAD_LEFT))
+            drawPath(triangle(Offset(c.x + arrowDist, c.y), Offset(c.x + arrowDist - arrow * 1.2f, c.y), Offset(0f, arrow)), arrowColor(DPAD_RIGHT))
         }
     }
 }
