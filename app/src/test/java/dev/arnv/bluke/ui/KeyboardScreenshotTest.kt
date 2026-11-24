@@ -77,6 +77,14 @@ class KeyboardScreenshotTest {
         }
     }
 
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-420dpi", sdk = [36])
+    fun portraitAsksToTurnThePhone() {
+        captureMatrix(name = "keyboard-portrait", landscape = false) {
+            KeyboardSurfaceUnderTest(manager, synth, prefs)
+        }
+    }
+
     @OptIn(ExperimentalTestApi::class)
     @Test
     fun tuneSheetOpen() = runAndroidComposeUiTest<ComponentActivity> {

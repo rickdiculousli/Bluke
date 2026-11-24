@@ -16,9 +16,22 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.onAllNodesWithText
+import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithContentDescription
+import androidx.compose.ui.test.assertCountEquals
+import androidx.compose.ui.test.assertIsEnabled
+import androidx.compose.ui.test.assertIsNotEnabled
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
+import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
 import dev.arnv.bluke.bluetooth.BluetoothKeyboardManager
 import org.junit.After
+import org.junit.Before
+import kotlinx.coroutines.runBlocking
+import dev.arnv.bluke.data.LayoutRepository
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
@@ -40,12 +53,20 @@ class GamepadLayoutTest {
     private val prefs: SharedPreferences =
         context.getSharedPreferences("gamepad-layout-test", Context.MODE_PRIVATE).also { it.edit().clear().commit() }
 
+    // The saved layout lives in one DataStore for the whole test process, so each test starts from none.
+    @Before
+    @After
+    fun clearSavedLayouts() = runBlocking {
+        val repository = LayoutRepository(context)
+        listOf("xbox_series", "playstation_5").forEach { repository.clear(it) }
+    }
+
     @After
     fun closeManager() {
         manager.close()
     }
 
-    private fun setSurface(editMode: Boolean = false) = compose.setContent {
+    private fun setSurface(editMode: Boolean = false, tuneOpen: Boolean = false) = compose.setContent {
         SurfaceTheme {
             GamepadView(
                 btManager = manager,
@@ -53,6 +74,7 @@ class GamepadLayoutTest {
                 sharedPrefs = prefs,
                 caseBrush = SolidColor(Color.Unspecified),
                 initialEditMode = editMode,
+                initialTuneOpen = tuneOpen,
             )
         }
     }
@@ -85,18 +107,27 @@ class GamepadLayoutTest {
         }
     }
 
-    /** In edit mode every resize handle lies wholly in the controls area and on no other part's move frame. */
-    private fun assertHandlesClear() = forEachConsole { id ->
+    /** The corner of [frame] that [point] sits on (within a pixel), as outward signs from the centre, or null. */
+    private fun cornerOf(frame: Rect, point: Offset): Offset? = listOf(
+        Offset(1f, 1f), Offset(-1f, 1f), Offset(1f, -1f), Offset(-1f, -1f),
+    ).firstOrNull { (cornerAt(frame, it) - point).getDistance() <= 1.5f }
+
+    private fun cornerAt(frame: Rect, signs: Offset) =
+        Offset(if (signs.x > 0) frame.right else frame.left, if (signs.y > 0) frame.bottom else frame.top)
+
+    private fun frames() = boundsByTag { it.startsWith("gamepad_frame_") }.mapKeys { it.key.removePrefix("gamepad_frame_") }
+    private fun handles() = boundsByTag { it.startsWith("gamepad_resize_") }.mapKeys { it.key.removePrefix("gamepad_resize_") }
+
+    /** In edit mode every resize handle is centred on a corner of its own part's frame, wholly in the controls area. */
+    private fun assertHandlesOnTheirCorners() = forEachConsole { id ->
         val area = compose.onNodeWithTag("gamepad_controls_area").fetchSemanticsNode().boundsInRoot
-        val frames = boundsByTag { it.startsWith("gamepad_frame_") }.mapKeys { it.key.removePrefix("gamepad_frame_") }
-        val handles = boundsByTag { it.startsWith("gamepad_resize_") }.mapKeys { it.key.removePrefix("gamepad_resize_") }
+        val frames = frames()
+        val handles = handles()
         assertEquals("a frame per part ($id)", 12, frames.size)
         assertEquals("a handle per part ($id)", 12, handles.size)
         handles.forEach { (part, handle) ->
             assertTrue("$part handle $handle inside $area ($id)", area.contains(handle.topLeft) && area.contains(handle.bottomRight - Offset(0.5f, 0.5f)))
-            frames.filterKeys { it != part }.forEach { (other, frame) ->
-                assertFalse("$part handle $handle on $other frame $frame ($id)", handle.deflate(0.5f).overlaps(frame))
-            }
+            assertTrue("$part handle $handle on a corner of ${frames.getValue(part)} ($id)", cornerOf(frames.getValue(part), handle.center) != null)
         }
     }
 
@@ -169,23 +200,23 @@ class GamepadLayoutTest {
     }
 
     @Test
-    fun resizeHandlesAreClearOnALargePhone() {
+    fun resizeHandlesSitOnTheirCornersOnALargePhone() {
         setSurface(editMode = true)
-        assertHandlesClear()
+        assertHandlesOnTheirCorners()
     }
 
     @Test
     @Config(qualifiers = "w800dp-h360dp-land-xhdpi", sdk = [36])
-    fun resizeHandlesAreClearOnA360dpTallPhone() {
+    fun resizeHandlesSitOnTheirCornersOnA360dpTallPhone() {
         setSurface(editMode = true)
-        assertHandlesClear()
+        assertHandlesOnTheirCorners()
     }
 
     @Test
     @Config(qualifiers = "w640dp-h360dp-land-xhdpi", sdk = [36])
-    fun resizeHandlesAreClearOnASmallPhone() {
+    fun resizeHandlesSitOnTheirCornersOnASmallPhone() {
         setSurface(editMode = true)
-        assertHandlesClear()
+        assertHandlesOnTheirCorners()
     }
 
     @Test
@@ -205,6 +236,79 @@ class GamepadLayoutTest {
         compose.onNodeWithTag("gamepad_turn_sideways").assertIsDisplayed()
         assertTrue(controlBounds().isEmpty())
         compose.onNodeWithTag("console_selector_pill").assertIsDisplayed()
+    }
+
+    /** Drags [part]'s handle [distanceDp] away from the part's centre, along its corner; returns where the finger ends, in root px. */
+    private fun dragHandleOutward(part: String, distanceDp: Float): Pair<Offset, Offset> {
+        val frame = frames().getValue(part)
+        val handle = handles().getValue(part)
+        val signs = cornerOf(frame, handle.center) ?: error("$part handle ${handle.center} is on no corner of $frame")
+        val diagonal = cornerAt(frame, signs) - frame.center
+        val step = diagonal / diagonal.getDistance() * with(compose.density) { distanceDp.dp.toPx() } / 8f
+        compose.onNodeWithTag("gamepad_resize_$part").performTouchInput {
+            down(center)
+            repeat(8) { moveBy(step) }
+            up()
+        }
+        compose.waitForIdle()
+        return signs to handle.center + step * 8f
+    }
+
+    @Test
+    fun draggingEachHandleOutwardGrowsItsPartUnderTheFinger() {
+        setSurface(editMode = true)
+        compose.waitForIdle()
+        val tolerance = with(compose.density) { 8.dp.toPx() }
+        for (part in frames().keys.sorted()) {
+            val before = frames().getValue(part)
+            val (signs, finger) = dragHandleOutward(part, 48f)
+            val after = frames().getValue(part)
+            assertTrue("$part grew: $before -> $after", after.width > before.width && after.height > before.height)
+            val corner = cornerAt(after, signs)
+            assertTrue("$part corner $corner within 8dp of the finger at $finger", (corner - finger).getDistance() <= tolerance)
+            assertTrue("$part handle is still on a corner of its part", cornerOf(after, handles().getValue(part).center) != null)
+            // Dragging any of its handles back in by as much shrinks it to where it began.
+            dragHandleOutward(part, -48f)
+            assertEquals("$part shrinks back", before.width, frames().getValue(part).width, 1.5f)
+        }
+    }
+
+    @Test
+    fun resetLayoutIsOffUntilSomethingMoves() {
+        setSurface(tuneOpen = true)
+        compose.onNodeWithTag("gamepad_tune_reset").assertIsNotEnabled()
+    }
+
+    @Test
+    fun resetLayoutOffersUndo() {
+        setSurface(editMode = true)
+        compose.waitForIdle()
+        val original = frames().getValue("dpad")
+        dragHandleOutward("dpad", 48f)
+        val grown = frames().getValue("dpad")
+        compose.onNodeWithTag("surface_tune").performClick()
+        // Let the sheet finish sliding in, so the tap lands on the button and not the scrim it leaves.
+        compose.waitForIdle()
+        compose.onNodeWithTag("gamepad_tune_reset").performScrollTo().assertIsEnabled().performClick()
+        assertEquals("reset puts the D-pad back", original.width, frames().getValue("dpad").width, 1f)
+        compose.onNodeWithText("Layout reset").assertExists()
+        compose.onNodeWithTag("gamepad_tune_reset").assertIsNotEnabled()
+
+        compose.onNodeWithText("Undo").performClick()
+        compose.waitForIdle()
+        assertEquals("undo restores the resize", grown.width, frames().getValue("dpad").width, 1f)
+        compose.onNodeWithTag("gamepad_tune_reset").assertIsEnabled()
+    }
+
+    @Test
+    fun tuneSheetHidesTheControlsFromTalkBack() {
+        setSurface(tuneOpen = true)
+        compose.onAllNodesWithContentDescription("Left bumper").assertCountEquals(0)
+        compose.onAllNodesWithContentDescription("Left stick").assertCountEquals(0)
+        compose.onNodeWithContentDescription("Close Gamepad").performClick()
+        compose.waitForIdle()
+        compose.onAllNodesWithContentDescription("Left bumper").assertCountEquals(1)
+        compose.onAllNodesWithContentDescription("Left stick").assertCountEquals(1)
     }
 
     @Test
