@@ -78,7 +78,7 @@ class App:
                 return True
         return False
 
-    def wait_settled(self, limit: float = 240.0) -> None:
+    def wait_settled(self, limit: float = 600.0) -> None:
         """Wait for the freshly booted system to stop churning. On a loaded host its post-boot work starves
         Settings for long enough (12 s to deliver a pairing request, 17 s to draw the dialog) that the host's
         30 s pairing window closes before anyone can press Pair."""
@@ -86,9 +86,9 @@ class App:
         deadline = time.monotonic() + limit
         while True:
             load = float(self._run("shell", "cat", "/proc/loadavg").split()[0])
-            if load < cores or time.monotonic() > deadline:
+            if load < 2 * cores or time.monotonic() > deadline:
                 print(f"emulator load {load:.1f} on {cores} cores"
-                      f"{'' if load < cores else ', still busy after ' + str(int(limit)) + ' s; going on'}", flush=True)
+                      f"{'' if load < 2 * cores else ', still busy after ' + str(int(limit)) + ' s; going on'}", flush=True)
                 return
             time.sleep(5)
 
@@ -396,7 +396,24 @@ async def run(args: argparse.Namespace) -> int:
             assert state["lastFailure"] is None, f"connected with a failure still published: {state}"
             host.drain()
 
-        await step("pair and connect", connect())
+        async def first_pairing(attempts: int = 3) -> None:
+            # A guest starved by a busy host can take longer to show Android's pairing prompt than the host's
+            # pairing window lasts. The attempt then ends in a refused bond, which Bluke reports as lastFailure;
+            # by the next try the guest has caught up. Every try is logged, so a retry is never silent.
+            for attempt in range(1, attempts + 1):
+                try:
+                    await connect()
+                    return
+                except AssertionError as error:
+                    if attempt == attempts:
+                        raise
+                    print(f"pairing try {attempt} failed ({error}); waiting for the app to end it and trying again", flush=True)
+                    try:
+                        await wait_state(app, lambda s: s["lastFailure"] is not None, "the failed bond to settle", timeout=60)
+                    except AssertionError:
+                        pass
+
+        await step("pair and connect", first_pairing())
         if not host.interrupt_open:
             print("cannot continue without a connection", flush=True)
             return 1
