@@ -108,17 +108,22 @@ class MirrorController(context: Context) : MirrorFrameSource {
     private val decodedCount = AtomicLong()
     // The rig's pipeline numbers, in microseconds; debug builds only. MotionEvent time to onTouch
     // (the input system's share), onTouch to the Pointer's TLS flush (the app's), the two measured
-    // together per Pointer (MotionEvent time to flush), and Ping to Pong.
+    // together per Pointer (MotionEvent time to flush), Ping to Pong, and a frame's decode finishing
+    // to its first draw.
     private val eventToTouchUs = RigSamples()
     private val touchToFlushUs = RigSamples()
     private val eventToFlushUs = RigSamples()
     private val pingRoundTripUs = RigSamples()
+    // A decoded frame's seq and when its decode finished (System.nanoTime), for decoded -> drawn.
+    @Volatile private var lastDecoded: Pair<Long, Long>? = null
+    private val decodedToDrawnUs = RigSamples()
 
     override fun currentFrame(): ImageBitmap? = currentImage
 
     override fun onFrameDrawn(seq: Long) {
         if (seq == lastDrawnSeq) return
         lastDrawnSeq = seq
+        lastDecoded?.takeIf { it.first == seq }?.let { decodedToDrawnUs.add((System.nanoTime() - it.second) / 1000) }
         drawnCount.incrementAndGet()
         rates.frameDrawn(SystemClock.uptimeMillis())
     }
@@ -234,6 +239,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
             "touchToFlushUs" to touchToFlushUs.toList(),
             "eventToFlushUs" to eventToFlushUs.toList(),
             "pingRoundTripUs" to pingRoundTripUs.toList(),
+            "decodedToDrawnUs" to decodedToDrawnUs.toList(),
         )
     }
 
@@ -507,6 +513,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
         }
         framePool.publish(target)
         currentImage = imageBitmaps.getOrPut(target) { target.asImageBitmap() }
+        lastDecoded = frame.seq to System.nanoTime()
         seqState.longValue = frame.seq
         decodedCount.incrementAndGet()
         val decodeUs = (SystemClock.elapsedRealtimeNanos() - started) / 1000

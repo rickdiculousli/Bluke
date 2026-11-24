@@ -130,6 +130,17 @@ class MirrorScreenshotTest {
             fps = 18,
             latencyMs = 7,
         ),
+        "pairing-while-streaming-code-shown" to address.copy(
+            phase = MirrorPhase.Connected(
+                "Rick's MacBook Pro",
+                "Built-in Retina Display",
+                hasFrame = true,
+                pairing = MirrorPhase.Pairing("590317", "Studio iMac", attemptsLeft = 3),
+            ),
+            pairedName = "Rick's MacBook Pro",
+            fps = 18,
+            latencyMs = 7,
+        ),
         "declined" to address.copy(
             phase = MirrorPhase.Waiting("Rick's MacBook Pro"),
             pairedName = "Rick's MacBook Pro",
@@ -260,6 +271,7 @@ class MirrorScreenshotTest {
             onNoticeShown = {},
             onTouch = { policy.update(it) },
             forgetPending = name.startsWith("forget-pending"),
+            shownPairingCode = if (name.endsWith("code-shown")) "590317" else null,
         )
     }
 
