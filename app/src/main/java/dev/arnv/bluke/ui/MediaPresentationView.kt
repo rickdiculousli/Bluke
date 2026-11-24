@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -45,6 +46,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.Layout
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
@@ -243,14 +245,14 @@ internal fun MediaPresentationView(
         Box(Modifier.fillMaxSize().then(if (upright) Modifier.uprightFrame() else Modifier)) {
             Column(Modifier.fillMaxSize()) {
                 SurfaceToolbar(chrome = chrome, haptics = haptics, onTune = { tuneOpen = true })
-                val deck = Modifier.fillMaxSize().padding(16.dp)
+                val deck = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp).testTag("multimedia_deck")
                 if (upright) {
                     UprightRemote(remote, tune, deck)
                 } else {
                     LandscapeRemote(remote, tune, deck)
                 }
             }
-            SurfaceTuneSheet(visible = tuneOpen, title = "Tune multimedia", onDismiss = { tuneOpen = false }) {
+            SurfaceTuneSheet(visible = tuneOpen, title = "Multimedia", onDismiss = { tuneOpen = false }) {
                 MultimediaTuneContent(tune, { it.write(sharedPrefs) }, haptics)
             }
         }
@@ -283,46 +285,95 @@ private fun Modifier.uprightFrame(): Modifier = layout { measurable, constraints
     }
 }
 
+/**
+ * Held flat: playback and volume beside the navigation pad, presentation keys under both, and the
+ * pointer on the right. The pointer keeps enough width for its three labelled mouse buttons.
+ */
 @Composable
 private fun LandscapeRemote(remote: RemoteSender, tune: MultimediaTuneState, modifier: Modifier) {
     Row(modifier, horizontalArrangement = Arrangement.spacedBy(GROUP_GAP)) {
-        Column(Modifier.width(240.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-            PlaybackGroup(remote)
-            VolumeGroup(remote, tune.hardwareVolumeButtons)
+        Column(Modifier.weight(1f - POINTER_SHARE).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(GROUP_GAP)) {
+            Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(GROUP_GAP)) {
+                Column(Modifier.weight(0.9f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(GROUP_GAP)) {
+                    PlaybackGroup(remote, Modifier.weight(1f), fillHeight = true)
+                    VolumeGroup(remote, tune.hardwareVolumeButtons)
+                }
+                NavigationGroup(remote, Modifier.weight(1f).fillMaxHeight())
+            }
             RemoteGroup("Presentation") {
-                Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
-                    presentationActions.forEach { RemoteActionButton(it, remote, neutralColors(), Modifier.weight(1f).fillMaxHeight()) }
+                Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
+                    presentationActions.forEach { action ->
+                        val share = if (action.caption == null) 0.6f else 1f
+                        RemoteActionButton(action, remote, neutralColors(), Modifier.weight(share).fillMaxHeight())
+                    }
                 }
             }
         }
-        NavigationGroup(remote, Modifier.width(DPAD_WIDTH).fillMaxHeight())
-        PointerArea(remote, tune, Modifier.weight(1f).fillMaxHeight())
+        Column(Modifier.weight(POINTER_SHARE).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
+            PointerPad(remote, tune, Modifier.weight(1f).fillMaxWidth())
+            ButtonRow(mouseActions, remote)
+            ButtonRow(pageActions, remote)
+        }
     }
 }
 
+/** Held upright: transport and volume across the top, navigation beside the presentation keys, the pointer below. */
 @Composable
 private fun UprightRemote(remote: RemoteSender, tune: MultimediaTuneState, modifier: Modifier) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(GROUP_GAP)) {
         PlaybackGroup(remote)
         VolumeGroup(remote, tune.hardwareVolumeButtons)
-        Row(Modifier.fillMaxWidth().height(232.dp), horizontalArrangement = Arrangement.spacedBy(GROUP_GAP)) {
-            NavigationGroup(remote, Modifier.width(UPRIGHT_DPAD_WIDTH).fillMaxHeight())
-            RemoteGroup("Presentation", Modifier.weight(1f).fillMaxHeight()) {
-                presentationActions.forEach {
-                    RemoteActionButton(it, remote, neutralColors(), Modifier.fillMaxWidth().weight(1f))
+        NavigationBesidePresentation(
+            navigation = { NavigationGroup(remote, Modifier.fillMaxSize()) },
+            presentation = {
+                RemoteGroup("Presentation") {
+                    presentationActions.forEach {
+                        RemoteActionButton(it, remote, neutralColors(), Modifier.fillMaxWidth())
+                    }
                 }
+            },
+        )
+        Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
+            Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
+                PointerPad(remote, tune, Modifier.weight(1f).fillMaxWidth())
+                ButtonRow(mouseActions, remote)
+            }
+            Column(Modifier.width(UPRIGHT_PAGE_WIDTH).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
+                pageActions.forEach { RemoteActionButton(it, remote, neutralColors(), Modifier.fillMaxWidth().weight(1f)) }
             }
         }
-        PointerArea(remote, tune, Modifier.fillMaxWidth().weight(1f))
     }
 }
 
-/** Transport first: play/pause is the largest key on the remote, previous and next beside it. */
+/**
+ * The navigation pad at [UPRIGHT_DPAD_WIDTH] with the presentation keys beside it, the pair as tall as
+ * the keys' labels need (and never shorter than the pad's own minimum). The keys are measured first,
+ * at their real width, because a wrapping label's intrinsic height can come out short.
+ */
 @Composable
-private fun PlaybackGroup(remote: RemoteSender) {
-    RemoteGroup("Playback") {
-        Row(Modifier.fillMaxWidth().height(72.dp), horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
-            RemoteActionButton(previousAction, remote, secondaryColors(), Modifier.width(64.dp).fillMaxHeight())
+private fun NavigationBesidePresentation(navigation: @Composable () -> Unit, presentation: @Composable () -> Unit) {
+    Layout(contents = listOf(navigation, presentation), modifier = Modifier.fillMaxWidth()) { (nav, keys), constraints ->
+        val navWidth = UPRIGHT_DPAD_WIDTH.roundToPx()
+        val keysWidth = constraints.maxWidth - navWidth - GROUP_GAP.roundToPx()
+        val keysPlaceable = keys.single().measure(Constraints(minWidth = keysWidth, maxWidth = keysWidth))
+        val height = maxOf(keysPlaceable.height, nav.single().minIntrinsicHeight(navWidth))
+        val navPlaceable = nav.single().measure(Constraints.fixed(navWidth, height))
+        layout(constraints.maxWidth, height) {
+            navPlaceable.placeRelative(0, 0)
+            keysPlaceable.placeRelative(constraints.maxWidth - keysWidth, 0)
+        }
+    }
+}
+
+/** Transport first: play/pause is the largest key on the remote, previous and next beside it. [fillHeight] stretches it over what its column leaves. */
+@Composable
+private fun PlaybackGroup(remote: RemoteSender, modifier: Modifier = Modifier, fillHeight: Boolean = false) {
+    RemoteGroup("Playback", modifier) {
+        Row(
+            Modifier.fillMaxWidth().then(if (fillHeight) Modifier.weight(1f) else Modifier.height(TRANSPORT_HEIGHT)),
+            horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP),
+        ) {
+            RemoteActionButton(previousAction, remote, secondaryColors(), Modifier.width(56.dp).fillMaxHeight())
             RemoteActionButton(
                 playPauseAction,
                 remote,
@@ -331,7 +382,7 @@ private fun PlaybackGroup(remote: RemoteSender) {
                 shape = MaterialTheme.shapes.large,
                 iconSize = 32.dp,
             )
-            RemoteActionButton(nextAction, remote, secondaryColors(), Modifier.width(64.dp).fillMaxHeight())
+            RemoteActionButton(nextAction, remote, secondaryColors(), Modifier.width(56.dp).fillMaxHeight())
         }
     }
 }
@@ -339,22 +390,21 @@ private fun PlaybackGroup(remote: RemoteSender) {
 @Composable
 private fun VolumeGroup(remote: RemoteSender, hardwareVolumeButtons: Boolean) {
     RemoteGroup(if (hardwareVolumeButtons) "Volume · phone buttons on" else "Volume") {
-        Row(Modifier.fillMaxWidth().height(56.dp), horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
-            volumeActions.forEach { RemoteActionButton(it, remote, secondaryColors(), Modifier.weight(1f).fillMaxHeight()) }
-        }
+        ButtonRow(volumeActions, remote, secondaryColors())
     }
 }
 
-/** Arrows around OK, with Esc, Menu, Home and End in the corners. */
+/** Arrows around OK, with Esc, Menu, Home and End in the corners; the arrow column is the narrow one. */
 @Composable
 private fun NavigationGroup(remote: RemoteSender, modifier: Modifier) {
     RemoteGroup("Navigation", modifier) {
         Column(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
             navigationGrid.forEach { row ->
                 Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
-                    row.forEach { action ->
+                    row.forEachIndexed { column, action ->
                         val colors = if (action.icons.isNotEmpty() || action == okAction) secondaryColors() else neutralColors()
-                        RemoteActionButton(action, remote, colors, Modifier.weight(1f).fillMaxHeight())
+                        val share = if (column == 1) ARROW_COLUMN_SHARE else 1f
+                        RemoteActionButton(action, remote, colors, Modifier.weight(share).fillMaxHeight())
                     }
                 }
             }
@@ -362,38 +412,32 @@ private fun NavigationGroup(remote: RemoteSender, modifier: Modifier) {
     }
 }
 
-/** The pointer pad, its three labelled mouse buttons below, and the page up/down strip beside it. */
+/** A row of equal buttons, as tall as its tallest label needs and never under 48dp. */
 @Composable
-private fun PointerArea(remote: RemoteSender, tune: MultimediaTuneState, modifier: Modifier) {
-    val colors = MaterialTheme.colorScheme
-    Row(modifier, horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
-        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
-            Box(
-                Modifier
-                    .weight(1f)
-                    .fillMaxWidth()
-                    .clip(MaterialTheme.shapes.large)
-                    .background(colors.surfaceContainerHigh)
-                    .testTag("multimedia_touchpad"),
-            ) {
-                // The pad scrolls with the touchpad's scroll feel (invert, momentum, glide) at this remote's speed.
-                val scrollFeel by rememberPreference(remote.prefs, *TouchpadScrollSettings.KEYS) { TouchpadScrollSettings.from(it) }
-                TouchGestureLayer(
-                    btManager = remote.btManager,
-                    sensitivity = tune.pointer.pointerSpeed,
-                    scrollSettings = scrollFeel.copy(speed = tune.pointer.scrollSpeed),
-                    buttonMode = TrackpadButtonMode.CLICKPAD,
-                    showNumpadLed = false,
-                    onClick = { remote.haptics.perform(HapticEvent.CLICK) },
-                )
-            }
-            Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
-                mouseActions.forEach { RemoteActionButton(it, remote, neutralColors(), Modifier.weight(1f).fillMaxHeight()) }
-            }
-        }
-        Column(Modifier.width(72.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
-            pageActions.forEach { RemoteActionButton(it, remote, neutralColors(), Modifier.fillMaxWidth().weight(1f)) }
-        }
+private fun ButtonRow(actions: List<RemoteAction>, remote: RemoteSender, colors: RemoteButtonColors = neutralColors()) {
+    Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
+        actions.forEach { RemoteActionButton(it, remote, colors, Modifier.weight(1f).fillMaxHeight()) }
+    }
+}
+
+/** The pointer pad: it moves the pointer and scrolls with the touchpad's scroll feel at this remote's speed. */
+@Composable
+private fun PointerPad(remote: RemoteSender, tune: MultimediaTuneState, modifier: Modifier) {
+    Box(
+        modifier
+            .clip(MaterialTheme.shapes.large)
+            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+            .testTag("multimedia_touchpad"),
+    ) {
+        val scrollFeel by rememberPreference(remote.prefs, *TouchpadScrollSettings.KEYS) { TouchpadScrollSettings.from(it) }
+        TouchGestureLayer(
+            btManager = remote.btManager,
+            sensitivity = tune.pointer.pointerSpeed,
+            scrollSettings = scrollFeel.copy(speed = tune.pointer.scrollSpeed),
+            buttonMode = TrackpadButtonMode.CLICKPAD,
+            showNumpadLed = false,
+            onClick = { remote.haptics.perform(HapticEvent.CLICK) },
+        )
     }
 }
 
@@ -405,7 +449,6 @@ private fun RemoteGroup(title: String, modifier: Modifier = Modifier, content: @
             title,
             style = MaterialTheme.typography.labelMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
-            maxLines = 1,
             modifier = Modifier.semantics { heading() },
         )
         content()
@@ -518,8 +561,8 @@ private val presentationActions = listOf(
 )
 
 private val pageActions = listOf(
-    key("Page up, previous slide", KeyboardLayouts.KEY_PAGEUP, icon = Icons.Default.KeyboardArrowUp, caption = "Page up"),
-    key("Page down, next slide", KeyboardLayouts.KEY_PAGEDOWN, icon = Icons.Default.KeyboardArrowDown, caption = "Page down"),
+    key("Page up, previous slide", KeyboardLayouts.KEY_PAGEUP, text = "Page up"),
+    key("Page down, next slide", KeyboardLayouts.KEY_PAGEDOWN, text = "Page down"),
 )
 
 private val mouseActions = listOf(
@@ -528,10 +571,14 @@ private val mouseActions = listOf(
     RemoteAction("Right click", RemoteOutput.Mouse(0x02), text = "Right"),
 )
 
-private val GROUP_GAP = 16.dp
+private val GROUP_GAP = 12.dp
 private val BUTTON_GAP = 8.dp
-private val DPAD_WIDTH = 216.dp
-private val UPRIGHT_DPAD_WIDTH = 224.dp
+private val TRANSPORT_HEIGHT = 64.dp
+private val UPRIGHT_DPAD_WIDTH = 186.dp
+private val UPRIGHT_PAGE_WIDTH = 64.dp
+private const val ARROW_COLUMN_SHARE = 0.8f
+/** The pointer's share of a landscape remote's width: enough for "Left", "Middle" and "Right" at large font sizes. */
+private const val POINTER_SHARE = 0.37f
 
 private const val KEY_APPLICATION = 0x65
 private const val POSTURE_ENTRY_DEGREES = 20
