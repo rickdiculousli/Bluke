@@ -13,6 +13,7 @@ import dev.arnv.bluke.bluetooth.ConsumerControl
 import dev.arnv.bluke.bluetooth.HID_DESCRIPTOR_REVISION_PREFERENCE
 import dev.arnv.bluke.bluetooth.GamepadDpadOutputMode
 import dev.arnv.bluke.bluetooth.numpadStroke
+import dev.arnv.bluke.mirror.MirrorTouchMode
 import dev.arnv.bluke.ui.InputMode
 import dev.arnv.bluke.ui.TouchpadScroller
 import dev.arnv.bluke.ui.defaultInputModeKeys
@@ -209,6 +210,9 @@ class RigReceiver : BroadcastReceiver() {
                     }
                     "loopback" -> mirror.setRigLoopback(true)
                     "forget" -> mirror.forgetCompanion()
+                    "touch-mode" -> mirror.setTouchMode(MirrorTouchMode.valueOf(intent.getStringExtra("touch") ?: "DIRECT"))
+                    "key-down" -> mirror.leftButton(true)
+                    "key-up" -> mirror.leftButton(false)
                     else -> Unit
                 }
                 mirror.rigSnapshot().forEach { (key, value) ->

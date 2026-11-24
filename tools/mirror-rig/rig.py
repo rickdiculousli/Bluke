@@ -84,6 +84,17 @@ HOME_EXPECTED = [
     ("up", AT_P3),
 ]
 
+# Hover with the left-button key. The finger hovers at P1 (a hold past the tap timeout, so no
+# click), then the key presses at the last point sent: a move then a press, both at P1. A finger
+# DOWN at P2 and MOVE to P3 drag with the button held (held to held is a drag, PROTOCOL.md). Lifting
+# the finger, and 2 s of nothing, send no release; the key's lift releases at the last point, P3,
+# which a drag already reached, so it's only an up.
+KEY_PRESS_EXPECTED = [("move", AT_P1), ("down", AT_P1)]
+KEY_DRAG_EXPECTED = [("drag", AT_P2), ("drag", AT_P3)]
+KEY_RELEASE_EXPECTED = [("up", AT_P3)]
+KEY_HOLD_S = 2.0
+TAP_TIMEOUT_S = 0.4
+
 
 class RigFailure(Exception):
     pass
@@ -117,8 +128,8 @@ class Phone:
             raise RigFailure(f"rig command {name} {extras} refused: {result}")
         return result
 
-    def mirror(self, action: str = "state") -> dict:
-        return self.cmd("mirror", action=action)
+    def mirror(self, action: str = "state", **extras: str) -> dict:
+        return self.cmd("mirror", action=action, **extras)
 
     def wait_mirror(self, predicate, what: str, timeout: float = TIMEOUT) -> dict:
         deadline = time.monotonic() + timeout
@@ -362,6 +373,41 @@ def main() -> int:
         round_trips = [us / 1000 for us in state["pingRoundTripUs"]]
         decoded_to_drawn = [us / 1000 for us in state["decodedToDrawnUs"]]
         uptimes.append(("after", host_uptime(), phone.shell("uptime").strip()))
+
+        # 5b. Hover and the left-button key: the key holds the button while a finger drags.
+        phone.mirror("touch-mode", touch="HOVER")
+        phone.wait_mirror(lambda s: s["touchMode"] == "HOVER", "Hover mode")
+        hover, p2, p3 = at(bounds, P1), at(bounds, P2), at(bounds, P3)
+        phone.shell(f"input motionevent DOWN {hover[0]} {hover[1]}; sleep {TAP_TIMEOUT_S + 0.3}; "
+                    f"input motionevent UP {hover[0]} {hover[1]}")
+        time.sleep(0.5)
+        rec.mark()
+        if phone.mirror()["keyHeld"]:
+            raise RigFailure("the key reads held before it was pressed")
+        if not phone.mirror("key-down")["keyHeld"]:
+            raise RigFailure("the key doesn't read held after key-down")
+        check_events("key down after hovering", rec.wait(len(KEY_PRESS_EXPECTED), "key press"), KEY_PRESS_EXPECTED)
+        rec.mark()
+        phone.shell(motions(("DOWN", p2), ("MOVE", p3)))
+        check_events("finger drags with the key held", rec.wait(len(KEY_DRAG_EXPECTED), "held drag"), KEY_DRAG_EXPECTED)
+        rec.mark()
+        time.sleep(KEY_HOLD_S)
+        quiet = [e["kind"] for e in rec.since_mark()]
+        if any(k in ("up", "release") for k in quiet):
+            raise RigFailure(f"key held {KEY_HOLD_S} s with a finger down: recorded {quiet}, expected no release")
+        phone.shell(f"input motionevent UP {p3[0]} {p3[1]}")
+        time.sleep(0.5)
+        after_lift = [e["kind"] for e in rec.since_mark()]
+        if any(k in ("up", "release", "down") for k in after_lift):
+            raise RigFailure(f"finger lifted with the key held: recorded {after_lift}, expected no release or click")
+        if not phone.mirror()["keyHeld"]:
+            raise RigFailure("the key reads released after the finger lifted")
+        rec.mark()
+        if phone.mirror("key-up")["keyHeld"]:
+            raise RigFailure("the key still reads held after key-up")
+        check_events("key up", rec.wait(len(KEY_RELEASE_EXPECTED), "key release"), KEY_RELEASE_EXPECTED)
+        phone.mirror("touch-mode", touch="DIRECT")  # the Home check below is a Direct drag
+        phone.wait_mirror(lambda s: s["touchMode"] == "DIRECT", "Direct mode")
 
         # 4. A held drag is released when Mirror leaves the screen.
         rec.mark()
