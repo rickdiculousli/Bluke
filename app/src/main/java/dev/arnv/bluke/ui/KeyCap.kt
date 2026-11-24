@@ -114,8 +114,8 @@ fun KeyCap(
                 .border(1.dp, KeyCapInk.TopEdge, RoundedCornerShape(innerRadius)),
             contentAlignment = Alignment.Center
         ) {
-            // Every word legend (Shift, Delete, Backspace, F1) shares one size, smaller than a letter;
-            // a legend shrinks below it only when it would not fit its cap at the current font scale.
+            // Word legends (Shift, Delete, Backspace, F1) take a letter's size; a legend shrinks below it
+            // only when it would not fit its cap at the current font scale.
             val fontScale = LocalDensity.current.fontScale
             val topWidth = (width - insetX * 2 - 2.dp).value - (baseUnitWidth.value * 0.16f)
             val topHeight = (height - insetTop - insetBottom - 2.dp).value
@@ -125,10 +125,9 @@ fun KeyCap(
                 return minOf(desired, byWidth, byHeight).coerceAtLeast(3f)
             }
             val letterSize = (baseUnitWidth.value * 0.24f).coerceIn(3f, 13f) * legendScale
-            val desiredMain = if (legend.length > 1) letterSize * WORD_LEGEND_SCALE else letterSize
             val desiredShift = (baseUnitWidth.value * 0.17f).coerceIn(2.5f, 9f) * legendScale
             val stacked = shiftedLegend.isNotEmpty()
-            val mainFontSize = fit(legend, desiredMain, if (stacked) 0.55f else 0.9f).sp
+            val mainFontSize = fit(legend, letterSize, if (stacked) 0.55f else 0.9f).sp
             val shiftFontSize = fit(shiftedLegend, desiredShift, 0.4f).sp
 
             if (shiftedLegend.isNotEmpty()) {
@@ -151,7 +150,7 @@ fun KeyCap(
                     Text(
                         text = shiftedLegend,
                         fontSize = shiftFontSize,
-                        color = legendColor.copy(alpha = 0.82f),
+                        color = legendColor,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.SansSerif,
                         maxLines = 1,
@@ -211,8 +210,6 @@ fun Color.darker(): Color {
     )
 }
 
-/** A word legend's size against a letter's. */
-private const val WORD_LEGEND_SCALE = 0.78f
 /** A bold sans character's average advance, in ems: enough to tell whether a legend fits its cap. */
 private const val LEGEND_EM_WIDTH = 0.56f
 private const val LEGEND_LINE_HEIGHT = 1.2f

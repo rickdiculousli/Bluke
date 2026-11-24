@@ -83,7 +83,7 @@ object Colorways {
         KeyboardLayoutType.OLIVIA_75 to KeyboardPalette(
             bgCode = Color(0xFF242427),
             alphaBg = Color(0xFFE5E1D8),
-            alphaLegend = Color(0xFFC8A392),
+            alphaLegend = Color(0xFF725D53),
             modBg = Color(0xFF1B1B1E),
             modLegend = Color(0xFFC8A392),
             accentBg = Color(0xFFE5C4B4),
@@ -95,7 +95,7 @@ object Colorways {
             alphaBg = Color(0xFF282A36),
             alphaLegend = Color(0xFFF8F8F2),
             modBg = Color(0xFF1E1F29),
-            modLegend = Color(0xFF6272A4),
+            modLegend = Color(0xFF7A87B2),
             accentBg = Color(0xFFFF79C6),
             accentLegend = Color(0xFF14151A),
             layoutTitle = "Dracula"
@@ -127,7 +127,7 @@ object Colorways {
             modBg = Color(0xFFCCCCCC),
             modLegend = Color(0xFF202020),
             accentBg = Color(0xFF5D7B93),
-            accentLegend = Color(0xFFFFFFFF),
+            accentLegend = Color(0xFF000000),
             layoutTitle = "Model M"
         ),
         KeyboardLayoutType.MIZU_65 to KeyboardPalette(
@@ -143,11 +143,11 @@ object Colorways {
         KeyboardLayoutType.LASER_75 to KeyboardPalette(
             bgCode = Color(0xFF1E1330),
             alphaBg = Color(0xFF2F1C75),
-            alphaLegend = Color(0xFF00A2B0),
+            alphaLegend = Color(0xFF0AA6B3),
             modBg = Color(0xFF26204B),
-            modLegend = Color(0xFFCE234E),
+            modLegend = Color(0xFFDE6987),
             accentBg = Color(0xFFCE234E),
-            accentLegend = Color(0xFF26204B),
+            accentLegend = Color(0xFFF2EEFF),
             layoutTitle = "Laser"
         ),
         KeyboardLayoutType.OBLIVION_75 to KeyboardPalette(
@@ -155,9 +155,9 @@ object Colorways {
             alphaBg = Color(0xFFD7D6D2),
             alphaLegend = Color(0xFF4D4D4D),
             modBg = Color(0xFF4D4D4D),
-            modLegend = Color(0xFFB7B2A6),
+            modLegend = Color(0xFFC3BFB5),
             accentBg = Color(0xFFD64827),
-            accentLegend = Color(0xFF2E2E2E),
+            accentLegend = Color(0xFF0A0705),
             layoutTitle = "Oblivion"
         ),
         KeyboardLayoutType.NINE_ZERO_ZERO_NINE_TKL to KeyboardPalette(
@@ -173,9 +173,9 @@ object Colorways {
         KeyboardLayoutType.EIGHT_ZERO_ZERO_EIGHT_65 to KeyboardPalette(
             bgCode = Color(0xFF1D1E22),
             alphaBg = Color(0xFF9BA7B7),
-            alphaLegend = Color(0xFF3F4754),
+            alphaLegend = Color(0xFF343B46),
             modBg = Color(0xFF3F4754),
-            modLegend = Color(0xFFFE588C),
+            modLegend = Color(0xFFFE97B8),
             accentBg = Color(0xFFFE588C),
             accentLegend = Color(0xFF1D1E22),
             layoutTitle = "8008"
