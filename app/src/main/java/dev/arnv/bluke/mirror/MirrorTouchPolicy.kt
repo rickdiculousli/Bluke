@@ -43,7 +43,7 @@ data class MirrorTouchUpdate(
  *   moved [tapSlopPx] or more) clicks at the down point: press, then release. A cancel never clicks.
  * - A second finger that lands outside the image (a thumb resting on the bars beside it) is
  *   ignored until it lifts. One that lands on the image releases a held button, then the fingers'
- *   centroid movement scrolls as Wheel (pixels; fingers moving down give positive dy, scrolling the
+ *   centroid movement scrolls as Wheel, after a `buttons=0` move to the centroid so the computer scrolls under the fingers (pixels; fingers moving down give positive dy, scrolling the
  *   view up) until every finger lifts.
  * - A first finger down outside the image does nothing until every finger lifts.
  * - After the link drops mid-touch ([abandon]), the fingers still down send nothing until every
@@ -135,7 +135,7 @@ class MirrorTouchPolicy(
           newcomers.isEmpty() -> move(g, fit, tracked, out)
           else -> {
             releaseHeld(g, out)
-            gesture = startScroll(active)
+            gesture = startScroll(fit, active, out)
           }
         }
       }
@@ -188,7 +188,7 @@ class MirrorTouchPolicy(
 
   private fun start(fit: MirrorFit, fingers: List<MirrorFinger>, timeMs: Long, out: Out) {
     if (fingers.size > 1) {
-      gesture = startScroll(fingers)
+      gesture = startScroll(fit, fingers, out)
       return
     }
     val f = fingers.single()
@@ -239,8 +239,16 @@ class MirrorTouchPolicy(
     out.messages += MirrorMessage.Pointer(g.last.x, g.last.y, 0)
   }
 
-  private fun startScroll(fingers: List<MirrorFinger>): Gesture.Scroll {
-    return Gesture.Scroll(fingers.map { it.x }.average().toFloat(), fingers.map { it.y }.average().toFloat())
+  /**
+   * Starts a scroll at the fingers' centroid. A Wheel carries no position and the computer
+   * scrolls under its cursor, so the cursor moves there first (`buttons=0`).
+   */
+  private fun startScroll(fit: MirrorFit, fingers: List<MirrorFinger>, out: Out): Gesture.Scroll {
+    val cx = fingers.map { it.x }.average().toFloat()
+    val cy = fingers.map { it.y }.average().toFloat()
+    val at = fit.toNormalizedClamped(cx, cy)
+    out.messages += MirrorMessage.Pointer(at.x, at.y, 0)
+    return Gesture.Scroll(cx, cy)
   }
 
   private fun scroll(g: Gesture.Scroll, fingers: List<MirrorFinger>, out: Out) {

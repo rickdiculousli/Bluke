@@ -116,6 +116,13 @@ sealed interface MirrorNotice {
     data class Streaming(val companionName: String) : MirrorNotice
 }
 
+/**
+ * The notice for a pairing event that may have cost a try: a wrong code only when the tries left
+ * fell from [before] to [after]. A refused request (locked, unavailable) costs none and shows nothing.
+ */
+fun wrongCodeNotice(before: Int, after: Int): MirrorNotice? =
+    if (after < before) MirrorNotice.WrongCode(after) else null
+
 data class MirrorUiState(
     val phase: MirrorPhase = MirrorPhase.Off,
     /** The phone's Wi-Fi address, for `bluke-mirror pair --phone`; null when it has none. */
