@@ -3,7 +3,7 @@ package dev.arnv.bluke.ui
 import android.content.Context
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.Dialpad
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.test.core.app.ApplicationProvider
@@ -14,7 +14,7 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
 
-/** The shared toolbar rendering each [SurfaceHostStatus], one row per status, as every surface shows it. */
+/** The shared toolbar rendering each [SurfaceHostStatus], one row per status, with the keyboard's controls. */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = "w914dp-h411dp-land-420dpi", sdk = [36])
@@ -30,7 +30,12 @@ class SurfaceToolbarScreenshotTest {
     @Config(qualifiers = "w640dp-h360dp-land-xhdpi")
     fun everyHostStatusOnANarrowPhone() = captureHosts("surface-toolbar-host-status-narrow")
 
-    private fun captureHosts(name: String) {
+    /** A portrait phone: the keyboard's three LEDs and sound toggle give way before the host chip does. */
+    @Test
+    @Config(qualifiers = "w411dp-h500dp-port-420dpi")
+    fun everyHostStatusOnAPortraitPhone() = captureHosts("surface-toolbar-host-status-portrait", landscape = false)
+
+    private fun captureHosts(name: String, landscape: Boolean = true) {
         val hosts = listOf(
             SurfaceHost(SurfaceHostStatus.Connected, "Rick's MacBook Pro (Work, 14-inch, 2024)"),
             SurfaceHost(SurfaceHostStatus.Connecting, "Desk PC"),
@@ -38,7 +43,7 @@ class SurfaceToolbarScreenshotTest {
             SurfaceHost(SurfaceHostStatus.Offline, null),
             SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off"),
         )
-        captureMatrix(name = name, landscape = true) {
+        captureMatrix(name = name, landscape = landscape) {
             SurfaceTheme {
                 val haptics = rememberSurfaceHaptics(prefs)
                 Surface(color = MaterialTheme.colorScheme.surface) {
@@ -50,7 +55,7 @@ class SurfaceToolbarScreenshotTest {
                                 onTune = {},
                             ) {
                                 SurfaceToolbarLeds(listOf("CAPS" to (index == 0), "NUM" to true, "SCR" to false), onToggle = {})
-                                SurfaceToolbarIconButton(Icons.Default.Dialpad, "Numpad", onClick = {}, selected = index % 2 == 0)
+                                SurfaceToolbarIconButton(Icons.AutoMirrored.Filled.VolumeUp, "Key sound", onClick = {}, selected = index % 2 == 0)
                             }
                         }
                     }
