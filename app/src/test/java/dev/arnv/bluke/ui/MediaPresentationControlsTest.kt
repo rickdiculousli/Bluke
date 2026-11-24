@@ -5,6 +5,7 @@ import android.view.OrientationEventListener
 import dev.arnv.bluke.bluetooth.ConsumerControl
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
 
 class MediaPresentationControlsTest {
@@ -80,5 +81,12 @@ class MediaPresentationControlsTest {
         assertEquals(MultimediaPosture.LANDSCAPE, stabilizer.update(0, 1_500L))
         assertEquals(MultimediaPosture.LANDSCAPE, stabilizer.update(0, 1_999L))
         assertEquals(MultimediaPosture.PORTRAIT_HELD, stabilizer.update(0, 2_000L))
+    }
+
+    @Test
+    fun everySlideKeyShowsTheKeyItSends() {
+        (presentationActions + pageActions).forEach { action ->
+            assertTrue("${action.description} shows its key", !action.caption.isNullOrBlank())
+        }
     }
 }

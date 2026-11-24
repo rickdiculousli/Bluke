@@ -192,7 +192,7 @@ fun KeyboardTuneContent(
             options.customSoundPacks.map { (id, name) -> KeyboardSound.Custom(id) to name }
         val names = sounds.toMap()
         TuneChoice(
-            label = "Sound pack",
+            label = null,
             options = sounds.map { it.first },
             selected = state.sound,
             optionLabel = { names[it] ?: "" },
@@ -206,22 +206,19 @@ fun KeyboardTuneContent(
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun ThemeChoice(themes: List<KeyboardThemeDefinition>, selectedId: String, onSelect: (String) -> Unit) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        Text("Keycaps", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
-        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            themes.forEach { theme ->
-                val selected = theme.id == selectedId
-                // The check leads when selected, as on every other chip; the swatch always trails.
-                FilterChip(
-                    selected = selected,
-                    onClick = { onSelect(theme.id) },
-                    label = { Text(theme.name) },
-                    leadingIcon = if (selected) {
-                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
-                    } else null,
-                    trailingIcon = { ThemeSwatch(theme) },
-                )
-            }
+    FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        themes.forEach { theme ->
+            val selected = theme.id == selectedId
+            // The check leads when selected, as on every other chip; the swatch always trails.
+            FilterChip(
+                selected = selected,
+                onClick = { onSelect(theme.id) },
+                label = { Text(theme.name) },
+                leadingIcon = if (selected) {
+                    { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
+                } else null,
+                trailingIcon = { ThemeSwatch(theme) },
+            )
         }
     }
 }

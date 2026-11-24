@@ -524,14 +524,14 @@ private class RemoteSender(val btManager: BluetoothKeyboardManager, val haptics:
     }
 }
 
-private sealed interface RemoteOutput {
+internal sealed interface RemoteOutput {
     data class Consumer(val control: ConsumerControl) : RemoteOutput
     data class Key(val keyCode: Int) : RemoteOutput
     data class Mouse(val mask: Int) : RemoteOutput
 }
 
 /** One remote button: what TalkBack calls it, what it shows, and what it sends. */
-private data class RemoteAction(
+internal data class RemoteAction(
     val description: String,
     val output: RemoteOutput,
     val icons: List<ImageVector> = emptyList(),
@@ -579,13 +579,13 @@ private val navigationGrid = listOf(
     ),
 )
 
-private val presentationActions = listOf(
+internal val presentationActions = listOf(
     key("Start slideshow (F5)", KeyboardLayouts.KEY_F5, text = "Start show", caption = "F5"),
     key("Blank the presentation screen (B)", KeyboardLayouts.KEY_B, text = "Blank screen", caption = "B"),
-    key("Back (Backspace)", KeyboardLayouts.KEY_BACKSPACE, text = "Back"),
+    key("Back (Backspace)", KeyboardLayouts.KEY_BACKSPACE, text = "Back", caption = "⌫"),
 )
 
-private val pageActions = listOf(
+internal val pageActions = listOf(
     // What they do on a slide, with the key they send, like the presentation keys' F5 and B.
     key("Page up, previous slide", KeyboardLayouts.KEY_PAGEUP, text = "Prev", caption = "PgUp"),
     key("Page down, next slide", KeyboardLayouts.KEY_PAGEDOWN, text = "Next", caption = "PgDn"),

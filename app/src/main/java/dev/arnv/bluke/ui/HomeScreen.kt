@@ -278,7 +278,7 @@ fun HomeScreen(
             title = { Text("Before using the gamepad") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                    Text("Choose Native for Windows/Linux games, Android for games on Android, or Web when a browser game ignores directions. Tap the controller mode button to switch; hold it to open settings.")
+                    Text("Choose Native for Windows and Linux games, Android for games on Android, or Web when a browser game ignores directions. Change it any time from the profile label between the shoulder buttons, or in Tune.")
                     Text("On Windows, some newer games accept only Xbox XInput controllers. Bluke is a standard Bluetooth HID gamepad, so Steam Input or another compatibility layer may be needed.")
                 }
             },

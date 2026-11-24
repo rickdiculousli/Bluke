@@ -206,6 +206,20 @@ class KeyboardSurfaceTest {
     }
 
     @Test
+    fun aSingleControlSectionIsNamedOnceByItsHeading() {
+        showSurface()
+        compose.onNodeWithTag("surface_tune").performClick()
+        compose.waitForIdle()
+
+        compose.onNode(androidx.compose.ui.test.hasText("Theme") and androidx.compose.ui.test.isHeading()).assertExists()
+        compose.onNode(androidx.compose.ui.test.hasText("Key sound") and androidx.compose.ui.test.isHeading()).assertExists()
+        compose.onNodeWithText("Keycaps").assertDoesNotExist()
+        compose.onNodeWithText("Sound pack").assertDoesNotExist()
+        // Layout holds three choices, so each keeps its own label.
+        compose.onNodeWithText("Geometry").assertExists()
+    }
+
+    @Test
     fun tuneSheetHidesTheKeysFromTalkBack() {
         showSurface()
         compose.onAllNodes(androidx.compose.ui.test.hasTestTag("key_q")).assertCountEquals(1)
