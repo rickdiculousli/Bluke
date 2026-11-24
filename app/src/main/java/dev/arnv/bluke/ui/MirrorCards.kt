@@ -62,6 +62,7 @@ import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
@@ -122,18 +123,28 @@ internal fun QuietLinkChip(state: MirrorUiState) {
 }
 
 /**
- * A live picture over a slow link: which computer, and its link latency, while the latency stays
- * at [SLOW_LINK_MS] or more, so lag a person feels has a cause they can see. A link that stops
- * answering is [QuietLinkChip]'s instead.
+ * A live picture over a slow link: which computer, and its link latency, from when the latency
+ * reaches [SLOW_LINK_MS] until it falls under [SLOW_LINK_CLEAR_MS], so lag a person feels has a
+ * cause they can see and a link wavering at the line doesn't flicker the chip. A link that stops
+ * answering is [QuietLinkChip]'s instead. TalkBack hears it once, as it appears, not each new figure.
  */
 @Composable
 internal fun SlowLinkChip(state: MirrorUiState) {
     val connected = state.phase as? MirrorPhase.Connected
     val latency = state.latencyMs
-    val slow = connected?.hasFrame == true && !state.pictureStale && latency != null && latency >= SLOW_LINK_MS
+    val showing = remember { booleanArrayOf(false) }
+    showing[0] = when {
+        connected?.hasFrame != true || state.pictureStale || latency == null -> false
+        showing[0] -> latency >= SLOW_LINK_CLEAR_MS
+        else -> latency >= SLOW_LINK_MS
+    }
+    val slow = showing[0]
     // What fades out is what was last shown.
-    val last = remember { arrayOf<String?>(null) }
-    if (slow) last[0] = "Slow link · $latency ms · ${connected?.companionName}"
+    val last = remember { arrayOf<String?>(null, null) }
+    if (slow) {
+        last[0] = "Slow link · $latency ms · ${connected?.companionName}"
+        last[1] = "Slow link to ${connected?.companionName}"
+    }
     AnimatedVisibility(
         visible = slow,
         enter = fadeIn(EffectsSpring) + expandVertically(SpatialSizeSpring),
@@ -146,7 +157,10 @@ internal fun SlowLinkChip(state: MirrorUiState) {
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh)
                 .heightIn(min = 40.dp)
                 .padding(horizontal = 16.dp, vertical = 8.dp)
-                .semantics { liveRegion = LiveRegionMode.Polite }
+                .clearAndSetSemantics {
+                    contentDescription = last[1].orEmpty()
+                    liveRegion = LiveRegionMode.Polite
+                }
                 .testTag("mirror_slow_link"),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
@@ -170,6 +184,9 @@ internal fun SlowLinkChip(state: MirrorUiState) {
 
 /** Link latency from which the surface says the link is slow: past it, a drag visibly trails the finger. */
 internal const val SLOW_LINK_MS = 100
+
+/** Link latency under which a slow link reads recovered. */
+internal const val SLOW_LINK_CLEAR_MS = 80
 
 /**
  * A pairing request that arrives while a picture is live: a chip above the picture says who asks,

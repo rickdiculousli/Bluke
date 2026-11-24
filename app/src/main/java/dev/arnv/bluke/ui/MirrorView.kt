@@ -314,13 +314,14 @@ fun MirrorSurface(
             )
         }
         // The notice stacks above the status card, so neither covers the other; the column has
-        // no pointer input, so touches outside them reach the picture. It starts right of the controls.
+        // no pointer input, so touches outside them reach the picture. It keeps clear of the controls.
         Column(
             modifier = Modifier
                 .fillMaxSize()
                 .then(underEditor)
                 .windowInsetsPadding(MirrorControlsInsets.union(WindowInsets.displayCutout.only(WindowInsetsSides.End)))
-                .padding(start = MIRROR_CONTROLS_WIDTH + 24.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+                // As far from the right edge as from the left, so the cards centre on the picture they dim.
+                .padding(horizontal = MIRROR_CONTROLS_WIDTH + 24.dp, vertical = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
                 MirrorNoticePill(
@@ -363,7 +364,10 @@ fun MirrorSurface(
                     // No live link: the key reads disabled, and a press says so by feel.
                     down && !live -> haptics.reject()
                     // Pressed before the pointer has gone anywhere this session: nowhere to press.
-                    down && !state.keyHeld -> hint = MirrorNotice.KeyNeedsPointer
+                    down && !state.keyHeld -> {
+                        haptics.reject()
+                        hint = MirrorNotice.KeyNeedsPointer
+                    }
                 }
             },
             onHotkey = { hotkey, down ->

@@ -51,7 +51,7 @@ import org.robolectric.annotation.GraphicsMode
  * 360dp-high phone, in the dark scheme the surface host wraps every input surface in, at font scale
  * 1.0, 1.3 and 2.0, with long and emoji computer names; the left-hand overlay over a light and a
  * dark picture, in Direct and Hover, with the key held, with 0, 3 and 8 hotkeys, with them disabled,
- * the two hints, the hotkey pager and the hotkey editor, at 1.0 and 1.3; plus the touch ring on the
+ * the two hints, the hotkey pager and the hotkey editor (at 2.0 too), at 1.0 and 1.3; plus the touch ring on the
  * first frame of a press, the ⋮ menu open, and the hotkeys' second page.
  */
 @RunWith(RobolectricTestRunner::class)
@@ -248,9 +248,10 @@ class MirrorScreenshotTest {
 
     private data class Shot(val name: String, val case: Case, val fontScale: Float)
 
+    /** Every state, plus the overlay's cases [withOverlay]; the editor, a text-heavy pane, at every scale. */
     private fun shots(fontScale: Float, withOverlay: Boolean): List<Shot> =
         states.map { (name, state) -> Shot(name, Case(state), fontScale) } +
-            if (withOverlay) overlay.map { (name, case) -> Shot(name, case, fontScale) } else emptyList()
+            overlay.filter { (name, _) -> withOverlay || name.startsWith("editor-") }.map { (name, case) -> Shot(name, case, fontScale) }
 
     @Test
     fun fontScale1() = captureAll(shots(1f, withOverlay = true))

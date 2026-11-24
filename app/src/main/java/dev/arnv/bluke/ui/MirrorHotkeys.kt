@@ -36,7 +36,7 @@ enum class MirrorKeyGroup { LETTERS, DIGITS, FUNCTION, NAVIGATION, MODIFIERS }
 /**
  * The keys the editor lists: A-Z, 0-9 (1..9 then 0), F1-F12, Esc, Tab, Space, Enter, Backspace, the four arrows,
  * and the left Ctrl, Shift, Alt, Cmd/Win keys as keys of their own.
- * Names: "A", "1", "F5", "Esc", "Tab", "Space", "Enter", "⌫", "↑" "↓" "←" "→", "Ctrl", "Shift", "Alt", "Cmd".
+ * Names: "A", "1", "F5", "Esc", "Tab", "Space", "Enter", "⌫", "↑" "↓" "←" "→", "Ctrl", "Shift", "Alt", "Cmd/Win".
  */
 val MIRROR_HOTKEY_KEYS: List<MirrorKeyChoice> = buildList {
     for (i in 0 until 26) {
@@ -57,7 +57,7 @@ val MIRROR_HOTKEY_KEYS: List<MirrorKeyChoice> = buildList {
     add(MirrorKeyChoice(KeyboardLayouts.MOD_LCTRL, "Ctrl", MirrorKeyGroup.MODIFIERS))
     add(MirrorKeyChoice(KeyboardLayouts.MOD_LSHIFT, "Shift", MirrorKeyGroup.MODIFIERS))
     add(MirrorKeyChoice(KeyboardLayouts.MOD_LALT, "Alt", MirrorKeyGroup.MODIFIERS))
-    add(MirrorKeyChoice(KeyboardLayouts.MOD_LWIN, "Cmd", MirrorKeyGroup.MODIFIERS))
+    add(MirrorKeyChoice(KeyboardLayouts.MOD_LWIN, "Cmd/Win", MirrorKeyGroup.MODIFIERS))
 }
 
 private val keyNames: Map<Int, String> = MIRROR_HOTKEY_KEYS.associate { it.keyCode to it.name }
@@ -78,7 +78,7 @@ private val modifierWords = listOf(
     HotkeyModifiers.CTRL to "Control",
     HotkeyModifiers.ALT to "Alt",
     HotkeyModifiers.SHIFT to "Shift",
-    HotkeyModifiers.GUI to "Command",
+    HotkeyModifiers.GUI to "Command or Windows",
 )
 
 private val spokenKeyNames = mapOf(
@@ -91,7 +91,7 @@ private val spokenKeyNames = mapOf(
     KeyboardLayouts.MOD_LCTRL to "Control",
     KeyboardLayouts.MOD_LSHIFT to "Shift",
     KeyboardLayouts.MOD_LALT to "Alt",
-    KeyboardLayouts.MOD_LWIN to "Command",
+    KeyboardLayouts.MOD_LWIN to "Command or Windows",
 )
 
 private fun String?.cleanLabel(): String? =

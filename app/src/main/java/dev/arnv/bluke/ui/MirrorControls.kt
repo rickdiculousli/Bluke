@@ -86,6 +86,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.DpOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import dev.arnv.bluke.mirror.MirrorPhase
@@ -215,7 +216,8 @@ internal fun MirrorControls(
             }
             if (state.touchMode == MirrorTouchMode.HOVER) {
                 LeftButtonKey(state.keyHeld, enabled = live, bounds, onKey)
-            } else {
+            } else if (hotkeys.list.isNotEmpty()) {
+                // Held for the key, so no hotkey moves when the mode changes.
                 Spacer(Modifier.height(KEY_HEIGHT))
             }
             HotkeyGrid(hotkeys, hotkeyRows, bounds, haptics, onHotkey, onHotkeysUnavailable, onEditHotkeys)
@@ -330,7 +332,8 @@ private fun TouchModeCell(mode: MirrorTouchMode, bounds: MirrorControlBounds, on
             .clickable(role = Role.Button, onClick = onToggle)
             .testTag("mirror_touch_mode_btn")
             .clearAndSetSemantics {
-                contentDescription = "Touch mode: $label, $meaning"
+                contentDescription = "Touch mode"
+                stateDescription = "$label, $meaning"
                 role = Role.Button
                 onClick("Switch to $other") {
                     onToggle()
@@ -378,16 +381,31 @@ private fun MenuCell(
 ) {
     var menuOpen by remember { mutableStateOf(false) }
     Box {
+        // While a picture is live, the link's latency stays in view on the menu's own cell.
+        val live = (state.phase as? MirrorPhase.Connected)?.hasFrame == true && state.latencyMs != null
+        val readout = state.readout()
         ControlFace(
             Modifier.size(CELL).controlBounds(bounds, "menu"),
             input = Modifier
                 .clickable(role = Role.Button, onClick = { menuOpen = true })
-                .semantics(mergeDescendants = true) { contentDescription = "More Mirror options" }
+                .semantics(mergeDescendants = true) {
+                    contentDescription = "More Mirror options"
+                    if (live) stateDescription = readout.description
+                }
                 .testTag("mirror_menu_btn"),
         ) {
-            Icon(Icons.Default.MoreVert, contentDescription = null, modifier = Modifier.size(ICON))
+            if (live) {
+                GlyphAndLabel(readout.latency) { Icon(Icons.Default.MoreVert, contentDescription = null, modifier = Modifier.size(ICON_SMALL)) }
+            } else {
+                Icon(Icons.Default.MoreVert, contentDescription = null, modifier = Modifier.size(ICON))
+            }
         }
-        DropdownMenu(expanded = menuOpen, onDismissRequest = { menuOpen = false }) {
+        // Opens beside the column, level with its cell, so it covers the picture rather than the controls.
+        DropdownMenu(
+            expanded = menuOpen,
+            onDismissRequest = { menuOpen = false },
+            offset = DpOffset(CELL + GAP, -CELL),
+        ) {
             val paired = state.pairedName
             val connected = state.phase as? MirrorPhase.Connected
             val status = when {
@@ -423,7 +441,7 @@ private fun MenuCell(
             }
             Text(
                 text = hotkeys.hostName?.takeIf { hotkeys.enabled }?.let { "Hotkeys go to $it over Bluetooth" }
-                    ?: "Hotkeys need Bluetooth connected to a host",
+                    ?: "Connect Bluetooth to ${hotkeys.hostName ?: "a host"} to use hotkeys",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 modifier = Modifier
@@ -571,7 +589,7 @@ private fun AddHotkeyCell(bounds: MirrorControlBounds, onEdit: () -> Unit) {
             .semantics(mergeDescendants = true) { contentDescription = "Add a hotkey button" }
             .testTag("mirror_add_hotkey"),
     ) {
-        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(ICON))
+        GlyphAndLabel("Keys") { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(ICON_SMALL)) }
     }
 }
 
@@ -657,12 +675,12 @@ private fun HotkeyCell(
         active = down && enabled,
         enabled = enabled,
     ) {
-        Text(
+        HotkeyText(
             label,
             style = style.first,
             maxLines = style.second,
-            overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
+            breakable = true,
             modifier = Modifier.padding(horizontal = LABEL_INSET),
         )
     }
@@ -673,12 +691,12 @@ private fun HotkeyCell(
 internal fun MirrorHotkeyFace(label: String) {
     val style = hotkeyLabelStyle(label)
     ControlFace(Modifier.size(CELL), input = Modifier) {
-        Text(
+        HotkeyText(
             label,
             style = style.first,
             maxLines = style.second,
-            overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
+            breakable = true,
             modifier = Modifier.padding(horizontal = LABEL_INSET),
         )
     }
@@ -700,7 +718,15 @@ private fun fitsInCell(text: String, style: TextStyle, maxLines: Int, width: Dp 
     val density = LocalDensity.current
     return remember(text, style, maxLines, width, height, density) {
         with(density) {
-            val result = measurer.measure(text, style, maxLines = maxLines, constraints = Constraints(maxWidth = width.roundToPx()))
+            // Measured as drawn: a modifier glyph takes its icon's room, not the fallback font's.
+            val drawn = hotkeyLabelText(text, breakable = true)
+            val result = measurer.measure(
+                text = drawn,
+                style = style,
+                maxLines = maxLines,
+                placeholders = glyphPlaceholders(drawn),
+                constraints = Constraints(maxWidth = width.roundToPx()),
+            )
             !result.hasVisualOverflow && result.size.height <= height.roundToPx()
         }
     }

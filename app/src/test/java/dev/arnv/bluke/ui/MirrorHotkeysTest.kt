@@ -149,7 +149,7 @@ class MirrorHotkeysTest {
     fun keyListNamesAndNoDuplicates() {
         assertEquals(26 + 10 + 12 + 9 + 4, MIRROR_HOTKEY_KEYS.size)
         assertEquals(MIRROR_HOTKEY_KEYS.size, MIRROR_HOTKEY_KEYS.map { it.keyCode }.toSet().size)
-        assertEquals("Cmd", hotkeyKeyName(KeyboardLayouts.MOD_LWIN))
+        assertEquals("Cmd/Win", hotkeyKeyName(KeyboardLayouts.MOD_LWIN))
         assertEquals("⌫", hotkeyKeyName(KeyboardLayouts.KEY_BACKSPACE))
         assertEquals("0", hotkeyKeyName(KeyboardLayouts.KEY_0))
     }

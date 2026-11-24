@@ -7,6 +7,7 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -18,6 +19,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -52,29 +54,32 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
- * The modifiers a hotkey can carry: the glyph its button face shows, and the modifier key whose
- * name the key list uses too, so one modifier reads the same everywhere.
+ * The modifiers a hotkey can carry, in the order a button face writes them (⌃⌥⇧⌘): the glyph the
+ * face shows, and the modifier key whose name the key list uses too, so one modifier reads the
+ * same everywhere.
  */
 private val MODIFIER_CHOICES = listOf(
-    Triple(HotkeyModifiers.CTRL, "⌃", KeyboardLayouts.MOD_LCTRL),
-    Triple(HotkeyModifiers.SHIFT, "⇧", KeyboardLayouts.MOD_LSHIFT),
-    Triple(HotkeyModifiers.ALT, "⌥", KeyboardLayouts.MOD_LALT),
-    Triple(HotkeyModifiers.GUI, "⌘", KeyboardLayouts.MOD_LWIN),
+    Triple(HotkeyModifiers.CTRL, '⌃', KeyboardLayouts.MOD_LCTRL),
+    Triple(HotkeyModifiers.ALT, '⌥', KeyboardLayouts.MOD_LALT),
+    Triple(HotkeyModifiers.SHIFT, '⇧', KeyboardLayouts.MOD_LSHIFT),
+    Triple(HotkeyModifiers.GUI, '⌘', KeyboardLayouts.MOD_LWIN),
 )
 
-private enum class AddBy(val label: String) { KEY("Choose a key"), CHARACTER("Type a character") }
+private enum class AddBy(val label: String) { KEY("By key"), CHARACTER("By character") }
 
 /** The button being made: how, its modifiers, and the key or character so far. */
 @Stable
@@ -158,7 +163,7 @@ internal fun MirrorHotkeyEditor(
                             enabled = adding != null,
                             modifier = Modifier.testTag("mirror_hotkey_add"),
                         ) {
-                            Text(adding?.let { "Add ${it.displayLabel}" } ?: "Add", maxLines = 1)
+                            HotkeyText(adding?.let { "Add ${it.displayLabel}" } ?: "Add")
                         }
                     }
                     TextButton(onClick = onDone, modifier = Modifier.testTag("mirror_hotkey_editor_done")) {
@@ -166,17 +171,9 @@ internal fun MirrorHotkeyEditor(
                     }
                 }
                 Row(Modifier.weight(1f).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                    // A full list takes the whole width; there's nothing to add beside it.
                     ButtonList(hotkeys, onChange, Modifier.weight(1f))
-                    if (full) {
-                        Text(
-                            "Remove a button to add another.",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.weight(1f).padding(top = 4.dp),
-                        )
-                    } else {
-                        NewButton(draft, typingLayout, Modifier.weight(1f))
-                    }
+                    if (!full) NewButton(draft, typingLayout, Modifier.weight(1f))
                 }
             }
         }
@@ -196,6 +193,14 @@ private fun ButtonList(hotkeys: List<MirrorHotkey>, onChange: (List<MirrorHotkey
             .padding(end = SCROLL_GUTTER),
     ) {
         SectionLabel("Your buttons")
+        if (hotkeys.size >= MAX_MIRROR_HOTKEYS) {
+            Text(
+                "All $MAX_MIRROR_HOTKEYS in use. Remove one to add another.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+        }
         if (hotkeys.isEmpty()) {
             Text(
                 "No buttons yet. Choose a key on the right, then Add.",
@@ -264,24 +269,29 @@ private fun NewButton(draft: NewHotkey, typingLayout: KeyboardCharacterLayout, m
                 )
             }
         }
-        FlowRow(
-            Modifier.padding(top = 4.dp),
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            MODIFIER_CHOICES.forEach { (bit, glyph, keyCode) ->
-                val name = hotkeyKeyName(keyCode)
-                FilterChip(
-                    selected = draft.modifiers and bit != 0,
-                    onClick = { draft.modifiers = draft.modifiers xor bit },
-                    label = {
-                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            // The glyph the button's face will show; TalkBack reads the name.
-                            Text(glyph, maxLines = 1, modifier = Modifier.clearAndSetSemantics {})
-                            Text(name, maxLines = 1)
-                        }
-                    },
-                    modifier = Modifier.testTag("mirror_modifier_$name"),
-                )
+        BoxWithConstraints(Modifier.padding(top = 4.dp)) {
+            // Names, as the key list writes them, while all four fit one line; the glyph the face
+            // shows once large text can't, so the keys below keep their height. TalkBack reads the
+            // name either way.
+            val named = modifierNamesFit(maxWidth)
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                MODIFIER_CHOICES.forEach { (bit, glyph, keyCode) ->
+                    val name = hotkeyKeyName(keyCode)
+                    FilterChip(
+                        selected = draft.modifiers and bit != 0,
+                        onClick = { draft.modifiers = draft.modifiers xor bit },
+                        label = {
+                            if (named) {
+                                Text(name, maxLines = 1)
+                            } else {
+                                Icon(MODIFIER_GLYPH_ICONS.getValue(glyph), contentDescription = null, modifier = Modifier.size(GLYPH))
+                            }
+                        },
+                        modifier = Modifier
+                            .testTag("mirror_modifier_$name")
+                            .semantics { if (!named) contentDescription = name },
+                    )
+                }
             }
         }
         Column(
@@ -348,6 +358,22 @@ private val MirrorKeyGroup.title: String
         MirrorKeyGroup.MODIFIERS -> "Modifiers on their own"
     }
 
+/** Whether the four modifier chips fit [width] on one line with their names. */
+@Composable
+private fun modifierNamesFit(width: Dp): Boolean {
+    val measurer = rememberTextMeasurer()
+    val style = MaterialTheme.typography.labelLarge
+    val density = LocalDensity.current
+    return remember(width, style, density) {
+        with(density) {
+            val names = MODIFIER_CHOICES.sumOf { measurer.measure(hotkeyKeyName(it.third), style).size.width }
+            // Each chip's padding around its name, then the gaps between chips.
+            val chrome = (CHIP_CHROME * MODIFIER_CHOICES.size + 8.dp * (MODIFIER_CHOICES.size - 1)).roundToPx()
+            names + chrome <= width.roundToPx()
+        }
+    }
+}
+
 @Composable
 private fun SectionLabel(text: String) {
     Text(
@@ -382,3 +408,9 @@ private fun KeyChoice(choice: MirrorKeyChoice, selected: Boolean, onClick: () ->
 
 /** Room at a scrolling column's end for its scroll cue's thumb, clear of the controls. */
 private val SCROLL_GUTTER = 16.dp
+
+/** A modifier glyph in a chip. */
+private val GLYPH = 18.dp
+
+/** A modifier chip around its name: its padding on each side, measured from the chips as drawn. */
+private val CHIP_CHROME = 32.dp
