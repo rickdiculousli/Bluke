@@ -179,7 +179,7 @@ fun ConnectionUi.card(): ConnectionCard = when (this) {
         )
         BlockReason.NO_HID_ROLE -> ConnectionCard(
             "This phone can't act as a keyboard",
-            "Its Bluetooth firmware doesn't offer the HID Device role Bluke needs. " +
+            "Its Bluetooth firmware doesn't let apps act as a keyboard or mouse. " +
                 "Turn Bluetooth off and on, then retry before giving up.",
             StatusTone.PROBLEM, busy = false, primary = ConnectionAction.RetryCheck, secondary = ConnectionAction.Help,
         )
@@ -237,7 +237,7 @@ private fun ConnectionUi.Failed.failedCard(): ConnectionCard {
             if (whilePairing) {
                 "Look for a pairing prompt on both devices and accept it."
             } else {
-                "Check that $name is on and nearby. If it's stuck, cancel and try again."
+                "Check that it's on and nearby. If it's stuck, cancel and try again."
             },
             StatusTone.WORKING, busy = true, primary = ConnectionAction.Cancel, secondary = ConnectionAction.Help,
         )
@@ -310,7 +310,7 @@ fun ConnectionUi.surfaceHost(): SurfaceHostInfo = when (this) {
 }
 
 /** How one host's row reads, from the same state the card reads, never from status text. */
-enum class HostRowState { IDLE, WORKING, CONNECTED, FAILED }
+enum class HostRowState { IDLE, LAST_USED, WORKING, CONNECTED, FAILED }
 
 fun ConnectionUi.rowState(address: String): HostRowState = when {
     this is ConnectionUi.Connected && host.address == address -> HostRowState.CONNECTED
@@ -319,5 +319,7 @@ fun ConnectionUi.rowState(address: String): HostRowState = when {
     this is ConnectionUi.Pairing && host.address == address -> HostRowState.WORKING
     this is ConnectionUi.Failed && host?.address == address ->
         if (reason == FailReason.STALLED) HostRowState.WORKING else HostRowState.FAILED
+    // The card already offers Reconnect for this host, so its row doesn't offer it again.
+    this is ConnectionUi.Ready && reconnectHost?.address == address -> HostRowState.LAST_USED
     else -> HostRowState.IDLE
 }

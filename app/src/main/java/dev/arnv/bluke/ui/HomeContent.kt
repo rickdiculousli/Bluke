@@ -52,6 +52,8 @@ import androidx.compose.ui.hapticfeedback.HapticFeedback
 import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.platform.LocalView
+import androidx.compose.ui.platform.LocalConfiguration
+import androidx.compose.material3.HorizontalDivider
 import android.view.HapticFeedbackConstants
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -178,79 +180,97 @@ private fun ModeDock(
     onLaunch: (InputMode) -> Unit,
     onModeSettings: (InputMode) -> Unit,
 ) {
-    val view = LocalView.current
-    Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth().testTag("mode_dock")) {
-    Box(contentAlignment = Alignment.TopCenter) {
-    Column(
-        modifier = Modifier
-            .widthIn(max = 640.dp)
-            .navigationBarsPadding()
-            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(8.dp),
-    ) {
-        Text(
-            "Use this phone as",
-            style = MaterialTheme.typography.labelLarge,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.padding(start = 4.dp).semantics { heading() },
-        )
-        InputMode.entries.chunked(2).forEach { row ->
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                row.forEach { mode ->
-                    // The pressed tone snaps on with the finger, the same frame, with no animation in the way.
-                    val interaction = remember { MutableInteractionSource() }
-                    val pressed by interaction.collectIsPressedAsState()
-                    // The haptic lands with the pressed tone, on touch-down; the launch still waits for the tap.
-                    LaunchedEffect(interaction, hapticsEnabled) {
-                        interaction.interactions.collect {
-                            if (it is PressInteraction.Press && hapticsEnabled) view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+    // A short window (a landscape phone, a split screen) gets one row of four, so the card keeps its room.
+    val compactHeight = LocalConfiguration.current.screenHeightDp < 600
+    Surface(color = MaterialTheme.colorScheme.surface, modifier = Modifier.fillMaxWidth().testTag("mode_dock")) {
+        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+            HorizontalDivider()
+            Column(
+                modifier = Modifier
+                    .widthIn(max = 640.dp)
+                    .navigationBarsPadding()
+                    .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
+            ) {
+                Text(
+                    "Use this phone as",
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(start = 4.dp).semantics { heading() },
+                )
+                InputMode.entries.chunked(if (compactHeight) 4 else 2).forEach { row ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        row.forEach { mode ->
+                            ModeTile(mode, compactHeight, hapticsEnabled, onLaunch, onModeSettings, Modifier.weight(1f))
                         }
-                    }
-                    Surface(
-                        shape = MaterialTheme.shapes.large,
-                        color = if (pressed) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLowest,
-                        contentColor = if (pressed) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
-                        modifier = Modifier
-                            .weight(1f)
-                            .heightIn(min = 64.dp)
-                            .testTag("mode_tile_${mode.preferenceKey}"),
-                    ) {
-                        Row(
-                            modifier = Modifier
-                                .combinedClickable(
-                                    interactionSource = interaction,
-                                    indication = ripple(),
-                                    role = Role.Button,
-                                    onClickLabel = "Open ${mode.displayName}",
-                                    onLongClickLabel = "Choose which modes the switch button cycles",
-                                    onLongClick = { onModeSettings(mode) },
-                                    onClick = { onLaunch(mode) },
-                                )
-                                .heightIn(min = 64.dp)
-                                .padding(horizontal = 16.dp, vertical = 12.dp),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                            verticalAlignment = Alignment.CenterVertically,
-                        ) {
-                            Icon(
-                                mode.icon,
-                                contentDescription = null,
-                                tint = if (pressed) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(24.dp),
-                            )
-                            Text(
-                                mode.displayName,
-                                style = MaterialTheme.typography.titleMedium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                            )
-                        }
+                        if (!compactHeight && row.size == 1) Spacer(Modifier.weight(1f))
                     }
                 }
-                if (row.size == 1) Spacer(Modifier.weight(1f))
             }
         }
     }
+}
+
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun ModeTile(
+    mode: InputMode,
+    stacked: Boolean,
+    hapticsEnabled: Boolean,
+    onLaunch: (InputMode) -> Unit,
+    onModeSettings: (InputMode) -> Unit,
+    modifier: Modifier,
+) {
+    val view = LocalView.current
+    val scheme = MaterialTheme.colorScheme
+    // The pressed tone snaps on with the finger, the same frame, with no animation in the way.
+    val interaction = remember { MutableInteractionSource() }
+    val pressed by interaction.collectIsPressedAsState()
+    // The haptic lands with the pressed tone, on touch-down; the launch still waits for the tap.
+    LaunchedEffect(interaction, hapticsEnabled) {
+        interaction.interactions.collect {
+            if (it is PressInteraction.Press && hapticsEnabled) view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+        }
     }
+    Surface(
+        shape = MaterialTheme.shapes.large,
+        color = if (pressed) scheme.secondary else scheme.surfaceContainerHighest,
+        contentColor = if (pressed) scheme.onSecondary else scheme.onSurface,
+        modifier = modifier
+            .heightIn(min = 64.dp)
+            .testTag("mode_tile_${mode.preferenceKey}"),
+    ) {
+        val click = Modifier
+            .combinedClickable(
+                interactionSource = interaction,
+                indication = ripple(),
+                role = Role.Button,
+                onClickLabel = "Open ${mode.displayName}",
+                onLongClickLabel = "Choose which modes the switch button cycles",
+                onLongClick = { onModeSettings(mode) },
+                onClick = { onLaunch(mode) },
+            )
+            .heightIn(min = 64.dp)
+        val tint = if (pressed) scheme.onSecondary else scheme.onSurfaceVariant
+        if (stacked) {
+            Column(
+                modifier = click.padding(horizontal = 8.dp, vertical = 8.dp),
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
+            ) {
+                Icon(mode.icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+                Text(mode.displayName, style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        } else {
+            Row(
+                modifier = click.padding(horizontal = 16.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Icon(mode.icon, contentDescription = null, tint = tint, modifier = Modifier.size(24.dp))
+                Text(mode.displayName, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+        }
     }
 }
 

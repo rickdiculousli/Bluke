@@ -144,8 +144,8 @@ internal fun ConnectionCard(
     ) {
         Column(
             modifier = Modifier
-                .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)
-                .animateContentSize(spring(stiffness = Spring.StiffnessMedium)),
+                .animateContentSize(spring(stiffness = Spring.StiffnessMedium))
+                .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp),
         ) {
             Row(verticalAlignment = Alignment.Top) {
                 StatusBadge(connection.icon(), card.tone, card.busy, container)
@@ -240,7 +240,8 @@ private fun PrimaryActionButton(
             OutlinedButton(
                 onClick = { onAction(action) },
                 modifier = buttonModifier,
-                border = BorderStroke(1.dp, scheme.outline),
+                // The card's own on-colour: `outline` falls under 3:1 on the tinted cards in dark.
+                border = BorderStroke(1.dp, cardColors(tone).content),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = cardColors(tone).content),
             ) { label() }
         tone == StatusTone.PROBLEM -> Button(
@@ -291,7 +292,7 @@ private fun CardDetails(
             if (connection.offersRestartInDetails) {
                 OutlinedButton(
                     onClick = { onAction(ConnectionAction.RestartHid) },
-                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
+                    border = BorderStroke(1.dp, content),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = content),
                     modifier = Modifier.heightIn(min = 48.dp),
                 ) {

@@ -155,12 +155,13 @@ private fun HostRow(
     onConnect: () -> Unit,
 ) {
     val likely = isLikelyHost(host)
-    val clickable = likely && (state == HostRowState.IDLE || state == HostRowState.FAILED)
+    val clickable = likely && (state == HostRowState.IDLE || state == HostRowState.FAILED || state == HostRowState.LAST_USED)
     val scheme = MaterialTheme.colorScheme
     val supporting = when (state) {
         HostRowState.CONNECTED -> "Connected"
         HostRowState.WORKING -> if (host.bonded) "Connecting…" else "Pairing…"
         HostRowState.FAILED -> "Couldn't connect"
+        HostRowState.LAST_USED -> "Last used"
         HostRowState.IDLE -> if (!likely) "Unlikely to accept a keyboard" else host.type.displayName
     }
     Surface(
@@ -231,7 +232,9 @@ private fun HostRow(
                 HostRowState.CONNECTED -> Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(24.dp))
                 HostRowState.WORKING -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                 HostRowState.FAILED -> ConnectPill("Try again")
-                HostRowState.IDLE -> if (likely) ConnectPill("Connect")
+                // A paired accessory (earbuds, a watch) stays listed and tappable, but isn't advertised as a host.
+                HostRowState.IDLE -> if (likely && (host.type.isSupported || host.hidCapable)) ConnectPill("Connect")
+                HostRowState.LAST_USED -> Unit
             }
         }
     }

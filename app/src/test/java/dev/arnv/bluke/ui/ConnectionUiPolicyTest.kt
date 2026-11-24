@@ -143,6 +143,8 @@ class ConnectionUiPolicyTest {
         assertEquals(HostRowState.WORKING, ui(target = ipad.address).rowState(ipad.address))
         val refused = ui(failure = LastConnectionFailure(ConnectionFailure.CONNECTION_REJECTED, mac.address))
         assertEquals(HostRowState.FAILED, refused.rowState(mac.address))
+        // The card offers Reconnect for the last host, so its row doesn't repeat it.
+        assertEquals(HostRowState.LAST_USED, ui(reconnect = mac.address).rowState(mac.address))
     }
 
     @Test
