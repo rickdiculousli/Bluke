@@ -66,6 +66,14 @@ DRAG_EXPECTED = [
     ("drag", AT_P2),
     ("up", AT_P2),
 ]
+# DOWN P1, held still for HOLD_S while the synthetic screen changes every frame, UP P1. The
+# companion releases a held button after 1 s with nothing from the phone's touch side; FrameAcks
+# don't count, so only the phone's Heartbeat keeps it held: no up may come before the lift.
+HOLD_S = 2.0
+HOLD_EXPECTED = [
+    ("move", AT_P1), ("down", AT_P1),
+    ("up", AT_P1),
+]
 # DOWN P0, MOVE P3, then Home while held. Leaving the screen cancels the touch before the
 # surface's ON_STOP, and the phone ends a cancelled touch by releasing at its last point (never a
 # click): the up, with no drag since the point didn't move. The Release that ON_STOP sends next
@@ -255,8 +263,8 @@ def quantiles(samples_ms: list[float]) -> dict:
     return {"count": len(s), "p50": pick(0.5), "p95": pick(0.95), "max": s[-1] if s else 0.0}
 
 
-def fmt(q: dict) -> str:
-    return f"count {q['count']:>5}  p50 {q['p50']:7.3f}  p95 {q['p95']:7.3f}  max {q['max']:7.3f} ms"
+def row(label: str, q: dict) -> str:
+    return f"{label:<40} {q['count']:>5} {q['p50']:8.3f} {q['p95']:8.3f} {q['max']:8.3f}"
 
 
 # ---------------------------------------------------------------------------- the run
@@ -316,6 +324,22 @@ def main() -> int:
         phone.shell(motions(*drag))
         check_events("drag", rec.wait(len(DRAG_EXPECTED), "drag"), DRAG_EXPECTED)
 
+        # 3b. A press held still while frames flow stays held until the finger lifts.
+        rec.mark()
+        decoded_before = phone.mirror()["framesDecoded"]
+        hold = at(bounds, P1)
+        phone.shell(f"input motionevent DOWN {hold[0]} {hold[1]}")
+        time.sleep(HOLD_S)
+        while_held = [e["kind"] for e in rec.since_mark()]
+        decoded_during = phone.mirror()["framesDecoded"] - decoded_before
+        phone.shell(f"input motionevent UP {hold[0]} {hold[1]}")
+        if while_held != ["move", "down"]:
+            raise RigFailure(f"press held still {HOLD_S} s: recorded {while_held} before the lift, expected only move, down")
+        if decoded_during < 10:
+            raise RigFailure(f"press held still {HOLD_S} s: only {decoded_during} frames decoded meanwhile; the screen should change every frame")
+        check_events(f"press held still {HOLD_S} s ({decoded_during} frames meanwhile)",
+                     rec.wait(len(HOLD_EXPECTED), "held press"), HOLD_EXPECTED)
+
         # 5 (before 4, which closes Mirror). Timing: RUNS more drags, then read the phone's numbers.
         print(f"timing: {RUNS} drags")
         batch = 10
@@ -328,6 +352,7 @@ def main() -> int:
                                   timeout=RUNS * 1.5 + 30)
         event_to_touch = [us / 1000 for us in state["eventToTouchUs"]]
         touch_to_flush = [us / 1000 for us in state["touchToFlushUs"]]
+        event_to_flush = [us / 1000 for us in state["eventToFlushUs"]]
         round_trips = [us / 1000 for us in state["pingRoundTripUs"]]
 
         # 4. A held drag is released when Mirror leaves the screen.
@@ -346,14 +371,16 @@ def main() -> int:
         if forwarded:
             subprocess.run(phone.adb + ["forward", "--remove", f"tcp:{forwarded}"], capture_output=True)
 
-    # Composition. The components aren't measured per touch, so touch -> inject adds the four
-    # components' own quantiles: its p95 and max are upper bounds on the pipeline's.
+    # Composition. The phone's share is measured per Pointer (MotionEvent time to TLS flush); the
+    # link and the companion aren't, so touch -> inject adds three rows' own quantiles: its p95 and
+    # max are upper bounds on the pipeline's.
     dispatch = quantiles(event_to_touch)
     flush = quantiles(touch_to_flush)
+    phone = quantiles(event_to_flush)
     one_way = quantiles([rt / 2 for rt in round_trips])
     inject = summary["inject_ms"]
     ack = summary["frame_ack_ms"]
-    parts = (dispatch, flush, one_way, inject)
+    parts = (phone, one_way, inject)
     touch_total = {k: sum(p[k] for p in parts) for k in ("p50", "p95", "max")}
     touch_total["count"] = min(p["count"] for p in parts)
     # Quantiles don't subtract: the ack's way back is taken off as the link's median one way.
@@ -362,19 +389,31 @@ def main() -> int:
     if touch_total["count"] < RUNS or frame_total["count"] < RUNS:
         raise RigFailure(f"fewer than {RUNS} samples: touch {touch_total['count']}, frame {frame_total['count']}")
 
-    print()
-    print("Mirror pipeline timing on the emulator (loopback through adb forward, not Wi-Fi)")
-    print(f"  phone event -> onTouch              {fmt(dispatch)}   (MotionEvent time to the app's handler: Android's input dispatch)")
-    print(f"  phone onTouch -> Pointer flushed    {fmt(flush)}   (handler to TLS write and flush: the app's own share)")
-    print(f"  link one way (ping RTT / 2)         {fmt(one_way)}")
-    print(f"  companion read -> recorded inject   {fmt(inject)}")
-    print(f"  touch -> recorded inject            {fmt(touch_total)}   (sum of the four rows' quantiles; p95, max are upper bounds)")
+    rows = [
+        ("phone event -> onTouch", dispatch),
+        ("phone onTouch -> Pointer flushed", flush),
+        ("phone event -> Pointer flushed [a]", phone),
+        ("link one way, ping RTT / 2 [b]", one_way),
+        ("companion read -> recorded inject [c]", inject),
+        ("touch -> recorded inject, a+b+c", touch_total),
+    ]
     capture = summary.get("capture_to_sent_ms")
     if capture:
-        print(f"  companion capture -> frame sent     {fmt(capture)}   (grab, downscale, encode, wait to send)")
-    print(f"  companion frame send -> FrameAck    {fmt(ack)}")
-    print(f"  frame sent -> decoded on the phone  {fmt(frame_total)}   (send -> ack minus the median one way)")
-    print(f"  frames sent {summary['frames_sent']}, acked {summary['frames_acked']}, sessions {summary['sessions']}")
+        rows.append(("companion capture -> frame sent", capture))
+    rows += [
+        ("companion frame sent -> FrameAck", ack),
+        ("frame sent -> decoded on phone", frame_total),
+    ]
+    print()
+    print("```text")
+    print(f"Mirror timing: emulator, loopback through adb forward (not Wi-Fi), {RUNS} drags; ms")
+    print(f"{'row':<40} {'count':>5} {'p50':>8} {'p95':>8} {'max':>8}")
+    for label, q in rows:
+        print(row(label, q))
+    print(f"frames sent {summary['frames_sent']}, acked {summary['frames_acked']}, sessions {summary['sessions']}")
+    print("a is measured per Pointer; a+b+c adds quantiles, so its p95 and max are upper bounds.")
+    print("frame sent -> decoded is send -> ack minus the median one way.")
+    print("```")
     print("mirror rig: ok")
     return 0
 

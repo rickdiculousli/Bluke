@@ -136,24 +136,24 @@ class MirrorPairingTest {
   }
 
   @Test
-  fun declineDropsTheRequestWithoutAStrike() {
+  fun declineBeforeTheShareIsFreeAndAfterItIsAStrike() {
     assertNull(pairing.decline())
     pairing.onMessage("c1", MirrorMessage.PairRequest("Stranger"), phoneFp, companionFp)
     assertEquals("c1", pairing.decline())
     assertEquals(PhonePairingState.Idle, pairing.state)
-    // Its close afterwards is not a strike either, even after a share.
+    // Its close afterwards is not a strike either.
     pairing.onClosed("c1")
     assertEquals(3, pairing.attemptsLeft)
-    // A declined request mid-exchange (share received) still costs nothing.
+    // Declining after a share costs an attempt: the PakeReply already let the sender check its guess.
     pairing.onMessage("c2", MirrorMessage.PairRequest("Stranger"), phoneFp, companionFp)
     val party = Spake2Party(Spake2Role.A, companionFp, phoneFp, Spake2.codeToW("000000"), Spake2.AAD, Spake2.randomScalar())
     pairing.onMessage("c2", MirrorMessage.PakeShare(party.share), phoneFp, companionFp)
     assertEquals("c2", pairing.decline())
     pairing.onClosed("c2")
-    assertEquals(3, pairing.attemptsLeft)
+    assertEquals(2, pairing.attemptsLeft)
     // The next request is served at once.
     assertEquals(
-        MirrorMessage.PairCode(3),
+        MirrorMessage.PairCode(2),
         pairing.onMessage("c3", MirrorMessage.PairRequest("Mac"), phoneFp, companionFp).reply,
     )
   }
@@ -174,11 +174,13 @@ class MirrorPairingTest {
   }
 
   @Test
-  fun aCodeThatGotItsShareDoesNotExpire() {
+  fun aCodeThatGotItsShareOutlivesTheCodeLifetimeUntilItsConfirmDeadline() {
+    clockMs = 110_000
     pairing.onMessage("c1", MirrorMessage.PairRequest("Mac"), phoneFp, companionFp)
     val party = Spake2Party(Spake2Role.A, companionFp, phoneFp, Spake2.codeToW("123456"), Spake2.AAD, Spake2.randomScalar())
+    clockMs = 229_000
     val reply = pairing.onMessage("c1", MirrorMessage.PakeShare(party.share), phoneFp, companionFp).reply as MirrorMessage.PakeReply
-    clockMs = 500_000
+    clockMs = 229_000 + PhonePairing.CONFIRM_LIFETIME_MS - 1
     assertNull(pairing.expire())
     val done = pairing.onMessage("c1", MirrorMessage.PakeConfirm(party.finish(reply.pB).ownMac), phoneFp, companionFp)
     assertEquals(PinnedCompanion(companionFp, "Mac"), done.pinned)
@@ -289,5 +291,35 @@ class MirrorPairingTest {
     )) {
       assertEquals(m.toString(), SessionVerdict.CLOSE, MirrorConnectionPolicy.sessionAccepts(m))
     }
+  }
+
+  @Test
+  fun aFullListenerMakesWayForANewConnectionOnlyByDroppingTheOldestUnrouted() {
+    assertEquals(MirrorAdmission.Admit, MirrorConnectionPolicy.admit(open = 3, unroutedOldestFirst = listOf("a"), max = 4))
+    assertEquals(MirrorAdmission.Evict("a"), MirrorConnectionPolicy.admit(open = 4, unroutedOldestFirst = listOf("a", "b"), max = 4))
+    // Every open connection is a session or a pairing: the newcomer is turned away.
+    assertEquals(MirrorAdmission.Refuse, MirrorConnectionPolicy.admit(open = 4, unroutedOldestFirst = emptyList<String>(), max = 4))
+  }
+
+  @Test
+  fun aConfirmHeldPastItsDeadlineEndsTheAttemptWithAStrike() {
+    pairing.onMessage("c1", MirrorMessage.PairRequest("Mac"), phoneFp, companionFp)
+    val party = Spake2Party(Spake2Role.A, companionFp, phoneFp, Spake2.codeToW("123456"), Spake2.AAD, Spake2.randomScalar())
+    pairing.onMessage("c1", MirrorMessage.PakeShare(party.share), phoneFp, companionFp)
+    clockMs = PhonePairing.CONFIRM_LIFETIME_MS
+    assertEquals("c1", pairing.expire())
+    assertEquals(2, pairing.attemptsLeft)
+    assertEquals(PhonePairingState.Idle, pairing.state)
+    // Its close afterwards costs nothing more, and the slot is free for the next request.
+    pairing.onClosed("c1")
+    assertEquals(MirrorMessage.PairCode(2), pairing.onMessage("c2", MirrorMessage.PairRequest("Mac"), phoneFp, companionFp).reply)
+  }
+
+  @Test
+  fun aConnectionMustSendItsFirstMessageWithinOneDeadlineFromAccept() {
+    val accepted = linkedMapOf("old" to 0L, "new" to 5_000L)
+    assertEquals(emptyList<String>(), MirrorConnectionPolicy.pastFirstMessageDeadline(accepted, 9_999))
+    assertEquals(listOf("old"), MirrorConnectionPolicy.pastFirstMessageDeadline(accepted, MirrorConnectionPolicy.FIRST_MESSAGE_DEADLINE_MS))
+    assertEquals(listOf("old", "new"), MirrorConnectionPolicy.pastFirstMessageDeadline(accepted, 15_000))
   }
 }

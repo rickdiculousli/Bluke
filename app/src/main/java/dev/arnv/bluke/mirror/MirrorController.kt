@@ -69,12 +69,16 @@ class MirrorController(context: Context) : MirrorFrameSource {
     private var wifiAddress: InetAddress? = null
     private val servers = mutableListOf<ServerSocket>()
     private val openSockets = Collections.synchronizedSet(mutableSetOf<SSLSocket>())
+    /** Open connections that haven't sent their first message yet, oldest first, with when each was accepted. */
+    private val unrouted = LinkedHashMap<SSLSocket, Long>()
     private var nsdListener: NsdManager.RegistrationListener? = null
     private var pairing = newPairing()
-    private var session: Session? = null
+    // Written under the lock; the main thread's touches and tick read it without.
+    @Volatile private var session: Session? = null
     private var listenError: String? = null
     private var displayName: String? = null
     private var hasFrame = false
+    private var connectedAtMs = 0L
 
     /** Debug builds' rig turns this on so `adb forward` (which reaches the phone's loopback) works. */
     @Volatile var rigLoopback = false
@@ -103,9 +107,11 @@ class MirrorController(context: Context) : MirrorFrameSource {
     private val drawnCount = AtomicLong()
     private val decodedCount = AtomicLong()
     // The rig's pipeline numbers, in microseconds; debug builds only. MotionEvent time to onTouch
-    // (the input system's share), onTouch to the Pointer's TLS flush (the app's), Ping to Pong.
+    // (the input system's share), onTouch to the Pointer's TLS flush (the app's), the two measured
+    // together per Pointer (MotionEvent time to flush), and Ping to Pong.
     private val eventToTouchUs = RigSamples()
     private val touchToFlushUs = RigSamples()
+    private val eventToFlushUs = RigSamples()
     private val pingRoundTripUs = RigSamples()
 
     override fun currentFrame(): ImageBitmap? = currentImage
@@ -148,6 +154,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
             wifi = null
             wifiAddress = null
             synchronized(openSockets) { openSockets.toList() }.forEach { if (it !== ending?.socket) closeQuietly(it) }
+            unrouted.clear()
             pairing = newPairing()
             displayName = null
             hasFrame = false
@@ -199,7 +206,9 @@ class MirrorController(context: Context) : MirrorFrameSource {
         val touchedAtNs = System.nanoTime() // the uptime clock MotionEvent times are on
         eventToTouchUs.add((touchedAtNs - frame.eventNanos) / 1000)
         val update = touchPolicy.update(frame)
-        session?.let { target -> update.messages.forEach { target.send(it, touchedAtNs = touchedAtNs) } }
+        session?.let { target ->
+            update.messages.forEach { target.send(it, touchedAtNs = touchedAtNs, eventNs = frame.eventNanos) }
+        }
         return update
     }
 
@@ -223,6 +232,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
             "linkQuiet" to ui.linkQuiet,
             "eventToTouchUs" to eventToTouchUs.toList(),
             "touchToFlushUs" to touchToFlushUs.toList(),
+            "eventToFlushUs" to eventToFlushUs.toList(),
             "pingRoundTripUs" to pingRoundTripUs.toList(),
         )
     }
@@ -309,17 +319,33 @@ class MirrorController(context: Context) : MirrorFrameSource {
             } catch (_: IOException) {
                 return
             }
-            if (synchronized(lock) { gen != generation } || openSockets.size >= MAX_CONNECTIONS) {
+            val admitted = synchronized(lock) {
+                if (gen != generation) return@synchronized false
+                val unroutedNow = unrouted.keys.toList()
+                when (val admission = MirrorConnectionPolicy.admit(openSockets.size, unroutedNow, MAX_CONNECTIONS)) {
+                    MirrorAdmission.Admit -> Unit
+                    is MirrorAdmission.Evict -> {
+                        unrouted -= admission.oldest
+                        openSockets -= admission.oldest
+                        closeQuietly(admission.oldest)
+                    }
+                    MirrorAdmission.Refuse -> return@synchronized false
+                }
+                openSockets += socket
+                unrouted[socket] = SystemClock.uptimeMillis()
+                true
+            }
+            if (!admitted) {
                 closeQuietly(socket)
                 continue
             }
-            openSockets += socket
             thread(name = "mirror-conn", isDaemon = true) {
                 try {
                     handle(socket, gen)
                 } catch (e: Exception) {
                     Log.i(TAG, "Mirror connection ended: ${e.javaClass.simpleName}: ${e.message}")
                 } finally {
+                    synchronized(lock) { unrouted -= socket }
                     openSockets -= socket
                     closeQuietly(socket)
                 }
@@ -338,6 +364,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
         val output = BufferedOutputStream(socket.outputStream, 64 * 1024)
         // Nothing is read past the first message, and nothing written, before the route says who this is.
         val first = MirrorCodec.read(input)
+        synchronized(lock) { unrouted -= socket }
         when (val route = MirrorConnectionPolicy.route(first, peerFingerprint, identity.pinnedCompanion()?.fingerprint)) {
             MirrorRoute.Pairing -> runPairing(socket, input, output, first, peerFingerprint)
             MirrorRoute.Session -> runSession(socket, input, output, gen)
@@ -360,6 +387,11 @@ class MirrorController(context: Context) : MirrorFrameSource {
                     pairing.onMessage(socket, message, identity.fingerprint, companionFingerprint)
                 }
                 step.pinned?.let { identity.pin(it) }
+                if (step.pinned != null) {
+                    // A newly pinned companion replaces the old one's live session at once, as Forget does.
+                    val ending = synchronized(lock) { session.also { session = null } }
+                    ending?.closeAfterFlush()
+                }
                 step.reply?.let { writeNow(output, it) }
                 synchronized(lock) {
                     val result = step.reply as? MirrorMessage.PairResult
@@ -395,7 +427,8 @@ class MirrorController(context: Context) : MirrorFrameSource {
             session = current
             displayName = null
             hasFrame = false
-            rates.reset(SystemClock.uptimeMillis())
+            connectedAtMs = SystemClock.uptimeMillis()
+            rates.reset(connectedAtMs)
             publishLocked()
             old
         }
@@ -435,7 +468,9 @@ class MirrorController(context: Context) : MirrorFrameSource {
             }
         } finally {
             current.closeAfterFlush()
-            main.post { touchPolicy.cancel() }
+            // The companion lets go of its own held button when the link drops; the fingers still
+            // down send nothing more, even once a new session starts.
+            main.post { touchPolicy.abandon() }
             synchronized(lock) {
                 if (session === current) {
                     session = null
@@ -479,7 +514,8 @@ class MirrorController(context: Context) : MirrorFrameSource {
         if (!hasFrame) synchronized(lock) {
             if (session === from) {
                 hasFrame = true
-                publishLocked()
+                val name = runCatching { identity.pinnedCompanion()?.name }.getOrNull() ?: "computer"
+                publishLocked(notice = MirrorNotice.Streaming(name))
             }
         }
     }
@@ -500,7 +536,7 @@ class MirrorController(context: Context) : MirrorFrameSource {
             val now = SystemClock.uptimeMillis()
             val current = session
             if (current != null) {
-                touchPolicy.heartbeat(now, current.lastSentAtMs)?.let { current.send(it) }
+                touchPolicy.heartbeat(now, current.lastLiveSentAtMs)?.let { current.send(it) }
                 if (now - lastPingAt >= PING_INTERVAL_MS) {
                     lastPingAt = now
                     current.send(MirrorMessage.Ping(nowUs()))
@@ -508,8 +544,13 @@ class MirrorController(context: Context) : MirrorFrameSource {
             }
             synchronized(lock) {
                 if (!running) return
+                MirrorConnectionPolicy.pastFirstMessageDeadline(unrouted, now).forEach {
+                    unrouted -= it
+                    closeQuietly(it)
+                }
+                val before = pairing.attemptsLeft
                 pairing.expire()?.let { closeQuietly(it as SSLSocket) }
-                publishLocked()
+                publishLocked(notice = if (pairing.attemptsLeft < before) MirrorNotice.WrongCode(pairing.attemptsLeft) else null)
             }
             main.postDelayed(this, TICK_MS)
         }
@@ -522,7 +563,9 @@ class MirrorController(context: Context) : MirrorFrameSource {
         val phase = mirrorPhase(
             running = running,
             listenError = listenError,
-            session = session?.let { MirrorSessionFacts(pinned?.name ?: "computer", displayName, hasFrame) },
+            session = session?.let {
+                MirrorSessionFacts(pinned?.name ?: "computer", displayName, hasFrame, SystemClock.uptimeMillis() - connectedAtMs)
+            },
             pairing = pairing.state,
             listening = wifiAddress != null || loopbackPort != null,
             pinnedName = pinned?.name,
@@ -555,18 +598,24 @@ class MirrorController(context: Context) : MirrorFrameSource {
     /** A verified session's writer: every message goes out in submit order, on one thread. */
     private inner class Session(val socket: SSLSocket, private val output: OutputStream) {
         private val writer = Executors.newSingleThreadExecutor { Thread(it, "mirror-write") }
-        @Volatile var lastSentAtMs = SystemClock.uptimeMillis()
+        /**
+         * When a message the companion counts as liveness for a held button last went out. FrameAcks
+         * come from the decoder, not the touch thread, so they don't count (or reset the heartbeat).
+         */
+        @Volatile var lastLiveSentAtMs = SystemClock.uptimeMillis()
             private set
 
-        fun send(message: MirrorMessage, touchedAtNs: Long? = null) {
+        fun send(message: MirrorMessage, touchedAtNs: Long? = null, eventNs: Long? = null) {
             try {
                 writer.execute {
                     try {
                         output.write(MirrorCodec.encode(message))
                         output.flush()
-                        lastSentAtMs = SystemClock.uptimeMillis()
+                        if (MirrorTouchPolicy.countsAsLiveness(message)) lastLiveSentAtMs = SystemClock.uptimeMillis()
                         if (touchedAtNs != null && message is MirrorMessage.Pointer) {
-                            touchToFlushUs.add((System.nanoTime() - touchedAtNs) / 1000)
+                            val flushedNs = System.nanoTime()
+                            touchToFlushUs.add((flushedNs - touchedAtNs) / 1000)
+                            eventNs?.let { eventToFlushUs.add((flushedNs - it) / 1000) }
                         }
                     } catch (_: IOException) {
                         closeQuietly(socket)

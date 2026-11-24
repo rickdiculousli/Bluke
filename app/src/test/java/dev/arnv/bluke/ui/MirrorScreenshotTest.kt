@@ -80,6 +80,18 @@ class MirrorScreenshotTest {
             phase = MirrorPhase.Connected("Rick's MacBook Pro", "Built-in Retina Display", hasFrame = false),
             pairedName = "Rick's MacBook Pro",
         ),
+        "connected-no-picture" to address.copy(
+            phase = MirrorPhase.Connected("Rick's MacBook Pro", null, hasFrame = false, pictureOverdue = true),
+            pairedName = "Rick's MacBook Pro",
+            latencyMs = 6,
+        ),
+        "streaming-first-picture" to address.copy(
+            phase = MirrorPhase.Connected(LONG_NAME, "Built-in Retina Display", hasFrame = true),
+            pairedName = LONG_NAME,
+            fps = 20,
+            latencyMs = 6,
+            notice = MirrorNotice.Streaming(LONG_NAME),
+        ),
         "streaming" to address.copy(
             phase = MirrorPhase.Connected("Rick's MacBook Pro", "Built-in Retina Display", hasFrame = true),
             pairedName = "Rick's MacBook Pro",
@@ -238,7 +250,8 @@ class MirrorScreenshotTest {
         val policy = androidx.compose.runtime.remember(state.touchMode) { MirrorTouchPolicy(mode = state.touchMode, tapSlopPx = 24f) }
         MirrorSurface(
             state = state,
-            frames = if (state.phase is MirrorPhase.Connected || name == "link-lost") withPicture else withoutPicture,
+            // A picture once one was decoded this session, or one left from before the link dropped.
+            frames = if ((state.phase as? MirrorPhase.Connected)?.hasFrame == true || name == "link-lost") withPicture else withoutPicture,
             onClose = {},
             onNextMode = {},
             onConfigureModes = {},

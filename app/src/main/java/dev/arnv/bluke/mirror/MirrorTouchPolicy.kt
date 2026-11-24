@@ -18,10 +18,6 @@ enum class MirrorTouchEvent {
   PRESSED,
   /** Hover: a tap clicked. */
   TAPPED,
-  /** Direct: the held button was let go (a lift, a cancel, or a second finger starting a scroll). */
-  RELEASED,
-  /** Two fingers began scrolling. */
-  SCROLLING,
 }
 
 /**
@@ -41,7 +37,8 @@ data class MirrorTouchUpdate(
  * ([update]); an empty set means every finger lifted, and [cancel] means the system took the touch.
  *
  * - One finger, Direct: a down inside the image presses there (`buttons=1`), moves drag (clamped
- *   to the image once they leave it), the last finger up releases at the last point.
+ *   to the image once they leave it), the lift releases where the finger left the glass (a drag
+ *   there first if the lift's own point differs from the last move's).
  * - One finger, Hover: moves without pressing (`buttons=0`); a tap (held under [tapTimeoutMs], never
  *   moved [tapSlopPx] or more) clicks at the down point: press, then release. A cancel never clicks.
  * - A second finger that lands outside the image (a thumb resting on the bars beside it) is
@@ -49,6 +46,10 @@ data class MirrorTouchUpdate(
  *   centroid movement scrolls as Wheel (pixels; fingers moving down give positive dy, scrolling the
  *   view up) until every finger lifts.
  * - A first finger down outside the image does nothing until every finger lifts.
+ * - After the link drops mid-touch ([abandon]), the fingers still down send nothing until every
+ *   one lifts, so a reconnect never turns the rest of the old touch into a fresh press.
+ * - A first finger landing ([update]'s `firstDown`) always starts a new gesture, whatever this
+ *   policy missed while it wasn't told about touches.
  *
  * Not thread-safe: call it from the thread that delivers touches.
  */
@@ -93,9 +94,24 @@ class MirrorTouchPolicy(
     val events = mutableListOf<MirrorTouchEvent>()
   }
 
-  /** Reports the fingers down after a touch event at [timeMs], mapped through [fit]. */
-  fun update(fit: MirrorFit, fingers: List<MirrorFinger>, timeMs: Long): MirrorTouchUpdate {
+  /**
+   * Reports the fingers down after a touch event at [timeMs], mapped through [fit]. [lifted] are
+   * the fingers this event lifted, where they left the glass; [firstDown] when this event is the
+   * first finger landing (no finger was down before it).
+   */
+  fun update(
+      fit: MirrorFit,
+      fingers: List<MirrorFinger>,
+      timeMs: Long,
+      lifted: List<MirrorFinger> = emptyList(),
+      firstDown: Boolean = false,
+  ): MirrorTouchUpdate {
     val out = Out()
+    if (firstDown && gesture != Gesture.Idle) {
+      // A gesture whose end this policy never saw (it wasn't told while the picture was away).
+      (gesture as? Gesture.OneFinger)?.let { releaseHeld(it, out) }
+      gesture = Gesture.Idle
+    }
     when (val g = gesture) {
       Gesture.Idle -> if (fingers.isNotEmpty()) start(fit, fingers, timeMs, out)
       Gesture.Ignored -> if (fingers.isEmpty()) gesture = Gesture.Idle
@@ -109,17 +125,17 @@ class MirrorTouchPolicy(
             move(g, fit, tracked, out)
           }
           active.isEmpty() -> {
-            lift(g, timeMs, out)
+            lift(g, fit, lifted.find { it.id == g.id }, timeMs, out)
             if (fingers.isNotEmpty()) gesture = Gesture.Ignored
           }
           tracked == null -> {
-            lift(g, timeMs, out)
+            lift(g, fit, lifted.find { it.id == g.id }, timeMs, out)
             start(fit, active, timeMs, out)
           }
           newcomers.isEmpty() -> move(g, fit, tracked, out)
           else -> {
             releaseHeld(g, out)
-            gesture = startScroll(active, out)
+            gesture = startScroll(active)
           }
         }
       }
@@ -140,6 +156,14 @@ class MirrorTouchPolicy(
     (gesture as? Gesture.OneFinger)?.let { releaseHeld(it, out) }
     gesture = Gesture.Idle
     return result(out, emptyList())
+  }
+
+  /**
+   * The link dropped: the session that held the button is gone (the companion releases on its
+   * own), so nothing is sent; fingers still down are ignored until every one lifts.
+   */
+  fun abandon() {
+    if (gesture != Gesture.Idle) gesture = Gesture.Ignored
   }
 
   /** `Heartbeat` when a button is held and nothing has been sent for 250 ms or more, else null. */
@@ -164,7 +188,7 @@ class MirrorTouchPolicy(
 
   private fun start(fit: MirrorFit, fingers: List<MirrorFinger>, timeMs: Long, out: Out) {
     if (fingers.size > 1) {
-      gesture = startScroll(fingers, out)
+      gesture = startScroll(fingers)
       return
     }
     val f = fingers.single()
@@ -190,10 +214,17 @@ class MirrorTouchPolicy(
     out.messages += MirrorMessage.Pointer(point.x, point.y, if (g.mode == MirrorTouchMode.DIRECT) 1 else 0)
   }
 
-  private fun lift(g: Gesture.OneFinger, timeMs: Long, out: Out) {
+  private fun lift(g: Gesture.OneFinger, fit: MirrorFit, at: MirrorFinger?, timeMs: Long, out: Out) {
     gesture = Gesture.Idle
     when (g.mode) {
-      MirrorTouchMode.DIRECT -> releaseHeld(g, out)
+      MirrorTouchMode.DIRECT -> {
+        // The up event carries its own point; drag there before letting go.
+        at?.let { fit.toNormalizedClamped(it.x, it.y) }?.takeIf { it != g.last }?.let { point ->
+          g.last = point
+          out.messages += MirrorMessage.Pointer(point.x, point.y, 1)
+        }
+        releaseHeld(g, out)
+      }
       MirrorTouchMode.HOVER ->
           if (!g.leftSlop && timeMs - g.downAtMs < tapTimeoutMs) {
             out.messages += MirrorMessage.Pointer(g.downPoint.x, g.downPoint.y, 1)
@@ -206,11 +237,9 @@ class MirrorTouchPolicy(
   private fun releaseHeld(g: Gesture.OneFinger, out: Out) {
     if (g.mode != MirrorTouchMode.DIRECT) return
     out.messages += MirrorMessage.Pointer(g.last.x, g.last.y, 0)
-    out.events += MirrorTouchEvent.RELEASED
   }
 
-  private fun startScroll(fingers: List<MirrorFinger>, out: Out): Gesture.Scroll {
-    out.events += MirrorTouchEvent.SCROLLING
+  private fun startScroll(fingers: List<MirrorFinger>): Gesture.Scroll {
     return Gesture.Scroll(fingers.map { it.x }.average().toFloat(), fingers.map { it.y }.average().toFloat())
   }
 
@@ -237,13 +266,37 @@ class MirrorTouchPolicy(
 
   companion object {
     const val HEARTBEAT_INTERVAL_MS = 250L
+
+    /**
+     * Whether the companion's held-button rule (released after 1 s of silence) counts [message] as
+     * the phone being alive: the touch thread's traffic and Ping, never FrameAck, which the decoder
+     * sends even while the touch thread hangs. The heartbeat keys on the last of these.
+     */
+    fun countsAsLiveness(message: MirrorMessage): Boolean =
+        when (message) {
+          is MirrorMessage.Pointer,
+          is MirrorMessage.Wheel,
+          MirrorMessage.Heartbeat,
+          MirrorMessage.Release,
+          is MirrorMessage.Ping -> true
+          else -> false
+        }
   }
 }
 
-/** One surface touch event through the policy: a cancel cancels, else the fingers still down. */
+/**
+ * One surface touch event through the policy: a cancel cancels, else the fingers still down, the
+ * ones this event lifted, and whether it is the first finger landing.
+ */
 fun MirrorTouchPolicy.update(frame: MirrorTouchFrame): MirrorTouchUpdate =
     if (frame.cancelled) {
       cancel()
     } else {
-      update(frame.fit, frame.points.filter { it.down }.map { MirrorFinger(it.id, it.x, it.y) }, frame.uptimeMillis)
+      update(
+          frame.fit,
+          frame.points.filter { it.down }.map { MirrorFinger(it.id, it.x, it.y) },
+          frame.uptimeMillis,
+          lifted = frame.points.filter { !it.down && it.wasDown }.map { MirrorFinger(it.id, it.x, it.y) },
+          firstDown = frame.points.none { it.wasDown },
+      )
     }

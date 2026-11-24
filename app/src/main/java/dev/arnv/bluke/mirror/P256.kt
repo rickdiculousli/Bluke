@@ -4,8 +4,10 @@ import java.math.BigInteger
 
 /**
  * Just enough NIST P-256 for SPAKE2: Jacobian points, a fixed-length Montgomery ladder, and SEC1
- * point encoding. Built on [BigInteger], which is not constant-time; see [Spake2] for why that is
- * acceptable here.
+ * point encoding. Built on [BigInteger], which is not constant-time, so a multiply's timing can
+ * leak bits of its scalar. That is acceptable for its one use, [Spake2] pairing: each attempt draws
+ * a fresh code and a fresh scalar, and every PakeShare costs the sender one of its three strikes, so
+ * an attacker gets one online guess per code and never a second timing of the same secret.
  */
 internal object P256 {
   val p = BigInteger("ffffffff00000001000000000000000000000000ffffffffffffffffffffffff", 16)
