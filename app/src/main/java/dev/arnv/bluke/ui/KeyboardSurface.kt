@@ -112,12 +112,12 @@ data class KeyboardTuneState(
     }
 
     /**
-     * Stores [next], chosen while this was showing. A newly chosen sound goes through [selectKeySound],
-     * so picking one while muted turns key sounds on.
+     * Stores [next], chosen while this was showing. A chosen sound goes through [selectKeySound], so
+     * picking one while muted turns key sounds on, even when it is the sound already chosen.
      */
-    fun writeChange(prefs: SharedPreferences, next: KeyboardTuneState) {
+    fun writeChange(prefs: SharedPreferences, next: KeyboardTuneState, soundChosen: Boolean = next.sound != sound) {
         next.write(prefs)
-        if (next.sound != sound) selectKeySound(prefs, next.sound.profileId)
+        if (soundChosen) selectKeySound(prefs, next.sound.profileId)
     }
 
     companion object {
@@ -170,6 +170,7 @@ fun KeyboardTuneContent(
     state: KeyboardTuneState,
     onChange: (KeyboardTuneState) -> Unit,
     options: KeyboardTuneOptions,
+    onSelectSound: (KeyboardSound) -> Unit = { onChange(state.copy(sound = it)) },
     onEditThemes: (() -> Unit)? = null,
     onManageSounds: (() -> Unit)? = null,
     showSound: Boolean = true,
@@ -211,7 +212,7 @@ fun KeyboardTuneContent(
             options = sounds.map { it.first },
             selected = state.sound,
             optionLabel = { names[it] ?: "" },
-            onSelect = { onChange(state.copy(sound = it)) },
+            onSelect = onSelectSound,
         )
         if (onManageSounds != null) TuneAction("Manage sound packs", Icons.Default.LibraryMusic, onManageSounds)
     }
@@ -599,6 +600,8 @@ internal fun KeyboardSurface(
                 state = state.tune,
                 onChange = { state.tune.writeChange(sharedPrefs, it) },
                 options = rememberKeyboardTuneOptions(refresh = tuneOpen),
+                // A tap on a sound, even the one already chosen, turns key sounds on.
+                onSelectSound = { state.tune.writeChange(sharedPrefs, state.tune.copy(sound = it), soundChosen = true) },
                 onEditThemes = { context.startActivity(Intent(context, KeyboardThemesActivity::class.java)) },
                 onManageSounds = { context.startActivity(Intent(context, SoundPacksActivity::class.java)) },
             )

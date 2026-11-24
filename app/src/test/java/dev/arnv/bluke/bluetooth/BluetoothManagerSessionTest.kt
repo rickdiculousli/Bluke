@@ -159,6 +159,20 @@ class BluetoothManagerSessionTest {
         assertFalse(manager.hasPendingConnection.value)
     }
 
+    @Test fun aReconnectedHostStartsWithoutLockLightReports() {
+        assertFalse(manager.hostReportsLockLights.value)
+        HidShadow.callback!!.onInterruptData(device, KEYBOARD_REPORT_ID.toByte(), byteArrayOf(1, 2))
+        assertTrue(manager.hostReportsLockLights.value)
+
+        manager.disconnectDevice()
+        awaitIdle()
+        HidShadow.states[device] = BluetoothProfile.STATE_CONNECTED
+        HidShadow.callback!!.onConnectionStateChanged(device, BluetoothProfile.STATE_CONNECTED)
+
+        assertEquals(device, manager.connectedDevice.value)
+        assertFalse(manager.hostReportsLockLights.value)
+    }
+
     @Test fun settingsConnectionAfterDisconnectIsAdopted() {
         manager.disconnectDevice()
         awaitIdle()

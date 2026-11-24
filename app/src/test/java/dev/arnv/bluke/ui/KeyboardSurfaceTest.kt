@@ -280,6 +280,34 @@ class KeyboardSurfaceTest {
     }
 
     @Test
+    fun reTappingTheChosenSoundInTuneWhileMutedTurnsKeySoundsOn() {
+        KeyboardTuneState.read(prefs).copy(sound = KeyboardSound.BuiltIn(SwitchType.HOLY_PANDA)).write(prefs)
+        prefs.edit().putBoolean(KEY_SOUND_ENABLED_PREFERENCE, false).commit()
+        showSurface()
+        compose.onNodeWithTag("surface_tune").performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithText(SwitchType.HOLY_PANDA.displayName).performScrollTo().performClick()
+        compose.waitForIdle()
+
+        assertEquals(KeyboardSound.BuiltIn(SwitchType.HOLY_PANDA), KeyboardTuneState.read(prefs).sound)
+        assertTrue(prefs.getBoolean(KEY_SOUND_ENABLED_PREFERENCE, false))
+    }
+
+    @Test
+    fun reTappingTheChosenGeometryInTuneWhileMutedLeavesKeySoundsOff() {
+        prefs.edit().putBoolean(KEY_SOUND_ENABLED_PREFERENCE, false).commit()
+        showSurface()
+        compose.onNodeWithTag("surface_tune").performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithText(KeyboardTuneState.read(prefs).geometry.displayName).performClick()
+        compose.waitForIdle()
+
+        assertFalse(prefs.getBoolean(KEY_SOUND_ENABLED_PREFERENCE, true))
+    }
+
+    @Test
     fun aSingleControlSectionIsNamedOnceByItsHeading() {
         showSurface()
         compose.onNodeWithTag("surface_tune").performClick()

@@ -290,6 +290,8 @@ async def check_leds(app: App, host: Host) -> None:
     await wait_state(app, lambda s: s["capsLock"] and not s["numLock"], "Caps Lock from the host")
     host.hid.send_data(bytes([0x01, 0x01]))  # Num Lock only
     await wait_state(app, lambda s: s["numLock"] and not s["capsLock"], "Num Lock from the host")
+    state = await wait_state(app, lambda s: True, "the app state")
+    assert state["hostReportsLockLights"], f"the host sent LED reports but the app doesn't know: {state}"
 
 
 async def check_numpad(app: App, host: Host) -> None:
@@ -458,6 +460,9 @@ async def run(args: argparse.Namespace) -> int:
             await host.wait_channels(False)
             await wait_state(app, lambda s: not s["host"] and not s["disconnecting"], "the app to drop the host")
             await connect()
+            # A new link starts with no LED report from the host, so the app's own lock lights lead again.
+            state = await wait_state(app, lambda s: True, "the app state")
+            assert not state["hostReportsLockLights"], f"lock-light flag survived the reconnect: {state}"
             await check_keyboard(app, host)
         await step("disconnect and reconnect", reconnect())
 

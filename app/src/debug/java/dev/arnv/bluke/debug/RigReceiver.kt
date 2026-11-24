@@ -41,6 +41,7 @@ class RigReceiver : BroadcastReceiver() {
                 result.put("capsLock", manager.capsLockState.value)
                 result.put("numLock", manager.numLockState.value)
                 result.put("scrollLock", manager.scrollLockState.value)
+                result.put("hostReportsLockLights", manager.hostReportsLockLights.value)
                 val adapter = context.getSystemService(BluetoothManager::class.java)?.adapter
                 result.put("address", adapter?.address ?: JSONObject.NULL)
                 result.put("ok", true)
