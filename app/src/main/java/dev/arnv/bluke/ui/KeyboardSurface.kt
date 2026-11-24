@@ -68,6 +68,8 @@ private const val LOCK_SYNC_MODE_PREFERENCE = "lock_sync_mode"
 private const val KEY_CAPS_LOCK = 0x39
 private const val KEY_NUM_LOCK = 0x53
 private const val KEY_SCROLL_LOCK = 0x47
+/** Keys an accessibility click latches rather than taps: the modifiers and Fn. */
+private val LATCHING_KEYS = (KeyboardLayouts.MOD_LCTRL..KeyboardLayouts.MOD_RWIN).toSet() + KeyboardLayouts.KEY_FN
 
 /** The key sound the keyboard plays: a built-in switch, or an imported pack by its id. */
 sealed interface KeyboardSound {
@@ -300,6 +302,33 @@ class KeyboardSurfaceState internal constructor(
         }
     }
 
+    /** Modifiers (and Fn) an accessibility click holds down until the next other key's click. */
+    val latchedKeys = mutableStateListOf<Int>()
+
+    /**
+     * An accessibility click on a key (TalkBack's double-tap), which can't hold one key while
+     * tapping another. A modifier or Fn latches down on one click and lets go on the next; any
+     * other key is pressed and released, then lets go of every latched modifier, so Shift then Q
+     * types a capital Q. Each step goes through [onKeyPress], as touch does.
+     */
+    fun onKeyClick(keyCode: Int, haptics: SurfaceHaptics, isConnected: Boolean) {
+        if (keyCode in LATCHING_KEYS) {
+            if (latchedKeys.remove(keyCode)) {
+                onKeyPress(keyCode, false, haptics, isConnected)
+            } else {
+                latchedKeys.add(keyCode)
+                onKeyPress(keyCode, true, haptics, isConnected)
+            }
+            return
+        }
+        onKeyPress(keyCode, true, haptics, isConnected)
+        onKeyPress(keyCode, false, haptics, isConnected)
+        latchedKeys.toList().forEach { latched ->
+            latchedKeys.remove(latched)
+            onKeyPress(latched, false, haptics, isConnected)
+        }
+    }
+
     /** Process a local screen press or release of [keyCode]. A press plays one haptic, on touch-down. */
     fun onKeyPress(keyCode: Int, isPress: Boolean, haptics: SurfaceHaptics, isConnected: Boolean) {
         fun applyPendingCharacterLayoutIfReleased() {
@@ -521,6 +550,8 @@ internal fun KeyboardSurface(
                     isScrollLockActive = state.isScrollLockActive,
                     isFnActive = state.isFnActive,
                     keySensitivity = state.keySensitivity,
+                    latchedKeys = state.latchedKeys,
+                    onKeyClick = { code -> state.onKeyClick(code, haptics, isConnected) },
                     onKeyPressChange = { code, press -> state.onKeyPress(code, press, haptics, isConnected) },
                 )
                 KeyboardLayoutSwitcherOverlay(
