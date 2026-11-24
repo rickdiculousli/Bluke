@@ -17,6 +17,7 @@ import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -88,6 +89,18 @@ class GamepadSurfaceTest {
         prefs.edit().putBoolean(HAPTICS_PREFERENCE, true).commit()
         setSurface()
         pressA()
+        compose.waitForIdle()
+        assertEquals(listOf(HapticEvent.PRESS), haptics.events)
+    }
+
+    @Test
+    fun aStickClickPlaysOnePress() {
+        prefs.edit().putBoolean(HAPTICS_PREFERENCE, true).commit()
+        setSurface()
+        compose.onNodeWithContentDescription("Left stick").performTouchInput {
+            down(center)
+            up()
+        }
         compose.waitForIdle()
         assertEquals(listOf(HapticEvent.PRESS), haptics.events)
     }
