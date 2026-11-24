@@ -79,6 +79,31 @@ class TouchpadScreenshotTest {
         )
     }
 
+    /** A small landscape phone: the toolbar's toggles step down to their icons so the host keeps its name. */
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land-xhdpi", sdk = [36])
+    fun aSmallLandscapePhoneWithTheNumpadOn() {
+        captureTouchpad("touchpad-small-numpad", prefs("small") { putBoolean(TOUCHPAD_NUMPAD_PREFERENCE, true) })
+    }
+
+    /** A portrait phone: the narrowest toolbar the touchpad gets. */
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-420dpi", sdk = [36])
+    fun aPortraitPhoneWithTheRailOn() {
+        captureMatrix(name = "touchpad-portrait-rail") {
+            SurfaceTheme {
+                TouchpadView(
+                    btManager = manager,
+                    chrome = previewChrome(InputMode.TOUCHPAD, connected),
+                    sharedPrefs = prefs("portrait") {
+                        putString(TOUCHPAD_MODIFIER_POSITION_PREFERENCE, TouchpadModifierPosition.LEFT.preferenceValue)
+                    },
+                    caseBrush = SolidColor(Color(0xFF1E1E20)),
+                )
+            }
+        }
+    }
+
     @OptIn(ExperimentalTestApi::class)
     @Test
     fun tuneSheetOpen() {
