@@ -23,10 +23,8 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.AlignHorizontalLeft
-import androidx.compose.material.icons.filled.AlignHorizontalRight
 import androidx.compose.material.icons.filled.Dialpad
-import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material.icons.filled.KeyboardCommandKey
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -59,6 +57,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
@@ -84,6 +83,17 @@ enum class TrackpadButtonMode(val preferenceValue: String, val displayName: Stri
             entries.firstOrNull { it.preferenceValue == value } ?: CLICKPAD
     }
 }
+
+/**
+ * The side the modifier rail last stood on ("left" or "right"), so the toolbar's on/off toggle turns it
+ * back on where it was. [TOUCHPAD_MODIFIER_POSITION_PREFERENCE] still holds off/left/right.
+ */
+const val TOUCHPAD_MODIFIER_LAST_SIDE_PREFERENCE = "touchpad_modifier_last_side"
+
+/** The side the rail returns to when switched on: the last side it stood on, left before any. */
+fun lastModifierRailSide(prefs: SharedPreferences): TouchpadModifierPosition =
+    TouchpadModifierPosition.fromPreference(prefs.getString(TOUCHPAD_MODIFIER_LAST_SIDE_PREFERENCE, null))
+        .takeIf { it != TouchpadModifierPosition.OFF } ?: TouchpadModifierPosition.LEFT
 
 /** Where a mouse report goes. The app sends it to the manager; tests provide a recorder through [LocalMouseReportSink]. */
 fun interface MouseReportSink {
@@ -111,6 +121,9 @@ data class TouchpadTuneState(
             putBoolean(TOUCHPAD_SCROLL_MOMENTUM_PREFERENCE, momentum)
             putFloat(TOUCHPAD_SCROLL_GLIDE_PREFERENCE, glide.coerceIn(0f, 1f))
             putString(TOUCHPAD_MODIFIER_POSITION_PREFERENCE, modifierPosition.preferenceValue)
+            if (modifierPosition != TouchpadModifierPosition.OFF) {
+                putString(TOUCHPAD_MODIFIER_LAST_SIDE_PREFERENCE, modifierPosition.preferenceValue)
+            }
         }
     }
 
@@ -244,19 +257,20 @@ fun TouchpadView(
                     selected = numpad,
                     modifier = Modifier.testTag("touchpad_numpad_toggle"),
                 )
-                val rail = tune.modifierPosition
+                // On/off here; the side is a Tune setting, and on returns to the last side chosen.
+                val railOn = tune.modifierPosition != TouchpadModifierPosition.OFF
                 SurfaceToolbarIconButton(
-                    icon = when (rail) {
-                        TouchpadModifierPosition.OFF -> Icons.Default.Keyboard
-                        TouchpadModifierPosition.LEFT -> Icons.Default.AlignHorizontalLeft
-                        TouchpadModifierPosition.RIGHT -> Icons.Default.AlignHorizontalRight
-                    },
-                    contentDescription = "Modifier keys: ${railLabel(rail).lowercase()}",
+                    icon = Icons.Default.KeyboardCommandKey,
+                    contentDescription = "Modifier keys",
                     onClick = {
                         haptics.perform(HapticEvent.TICK)
-                        tune.copy(modifierPosition = rail.next()).write(sharedPrefs)
+                        val next = if (railOn) TouchpadModifierPosition.OFF else lastModifierRailSide(sharedPrefs)
+                        tune.copy(modifierPosition = next).write(sharedPrefs)
                     },
-                    modifier = Modifier.testTag("touchpad_modifier_position"),
+                    selected = railOn,
+                    modifier = Modifier
+                        .semantics { stateDescription = if (railOn) "On, ${railLabel(tune.modifierPosition).lowercase()}" else "Off" }
+                        .testTag("touchpad_modifier_position"),
                 )
             }
 
@@ -394,7 +408,8 @@ private fun TouchpadModifierRail(
             MechanicalModifierKey(
                 label = label,
                 keyCode = keyCode,
-                style = if (label == guiLabel) theme.accentStyle else theme.modifierStyle,
+                // One unpressed style for all four, so only a held modifier looks held.
+                style = theme.modifierStyle,
                 btManager = btManager,
                 haptics = haptics,
             )
@@ -427,7 +442,11 @@ private fun MechanicalModifierKey(
         legendScale = style.legendScale,
         baseUnitWidth = 68.dp,
         modifier = Modifier
-            .semantics { contentDescription = label }
+            .semantics {
+                contentDescription = label
+                selected = isPressed
+            }
+            .testTag("touchpad_rail_key_$label")
             .pointerInput(keyCode) {
                 detectTapGestures(
                     onPress = {

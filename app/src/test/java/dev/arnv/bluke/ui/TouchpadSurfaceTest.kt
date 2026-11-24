@@ -9,7 +9,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.state.ToggleableState
 import androidx.compose.ui.test.SemanticsMatcher
 import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.assertIsDisplayed
@@ -196,6 +198,62 @@ class TouchpadSurfaceTest {
         TouchpadTuneState.read(prefs).copy(modifierPosition = TouchpadModifierPosition.LEFT).write(prefs)
         compose.waitForIdle()
         compose.onNodeWithTag("touchpad_rail_left").assertIsDisplayed()
+    }
+
+    private fun railToggle() = compose.onNodeWithTag("touchpad_modifier_position")
+
+    @Test
+    fun theRailToggleIsASwitchShowingWhetherTheRailIsOn() {
+        showTouchpad()
+        railToggle()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Switch))
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ToggleableState, ToggleableState.Off))
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "Off"))
+
+        railToggle().performClick()
+        compose.waitForIdle()
+
+        railToggle()
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.ToggleableState, ToggleableState.On))
+            .assert(SemanticsMatcher.expectValue(SemanticsProperties.StateDescription, "On, left"))
+        compose.onNodeWithTag("touchpad_rail_left").assertIsDisplayed()
+    }
+
+    @Test
+    fun turningTheRailBackOnReturnsItToTheLastSideChosen() {
+        TouchpadTuneState(modifierPosition = TouchpadModifierPosition.RIGHT).write(prefs)
+        showTouchpad()
+        compose.onNodeWithTag("touchpad_rail_right").assertIsDisplayed()
+
+        railToggle().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("touchpad_rail_right").assertDoesNotExist()
+        assertEquals("off", prefs.getString(TOUCHPAD_MODIFIER_POSITION_PREFERENCE, null))
+
+        railToggle().performClick()
+        compose.waitForIdle()
+        compose.onNodeWithTag("touchpad_rail_right").assertIsDisplayed()
+        compose.onNodeWithTag("touchpad_rail_left").assertDoesNotExist()
+        assertEquals("right", prefs.getString(TOUCHPAD_MODIFIER_POSITION_PREFERENCE, null))
+    }
+
+    @Test
+    fun noRailKeyLooksHeldUntilItIsHeld() {
+        TouchpadTuneState(modifierPosition = TouchpadModifierPosition.LEFT).write(prefs)
+        showTouchpad()
+        val labels = listOf("Ctrl", "Shift", "Alt", "Meta")
+        labels.forEach { compose.onNodeWithTag("touchpad_rail_key_$it").assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, false)) }
+        val idle = drawWindow()
+        val colours = labels.map { centrePixel(idle, "touchpad_rail_key_$it") }
+        assertEquals("every unheld rail key draws alike: $colours", 1, colours.toSet().size)
+
+        val meta = compose.onNodeWithTag("touchpad_rail_key_Meta")
+        meta.performTouchInput { down(center) }
+        compose.waitForIdle()
+        meta.assert(SemanticsMatcher.expectValue(SemanticsProperties.Selected, true))
+        assertNotEquals("a held key draws differently", colours.first(), centrePixel(drawWindow(), "touchpad_rail_key_Meta"))
+        meta.performTouchInput { up() }
+        compose.waitForIdle()
     }
 
     @Test
