@@ -25,6 +25,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.only
+import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -70,8 +71,10 @@ import dev.arnv.bluke.BlukeApplication
 import dev.arnv.bluke.ui.settings.SettingsSection
 import dev.arnv.bluke.ui.settings.settingsIntent
 import dev.arnv.bluke.bluetooth.BluetoothKeyboardManager
+import dev.arnv.bluke.mirror.MirrorFingerRouter
 import dev.arnv.bluke.mirror.MirrorFit
 import dev.arnv.bluke.mirror.MirrorNotice
+import dev.arnv.bluke.mirror.MirrorPhase
 import dev.arnv.bluke.mirror.MirrorRotation
 import dev.arnv.bluke.mirror.MirrorTouchEvent
 import dev.arnv.bluke.mirror.MirrorTouchFrame
@@ -106,12 +109,19 @@ fun MirrorView(
     launchMode: Int,
     onModeChange: (Int) -> Unit,
     sharedPrefs: SharedPreferences,
+    host: SurfaceHost,
 ) {
     val context = LocalContext.current
     val controller = remember(context) { (context.applicationContext as BlukeApplication).mirrorController }
     val state by controller.state.collectAsState()
     // Read again whenever the surface starts, so a change made in Settings applies on return.
     var hapticsEnabled by remember(sharedPrefs) { mutableStateOf(sharedPrefs.getBoolean("haptics_enabled", true)) }
+    var typingLayout by remember(sharedPrefs) { mutableStateOf(sharedPrefs.typingLayout()) }
+    var hotkeys by remember(sharedPrefs) { mutableStateOf(sharedPrefs.mirrorHotkeys()) }
+    // Hotkeys go out as Bluetooth keyboard keys, to the Bluetooth host, never over the mirror link.
+    val presser = remember(btManager) { MirrorHotkeyPresser(btManager::sendKey) }
+    val hotkeysEnabled = host.status == SurfaceHostStatus.Connected
+    LaunchedEffect(hotkeysEnabled) { if (!hotkeysEnabled) presser.releaseAll() }
     val lifecycleOwner = LocalLifecycleOwner.current
     // Mirror lives exactly while its surface is on screen: listening, the Wi-Fi lock, everything.
     DisposableEffect(lifecycleOwner, controller, sharedPrefs) {
@@ -119,9 +129,13 @@ fun MirrorView(
             when (event) {
                 Lifecycle.Event.ON_START -> {
                     hapticsEnabled = sharedPrefs.getBoolean("haptics_enabled", true)
+                    typingLayout = sharedPrefs.typingLayout()
                     controller.start()
                 }
-                Lifecycle.Event.ON_STOP -> controller.stop()
+                Lifecycle.Event.ON_STOP -> {
+                    presser.releaseAll()
+                    controller.stop()
+                }
                 else -> Unit
             }
         }
@@ -129,6 +143,7 @@ fun MirrorView(
         if (lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED)) controller.start()
         onDispose {
             lifecycleOwner.lifecycle.removeObserver(observer)
+            presser.releaseAll()
             controller.stop()
         }
     }
@@ -172,8 +187,19 @@ fun MirrorView(
         onUndoForget = forget::undo,
         shownPairingCode = shownPairingCode,
         onShowPairingCode = { shownPairingCode = it },
+        hotkeys = MirrorHotkeysUi(hotkeys, enabled = hotkeysEnabled, hostName = host.name),
+        typingLayout = typingLayout,
+        onKey = controller::leftButton,
+        onHotkey = { hotkey, down -> if (down) presser.press(hotkey) else presser.lift(hotkey) },
+        onHotkeysChange = {
+            hotkeys = it
+            sharedPrefs.saveMirrorHotkeys(it)
+        },
     )
 }
+
+private fun SharedPreferences.typingLayout(): KeyboardCharacterLayout =
+    KeyboardCharacterLayout.fromPreference(getString(KEYBOARD_CHARACTER_LAYOUT_PREFERENCE, null))
 
 /** A Forget that waits out its notice's undo window before it happens. */
 @Stable
@@ -216,9 +242,12 @@ fun rememberPendingForget(forget: () -> Unit): PendingForget {
 }
 
 /**
- * The whole surface, drawn from [state] alone. [hapticsEnabled] is the app's haptics preference;
- * [forgetPending] shows "Mirror forgot …" with an Undo while the forget waits out its window.
- * [shownPairingCode] is the pairing request whose code the person asked to see over a live picture.
+ * The whole surface, drawn from [state] alone: the picture fills it, and the left-hand controls
+ * float over its left edge. [hapticsEnabled] is the app's haptics preference; [forgetPending] shows
+ * "Mirror forgot …" with an Undo while the forget waits out its window. [shownPairingCode] is the
+ * pairing request whose code the person asked to see over a live picture. [onKey] is the
+ * left-button key going down or up, [onHotkey] a hotkey button's, and [editingHotkeys] opens the
+ * hotkey editor at once (for screenshots).
  */
 @Composable
 fun MirrorSurface(
@@ -240,6 +269,12 @@ fun MirrorSurface(
     onOpenWifiSettings: () -> Unit = {},
     shownPairingCode: String? = null,
     onShowPairingCode: (String) -> Unit = {},
+    hotkeys: MirrorHotkeysUi = MirrorHotkeysUi(),
+    typingLayout: KeyboardCharacterLayout = KeyboardCharacterLayout.US_QWERTY,
+    onKey: (down: Boolean) -> MirrorTouchUpdate = { NOTHING_DONE },
+    onHotkey: (MirrorHotkey, down: Boolean) -> Unit = { _, _ -> },
+    onHotkeysChange: (List<MirrorHotkey>) -> Unit = {},
+    editingHotkeys: Boolean = false,
 ) {
     val prompt = state.phase.pairingPrompt(shownPairingCode)
     val haptics = rememberMirrorHaptics(hapticsEnabled)
@@ -250,46 +285,42 @@ fun MirrorSurface(
             else -> Unit
         }
     }
-    Row(
+    // The surface's own hints (the key or a hotkey can't act yet) show in the notice's place.
+    var hint by remember { mutableStateOf<MirrorNotice?>(null) }
+    var editing by remember { mutableStateOf(editingHotkeys) }
+    val bounds = remember { MirrorControlBounds() }
+    val live = state.phase.isLive
+    Box(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surfaceContainerLowest)
             .testTag("mirror_view_root"),
     ) {
-        MirrorRail(
-            state = state,
-            haptics = haptics,
-            onClose = onClose,
-            onNextMode = onNextMode,
-            onConfigureModes = onConfigureModes,
-            onTouchModeChange = onTouchModeChange,
-            onForgetCompanion = onForgetCompanion,
-        )
-        Box(
-            modifier = Modifier
-                .weight(1f)
-                .fillMaxHeight()
-                .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.End)),
-        ) {
+        Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.End))) {
             MirrorImage(
                 frames = frames,
-                live = state.phase.isLive,
+                live = live,
                 stale = state.pictureStale,
                 haptics = haptics,
+                bounds = bounds,
                 onTouch = onTouch,
                 onImagePlaced = onImagePlaced,
             )
-            // The notice stacks above the status card, so neither covers the other; the column has
-            // no pointer input, so touches outside them reach the picture.
-            Column(
-                modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
+        }
+        // The notice stacks above the status card, so neither covers the other; the column has
+        // no pointer input, so touches outside them reach the picture. It starts right of the controls.
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .windowInsetsPadding(MirrorControlsInsets.union(WindowInsets.displayCutout.only(WindowInsetsSides.End)))
+                .padding(start = MIRROR_CONTROLS_WIDTH + 24.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+        ) {
                 MirrorNoticePill(
-                    notice = state.notice,
+                    notice = hint ?: state.notice,
                     forgetPending = forgetPending,
                     pairedName = state.pairedName,
-                    onShown = onNoticeShown,
+                    onShown = { if (hint != null) hint = null else onNoticeShown() },
                     onUndoForget = onUndoForget,
                 )
                 QuietLinkChip(state)
@@ -306,15 +337,57 @@ fun MirrorSurface(
                     onOpenWifiSettings = onOpenWifiSettings,
                     modifier = Modifier.weight(1f).fillMaxWidth(),
                 )
-            }
+        }
+        MirrorControls(
+            state = state,
+            hotkeys = hotkeys,
+            bounds = bounds,
+            haptics = haptics,
+            onClose = onClose,
+            onNextMode = onNextMode,
+            onConfigureModes = onConfigureModes,
+            onTouchModeChange = onTouchModeChange,
+            onKey = { down ->
+                val update = onKey(down)
+                when {
+                    MirrorTouchEvent.PRESSED in update.events -> haptics.press()
+                    MirrorTouchEvent.RELEASED in update.events -> haptics.release()
+                    // Pressed before the pointer has gone anywhere this session: nowhere to press.
+                    down && live && !state.keyHeld -> hint = MirrorNotice.KeyNeedsPointer
+                }
+            },
+            onHotkey = { hotkey, down ->
+                if (down) haptics.press()
+                onHotkey(hotkey, down)
+            },
+            onHotkeysUnavailable = {
+                haptics.reject()
+                hint = MirrorNotice.HotkeysNeedBluetooth(hotkeys.hostName)
+            },
+            onEditHotkeys = { editing = true },
+            onForgetCompanion = onForgetCompanion,
+        )
+        if (editing) {
+            MirrorHotkeyEditor(
+                hotkeys = hotkeys.list,
+                typingLayout = typingLayout,
+                onChange = onHotkeysChange,
+                onDone = { editing = false },
+            )
         }
     }
 }
 
+/** What a key press that did nothing returns. */
+private val NOTHING_DONE = MirrorTouchUpdate(emptyList(), emptyList(), emptyList(), held = false)
+
 /** The surface's haptics, each tied to the event that causes it; silent when the app's preference is off. */
 internal class MirrorHaptics(private val view: View, private val enabled: Boolean) {
-    /** A press reaches the computer: Direct touch-down, Hover tap. */
+    /** A press reaches the computer: Direct touch-down, Hover tap, the left-button key or a hotkey going down. */
     fun press() = perform(HapticFeedbackConstants.KEYBOARD_TAP)
+
+    /** The left-button key let go of the computer's button. */
+    fun release() = perform(HapticFeedbackConstants.KEYBOARD_RELEASE)
 
     /** A segmented choice changed (Direct/Hover) or the input mode moved on. */
     fun tick() = perform(
@@ -357,7 +430,9 @@ private data class TouchMark(val x: Float, val y: Float, val held: Boolean)
  *
  * Touches arrive as raw MotionEvents: a down asks Android for unbuffered dispatch, so moves reach
  * the computer as they happen instead of batched to the next frame, and a system cancel is told
- * apart from a lift.
+ * apart from a lift. A MotionEvent carries every finger on the window, the thumb on a control over
+ * the picture too, so each pointer is tagged by where it landed ([MirrorFingerRouter], against
+ * [bounds]) and the touch policy never sees the thumb as a second finger.
  */
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
@@ -366,10 +441,13 @@ private fun MirrorImage(
     live: Boolean,
     stale: Boolean,
     haptics: MirrorHaptics,
+    bounds: MirrorControlBounds,
     onTouch: (MirrorTouchFrame) -> MirrorTouchUpdate,
     onImagePlaced: (FloatArray) -> Unit,
 ) {
     val view = LocalView.current
+    // Which fingers belong to the overlay's controls, decided where each landed.
+    val router = remember { MirrorFingerRouter() }
     var surfaceSize by remember { mutableStateOf(IntSize.Zero) }
     var origin by remember { mutableStateOf(Offset.Zero) }
     // Frame size changes rarely (a new display), so reading it here recomposes only then.
@@ -464,12 +542,16 @@ private fun MirrorImage(
                     ?.takeIf { surfaceSize.width > 0 }
                     ?.let { fitMirror(it.width, it.height, surfaceSize.width.toFloat(), surfaceSize.height.toFloat(), allowRotation = true) }
                     ?: currentFit
+                // Routed on every event, live or not, so a finger is owned from the moment it lands.
+                val frame = router.route(event.toMirrorTouchFrame(fitNow ?: NO_FIT)) { x, y ->
+                    bounds.hits(Offset(origin.x + x, origin.y + y))
+                }
                 if (fitNow == null || !currentLive) {
                     marks.value = emptyList()
                     return@pointerInteropFilter true
                 }
                 // What the computer gets, the ring and the haptics all come from the touch policy's one record.
-                val update = currentOnTouch(event.toMirrorTouchFrame(fitNow))
+                val update = currentOnTouch(frame.copy(fit = fitNow))
                 update.events.forEach {
                     if (it == MirrorTouchEvent.PRESSED || it == MirrorTouchEvent.TAPPED) currentHaptics.press()
                 }
@@ -516,6 +598,9 @@ internal val EffectsSpring: FiniteAnimationSpec<Float> = spring(dampingRatio = 1
 private val FastEffectsSpring: FiniteAnimationSpec<Float> = spring(dampingRatio = 1f, stiffness = 3800f)
 internal val SpatialSizeSpring: FiniteAnimationSpec<IntSize> =
     spring(dampingRatio = 0.9f, stiffness = 700f, visibilityThreshold = IntSize.VisibilityThreshold)
+
+/** A fit for routing touches before any picture has been placed. */
+private val NO_FIT = MirrorFit(0f, 0f, 0f, 0f, MirrorRotation.NONE)
 
 private const val DIM_ALPHA = 0.6f
 private const val STALE_DIM_ALPHA = 0.3f

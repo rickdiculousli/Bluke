@@ -112,8 +112,12 @@ sealed interface MirrorNotice {
     data class WrongCode(val attemptsLeft: Int) : MirrorNotice
     data object Forgotten : MirrorNotice
     data class Declined(val companionName: String) : MirrorNotice
-    /** The first picture of a session arrived; the rail has room for only part of a long name. */
+    /** The first picture of a session arrived; the menu names the computer, the picture alone doesn't. */
     data class Streaming(val companionName: String) : MirrorNotice
+    /** The left-button key was pressed before any point was sent this session: it has nowhere to press. */
+    data object KeyNeedsPointer : MirrorNotice
+    /** A hotkey was touched while Bluetooth has no host; [hostName] is the one it would go to, if known. */
+    data class HotkeysNeedBluetooth(val hostName: String?) : MirrorNotice
 }
 
 /**

@@ -406,7 +406,7 @@ private fun PhoneAddressHint(state: MirrorUiState, command: String) {
  * can still move toward fade out, and a slim thumb at the side says how much more there is, even
  * when the cut falls between two lines.
  */
-private fun Modifier.scrollCue(scroll: ScrollState, thumbColor: Color): Modifier = this
+internal fun Modifier.scrollCue(scroll: ScrollState, thumbColor: Color): Modifier = this
     .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
     .drawWithContent {
         drawContent()
@@ -510,6 +510,9 @@ private fun MirrorNotice.text(): String = when (this) {
     MirrorNotice.Forgotten -> FORGOTTEN_TEXT
     is MirrorNotice.Declined -> "Declined $companionName"
     is MirrorNotice.Streaming -> "Streaming from $companionName"
+    MirrorNotice.KeyNeedsPointer -> "Touch the picture first, so the button knows where to press"
+    is MirrorNotice.HotkeysNeedBluetooth ->
+        hostName?.let { "Connect Bluetooth to $it to use hotkeys" } ?: "Connect Bluetooth to a host to use hotkeys"
 }
 
 private const val FORGOTTEN_TEXT = "Mirror pairing removed"

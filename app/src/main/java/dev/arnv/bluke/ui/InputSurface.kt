@@ -70,13 +70,15 @@ internal fun InputSurface(
                 chrome = chrome,
                 sharedPrefs = sharedPrefs,
             )
-            // Mirror keeps the rail spec 002 built for it rather than the shared toolbar.
+            // Mirror floats its own left-hand controls over the picture rather than the shared toolbar;
+            // the Bluetooth host is the one its hotkeys go to.
             InputMode.MIRROR -> MirrorView(
                 btManager = btManager,
                 onClose = onClose,
                 launchMode = launchMode,
                 onModeChange = onModeChange,
                 sharedPrefs = sharedPrefs,
+                host = stableHost,
             )
             else -> KeyboardSurface(
                 state = keyboardState,

@@ -46,7 +46,9 @@ import org.robolectric.annotation.GraphicsMode
 /**
  * The Mirror surface in each state it can show, in the landscape the input surfaces run in, on a
  * 360dp-high phone, in the dark scheme the surface host wraps every input surface in, at font scale
- * 1.0, 1.3 and 2.0, with long and emoji computer names; plus the touch ring on the first frame of a press.
+ * 1.0, 1.3 and 2.0, with long and emoji computer names; the left-hand overlay over a light and a
+ * dark picture, in Direct and Hover, with the key held, with 0, 3 and 8 hotkeys, with them disabled,
+ * and the hotkey editor, at 1.0 and 1.3; plus the touch ring on the first frame of a press.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -181,22 +183,75 @@ class MirrorScreenshotTest {
         ),
     )
 
+    private val streamingHover = address.copy(
+        phase = MirrorPhase.Connected("Rick's MacBook Pro", "Built-in Retina Display", hasFrame = true),
+        pairedName = "Rick's MacBook Pro",
+        fps = 20,
+        latencyMs = 6,
+        touchMode = MirrorTouchMode.HOVER,
+    )
+    private val three = listOf(
+        MirrorHotkey(KeyboardLayouts.KEY_E, label = "End turn"),
+        MirrorHotkey(KeyboardLayouts.KEY_1),
+        MirrorHotkey(KeyboardLayouts.KEY_TAB, HotkeyModifiers.SHIFT),
+    )
+    private val eight = three + listOf(
+        MirrorHotkey(KeyboardLayouts.KEY_2),
+        MirrorHotkey(KeyboardLayouts.KEY_3),
+        MirrorHotkey(KeyboardLayouts.KEY_ESC),
+        MirrorHotkey(KeyboardLayouts.KEY_F5, HotkeyModifiers.CTRL or HotkeyModifiers.SHIFT),
+        MirrorHotkey(KeyboardLayouts.KEY_SPACE),
+    )
+    private fun ready(list: List<MirrorHotkey>) = MirrorHotkeysUi(list, enabled = true, hostName = "Rick's MacBook Pro")
+
+    /** The overlay's own cases, at font scale 1.0 and 1.3. */
+    private val overlay = linkedMapOf(
+        "overlay-hover-3-dark-picture" to Case(streamingHover, ready(three)),
+        "overlay-hover-3-light-picture" to Case(streamingHover, ready(three), lightPicture = true),
+        "overlay-direct-3-light-picture" to Case(streamingHover.copy(touchMode = MirrorTouchMode.DIRECT), ready(three), lightPicture = true),
+        "overlay-hover-key-held" to Case(streamingHover.copy(keyHeld = true), ready(three)),
+        "overlay-hover-key-held-light-picture" to Case(streamingHover.copy(keyHeld = true), ready(three), lightPicture = true),
+        "overlay-hover-0" to Case(streamingHover, ready(emptyList())),
+        "overlay-hover-8" to Case(streamingHover, ready(eight)),
+        "overlay-direct-8" to Case(streamingHover.copy(touchMode = MirrorTouchMode.DIRECT), ready(eight)),
+        "overlay-hotkeys-disabled" to Case(streamingHover, MirrorHotkeysUi(three, enabled = false, hostName = "Rick's MacBook Pro")),
+        "overlay-waiting-3" to Case(
+            address.copy(phase = MirrorPhase.Waiting("Rick's MacBook Pro"), pairedName = "Rick's MacBook Pro", touchMode = MirrorTouchMode.HOVER),
+            ready(three),
+        ),
+        "editor-3" to Case(streamingHover, ready(three), editing = true),
+        "editor-0" to Case(streamingHover, ready(emptyList()), editing = true),
+        "editor-8" to Case(streamingHover, ready(eight), editing = true),
+    )
+
+    /** One overlay case: the state, its hotkeys, which picture, and whether the editor is open. */
+    private data class Case(
+        val state: MirrorUiState,
+        val hotkeys: MirrorHotkeysUi = MirrorHotkeysUi(),
+        val lightPicture: Boolean = false,
+        val editing: Boolean = false,
+    )
+
     private companion object {
         const val SETTLE_MS = 1_000L
         const val LONG_NAME = "Rick's MacBook Pro (Work) in the upstairs office"
         const val EMOJI_NAME = "🎮 Gaming PC 🖥️"
     }
 
-    private data class Shot(val name: String, val state: MirrorUiState, val fontScale: Float)
+    private data class Shot(val name: String, val case: Case, val fontScale: Float)
+
+    private fun shots(fontScale: Float, withOverlay: Boolean): List<Shot> =
+        states.map { (name, state) -> Shot(name, Case(state), fontScale) } +
+            if (withOverlay) overlay.map { (name, case) -> Shot(name, case, fontScale) } else emptyList()
 
     @Test
-    fun fontScale1() = captureAll(states.map { (name, state) -> Shot(name, state, fontScale = 1f) })
+    fun fontScale1() = captureAll(shots(1f, withOverlay = true))
 
     @Test
-    fun fontScale1_3() = captureAll(states.map { (name, state) -> Shot(name, state, fontScale = 1.3f) })
+    fun fontScale1_3() = captureAll(shots(1.3f, withOverlay = true))
 
     @Test
-    fun fontScale2() = captureAll(states.map { (name, state) -> Shot(name, state, fontScale = 2f) })
+    fun fontScale2() = captureAll(shots(2f, withOverlay = false))
 
     /** The first frame of a press: filled ring in Direct (the button is held), hollow in Hover. */
     @Test
@@ -214,7 +269,7 @@ class MirrorScreenshotTest {
         composeTestRule.setContent {
             val shot = current.value
             HostSurfaceTheme(shot.fontScale) {
-                key(shot) { Surface(shot.name, shot.state) }
+                key(shot) { Surface(shot.name, shot.case) }
             }
         }
         shots.forEach { shot ->
@@ -236,7 +291,7 @@ class MirrorScreenshotTest {
         var root: android.view.View? = null
         composeTestRule.setContent {
             root = LocalView.current
-            HostSurfaceTheme(fontScale = 1f) { Surface(stateName, state) }
+            HostSurfaceTheme(fontScale = 1f) { Surface(stateName, Case(state)) }
         }
         composeTestRule.waitForIdle()
         // Robolectric draws only when asked, and the touch layer learns the image's place from a draw.
@@ -256,13 +311,21 @@ class MirrorScreenshotTest {
     }
 
     @Composable
-    private fun Surface(name: String, state: MirrorUiState) {
+    private fun Surface(name: String, case: Case) {
+        val state = case.state
         // The real touch policy, so the ring the press draws is the one the app would.
         val policy = androidx.compose.runtime.remember(state.touchMode) { MirrorTouchPolicy(mode = state.touchMode, tapSlopPx = 24f) }
+        val hasPicture = (state.phase as? MirrorPhase.Connected)?.hasFrame == true || name == "link-lost" || name.startsWith("overlay-waiting")
         MirrorSurface(
             state = state,
             // A picture once one was decoded this session, or one left from before the link dropped.
-            frames = if ((state.phase as? MirrorPhase.Connected)?.hasFrame == true || name == "link-lost") withPicture else withoutPicture,
+            frames = when {
+                !hasPicture -> withoutPicture
+                case.lightPicture -> withLightPicture
+                else -> withPicture
+            },
+            hotkeys = case.hotkeys,
+            editingHotkeys = case.editing,
             onClose = {},
             onNextMode = {},
             onConfigureModes = {},
@@ -299,13 +362,30 @@ class MirrorScreenshotTest {
     }
 
     private val withPicture by lazy { FakeFrames(hasPicture = true) }
+    private val withLightPicture by lazy { FakeFrames(hasPicture = true, light = true) }
     private val withoutPicture by lazy { FakeFrames(hasPicture = false) }
 
-    /** A 480x300 stand-in for a card-game frame: a backdrop, two creatures and a hand of cards. */
-    private class FakeFrames(hasPicture: Boolean) : MirrorFrameSource {
+    /**
+     * A 480x300 stand-in for a card-game frame (a backdrop, two creatures and a hand of cards), or
+     * with [light] a white document window, the hardest picture for translucent controls.
+     */
+    private class FakeFrames(hasPicture: Boolean, light: Boolean = false) : MirrorFrameSource {
         override val frameSeq: State<Long> = mutableLongStateOf(1L)
-        private val image: ImageBitmap? = if (hasPicture) gameFrame().asImageBitmap() else null
+        private val image: ImageBitmap? = if (hasPicture) (if (light) lightFrame() else gameFrame()).asImageBitmap() else null
         override fun currentFrame(): ImageBitmap? = image
+
+        private fun lightFrame(): Bitmap {
+            val bitmap = Bitmap.createBitmap(480, 300, Bitmap.Config.RGB_565)
+            val canvas = Canvas(bitmap)
+            val paint = Paint(Paint.ANTI_ALIAS_FLAG)
+            paint.color = 0xFFFFFFFF.toInt(); canvas.drawRect(0f, 0f, 480f, 300f, paint)
+            paint.color = 0xFFECECEC.toInt(); canvas.drawRect(0f, 0f, 480f, 22f, paint)
+            paint.color = 0xFFD0D0D0.toInt()
+            for (row in 0 until 12) canvas.drawRect(24f, 40f + row * 20f, 456f, 41f + row * 20f, paint)
+            paint.color = 0xFF9AA0A6.toInt()
+            for (row in 0 until 12) canvas.drawRect(28f, 46f + row * 20f, 28f + (row * 37 % 260) + 80f, 52f + row * 20f, paint)
+            return bitmap
+        }
 
         private fun gameFrame(): Bitmap {
             val bitmap = Bitmap.createBitmap(480, 300, Bitmap.Config.RGB_565)

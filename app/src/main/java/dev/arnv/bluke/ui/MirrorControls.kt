@@ -3,6 +3,7 @@ package dev.arnv.bluke.ui
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -42,7 +43,6 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.LocalContentColor
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
-import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -71,6 +71,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.onClick
 import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.rememberTextMeasurer
@@ -142,7 +143,7 @@ internal object MirrorControlColors {
 }
 
 /** The overlay's width: two columns of targets and the gap between them. */
-internal val MIRROR_CONTROLS_WIDTH: Dp = CELL * 2 + GAP
+internal val MIRROR_CONTROLS_WIDTH: Dp get() = CELL * 2 + GAP
 
 /**
  * The insets the overlay keeps clear of on the left: the Back gesture's zone and any cutout,
@@ -235,7 +236,7 @@ private fun CloseCell(bounds: MirrorControlBounds, onClose: () -> Unit) {
         Modifier
             .size(CELL)
             .controlBounds(bounds, "close")
-            .combinedClickable(role = Role.Button, onClickLabel = "Close Mirror", indication = ripple(), interactionSource = null, onClick = onClose)
+            .clickable(role = Role.Button, onClick = onClose)
             .semantics(mergeDescendants = true) { contentDescription = "Close Mirror" }
             .testTag("exit_mirror_btn"),
     ) {
@@ -255,8 +256,6 @@ private fun NextModeCell(bounds: MirrorControlBounds, haptics: MirrorHaptics, on
             .size(CELL)
             .controlBounds(bounds, "next_mode")
             .combinedClickable(
-                interactionSource = null,
-                indication = ripple(),
                 role = Role.Button,
                 onClickLabel = "Next input mode",
                 onLongClickLabel = "Choose input modes",
@@ -266,6 +265,7 @@ private fun NextModeCell(bounds: MirrorControlBounds, haptics: MirrorHaptics, on
                 },
                 onLongClick = onConfigureModes,
             )
+            .testTag("mirror_mode_cycle_btn")
             .clearAndSetSemantics {
                 contentDescription = "Mirror"
                 role = Role.Button
@@ -273,8 +273,7 @@ private fun NextModeCell(bounds: MirrorControlBounds, haptics: MirrorHaptics, on
                     onNextMode()
                     true
                 }
-            }
-            .testTag("mirror_mode_cycle_btn"),
+            },
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(Icons.AutoMirrored.Filled.ScreenShare, contentDescription = null, modifier = Modifier.size(18.dp))
@@ -300,7 +299,8 @@ private fun TouchModeCell(mode: MirrorTouchMode, bounds: MirrorControlBounds, on
         Modifier
             .size(CELL)
             .controlBounds(bounds, "touch_mode")
-            .combinedClickable(interactionSource = null, indication = ripple(), role = Role.Button, onClick = onToggle)
+            .clickable(role = Role.Button, onClick = onToggle)
+            .testTag("mirror_touch_mode_btn")
             .clearAndSetSemantics {
                 contentDescription = "Touch mode: $label, $meaning"
                 role = Role.Button
@@ -308,8 +308,7 @@ private fun TouchModeCell(mode: MirrorTouchMode, bounds: MirrorControlBounds, on
                     onToggle()
                     true
                 }
-            }
-            .testTag("mirror_touch_mode_btn"),
+            },
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(icon, contentDescription = null, modifier = Modifier.size(if (labelFits) ICON_SMALL else ICON))
@@ -332,7 +331,7 @@ private fun MenuCell(
             Modifier
                 .size(CELL)
                 .controlBounds(bounds, "menu")
-                .combinedClickable(interactionSource = null, indication = ripple(), role = Role.Button, onClick = { menuOpen = true })
+                .clickable(role = Role.Button, onClick = { menuOpen = true })
                 .semantics(mergeDescendants = true) { contentDescription = "More Mirror options" }
                 .testTag("mirror_menu_btn"),
         ) {
@@ -420,6 +419,7 @@ private fun LeftButtonKey(held: Boolean, bounds: MirrorControlBounds, onKey: (do
             .size(width = MIRROR_CONTROLS_WIDTH, height = KEY_HEIGHT)
             .controlBounds(bounds, "left_button")
             .holdGesture { down -> currentOnKey(down) }
+            .testTag("mirror_left_button")
             .clearAndSetSemantics {
                 contentDescription = "Left mouse button"
                 stateDescription = if (held) "Held" else "Released"
@@ -428,8 +428,7 @@ private fun LeftButtonKey(held: Boolean, bounds: MirrorControlBounds, onKey: (do
                     currentOnKey(!held)
                     true
                 }
-            }
-            .testTag("mirror_left_button"),
+            },
         active = held,
         shape = MaterialTheme.shapes.large,
     ) {
@@ -463,7 +462,7 @@ private fun HotkeyGrid(
             Modifier
                 .size(CELL)
                 .controlBounds(bounds, "add_hotkey")
-                .combinedClickable(interactionSource = null, indication = ripple(), role = Role.Button, onClick = onEdit)
+                .clickable(role = Role.Button, onClick = onEdit)
                 .semantics(mergeDescendants = true) { contentDescription = "Add a hotkey button" }
                 .testTag("mirror_add_hotkey"),
         ) {
@@ -522,6 +521,7 @@ private fun HotkeyCell(
                     }
                 }
             }
+            .testTag("mirror_hotkey_$index")
             .clearAndSetSemantics {
                 contentDescription = hotkey.spokenLabel
                 role = Role.Button
@@ -535,8 +535,7 @@ private fun HotkeyCell(
                     }
                     true
                 }
-            }
-            .testTag("mirror_hotkey_$index"),
+            },
         active = down && enabled,
         enabled = enabled,
     ) {
