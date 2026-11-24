@@ -111,10 +111,14 @@ class GamepadLayoutTest {
         }
     }
 
-    /** The corner of [frame] that [point] sits on (within a pixel), as outward signs from the centre, or null. */
-    private fun cornerOf(frame: Rect, point: Offset): Offset? = listOf(
+    /**
+     * The corner of [frame] that [handle] covers (within a pixel), nearest its centre, as outward signs from
+     * the frame's centre, or null. A handle is centred on its corner unless the area's edge slides it in.
+     */
+    private fun cornerOf(frame: Rect, handle: Rect): Offset? = listOf(
         Offset(1f, 1f), Offset(-1f, 1f), Offset(1f, -1f), Offset(-1f, -1f),
-    ).firstOrNull { (cornerAt(frame, it) - point).getDistance() <= 1.5f }
+    ).filter { handle.inflate(1f).contains(cornerAt(frame, it)) }
+        .minByOrNull { (cornerAt(frame, it) - handle.center).getDistance() }
 
     private fun cornerAt(frame: Rect, signs: Offset) =
         Offset(if (signs.x > 0) frame.right else frame.left, if (signs.y > 0) frame.bottom else frame.top)
@@ -131,7 +135,7 @@ class GamepadLayoutTest {
         assertEquals("a handle per part ($id)", 12, handles.size)
         handles.forEach { (part, handle) ->
             assertTrue("$part handle $handle inside $area ($id)", area.contains(handle.topLeft) && area.contains(handle.bottomRight - Offset(0.5f, 0.5f)))
-            assertTrue("$part handle $handle on a corner of ${frames.getValue(part)} ($id)", cornerOf(frames.getValue(part), handle.center) != null)
+            assertTrue("$part handle $handle on a corner of ${frames.getValue(part)} ($id)", cornerOf(frames.getValue(part), handle) != null)
         }
     }
 
@@ -223,6 +227,61 @@ class GamepadLayoutTest {
         assertHandlesOnTheirCorners()
     }
 
+    /** Every control's touch box starts at least 12dp under the toolbar, so no reach for a trigger lands on it. */
+    private fun assertShoulderRowClearsTheToolbar() = forEachConsole { id ->
+        val toolbar = compose.onNodeWithTag("surface_toolbar").fetchSemanticsNode().boundsInRoot
+        val clearPx = with(compose.density) { 12.dp.toPx() } - 1f
+        controlBounds().forEach { (tag, rect) ->
+            assertTrue("$tag starts ${rect.top - toolbar.bottom}px under the toolbar at ${toolbar.bottom} ($id)", rect.top - toolbar.bottom >= clearPx)
+        }
+    }
+
+    @Test
+    fun theShoulderRowClearsTheToolbarOnALargePhone() {
+        setSurface()
+        assertShoulderRowClearsTheToolbar()
+    }
+
+    @Test
+    @Config(qualifiers = "w800dp-h360dp-land-xhdpi", sdk = [36])
+    fun theShoulderRowClearsTheToolbarOnA360dpTallPhone() {
+        setSurface()
+        assertShoulderRowClearsTheToolbar()
+    }
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land-xhdpi", sdk = [36])
+    fun theShoulderRowClearsTheToolbarOnASmallPhone() {
+        setSurface()
+        assertShoulderRowClearsTheToolbar()
+    }
+
+    @Test
+    fun theTriggersResizeFromTheirOuterCornersClearOfTheBumpers() {
+        setSurface(editMode = true)
+        forEachConsole { id ->
+            val frames = frames()
+            val handles = handles()
+            for ((part, signs) in listOf("left_trigger" to Offset(-1f, 1f), "right_trigger" to Offset(1f, 1f))) {
+                val handle = handles.getValue(part)
+                assertEquals("$part resizes from its bottom outer corner ($id)", signs, cornerOf(frames.getValue(part), handle))
+                frames.filterKeys { it != part }.forEach { (other, frame) ->
+                    assertFalse("$part handle $handle covers $other $frame ($id)", handle.overlaps(frame))
+                }
+            }
+        }
+    }
+
+    @Test
+    fun singleControlTuneSectionsNameTheirControl() {
+        setSurface(tuneOpen = true)
+        compose.onNodeWithText("Console").assertExists()
+        compose.onNodeWithText("Profile").assertExists()
+        compose.onNodeWithText("Match the games on the host").assertExists()
+        // The section title names the choice; the old second heading is gone.
+        compose.onAllNodesWithText("Button layout").assertCountEquals(0)
+    }
+
     @Test
     fun backFinishesEditingInsteadOfClosing() {
         setSurface(editMode = true)
@@ -246,16 +305,22 @@ class GamepadLayoutTest {
     private fun dragHandleOutward(part: String, distanceDp: Float): Pair<Offset, Offset> {
         val frame = frames().getValue(part)
         val handle = handles().getValue(part)
-        val signs = cornerOf(frame, handle.center) ?: error("$part handle ${handle.center} is on no corner of $frame")
-        val diagonal = cornerAt(frame, signs) - frame.center
+        val signs = cornerOf(frame, handle) ?: error("$part handle $handle is on no corner of $frame")
+        val corner = cornerAt(frame, signs)
+        val diagonal = corner - frame.center
         val step = diagonal / diagonal.getDistance() * with(compose.density) { distanceDp.dp.toPx() } / 8f
+        // The finger goes down on the corner itself, inside the handle.
+        val start = Offset(
+            corner.x.coerceIn(handle.left + 1f, handle.right - 1f),
+            corner.y.coerceIn(handle.top + 1f, handle.bottom - 1f),
+        )
         compose.onNodeWithTag("gamepad_resize_$part").performTouchInput {
-            down(center)
+            down(start - handle.topLeft)
             repeat(8) { moveBy(step) }
             up()
         }
         compose.waitForIdle()
-        return signs to handle.center + step * 8f
+        return signs to start + step * 8f
     }
 
     @Test
@@ -270,7 +335,7 @@ class GamepadLayoutTest {
             assertTrue("$part grew: $before -> $after", after.width > before.width && after.height > before.height)
             val corner = cornerAt(after, signs)
             assertTrue("$part corner $corner within 8dp of the finger at $finger", (corner - finger).getDistance() <= tolerance)
-            assertTrue("$part handle is still on a corner of its part", cornerOf(after, handles().getValue(part).center) != null)
+            assertTrue("$part handle is still on a corner of its part", cornerOf(after, handles().getValue(part)) != null)
             // Dragging any of its handles back in by as much shrinks it to where it began.
             dragHandleOutward(part, -48f)
             assertEquals("$part shrinks back", before.width, frames().getValue(part).width, 1.5f)

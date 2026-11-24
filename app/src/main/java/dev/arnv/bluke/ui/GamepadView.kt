@@ -18,6 +18,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
+import androidx.compose.foundation.layout.mandatorySystemGestures
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -45,6 +46,7 @@ import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.RestartAlt
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.outlined.FilterNone
+import androidx.compose.material3.ColorScheme
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -241,9 +243,9 @@ internal data class GamepadTuneState(
 /** The gamepad's settings: which output profile the host's games get. Every profile shares one descriptor, so it switches live. */
 @Composable
 internal fun GamepadTuneContent(state: GamepadTuneState, onChange: (GamepadTuneState) -> Unit) {
-    TuneSection("Profile") {
+    TuneSection("Profile", supporting = "Match the games on the host") {
         TuneChoice(
-            label = "Match the games on the host",
+            label = null,
             options = GamepadDpadOutputMode.entries,
             selected = state.profile,
             optionLabel = { it.label },
@@ -286,9 +288,13 @@ private data class PartTransform(val x: Float = 0f, val y: Float = 0f, val scale
 
 private const val SHOULDER_WIDTH_DP = 112f
 private const val EDGE_MARGIN_DP = 16f
-/** The space above the shoulder row, under the toolbar. */
-private const val SHOULDER_TOP_DP = 6f
-/** The space kept below the lower clusters, above the screen's bottom edge. */
+/**
+ * The space above the shoulder row, under the toolbar, on screen at every size: a thumb reaching for a
+ * trigger lands clear of Close, the mode button and Tune. More than [TARGET_GAP_DP], since a trigger is
+ * pressed blind.
+ */
+private const val SHOULDER_TOP_DP = 12f
+/** The space kept below the lower clusters, above the controls area's bottom, on screen at every size. */
 private const val BOTTOM_MARGIN_DP = 4f
 /** Where the outer cluster (left stick or D-pad; face buttons) sits, from its side edge: under a resting thumb. */
 private const val OUTER_CLUSTER_DP = 128f
@@ -296,8 +302,8 @@ private const val OUTER_CLUSTER_DP = 128f
 private const val INNER_CLUSTER_DP = 248f
 private const val CENTER_BUTTON_SPACING_DP = 60f
 /** The face-button cluster's square touch box: two spacings plus one button. */
-private const val FACE_SPACING_DP = 42f
-private const val FACE_BUTTON_DP = 50f
+private const val FACE_SPACING_DP = 40f
+private const val FACE_BUTTON_DP = 48f
 private const val FACE_CLUSTER_DP = 2 * FACE_SPACING_DP + FACE_BUTTON_DP
 private const val STICK_WELL_DP = 104f
 /** A stick part's height: its well. The L3/R3 badge sits beside the well, in the part's outer column. */
@@ -328,10 +334,14 @@ private data class GamepadMetrics(val scale: Float, val target: Float) {
     /** Center to center of the View/Share/Menu row, keeping [TARGET_GAP_DP] between them on screen. */
     val centerSpacing: Float get() = maxOf(CENTER_BUTTON_SPACING_DP, target + TARGET_GAP_DP / scale)
     val minWidth: Float get() = INNER_CLUSTERS_WIDTH_DP + 2 * centerSpacing + target
-    val minHeight: Float get() = LAYOUT_MIN_HEIGHT_DP + (target - MIN_TARGET_DP)
+    val minHeight: Float get() =
+        LAYOUT_MIN_HEIGHT_DP + (target - MIN_TARGET_DP) + (topMargin - SHOULDER_TOP_DP) + (bottomMargin - BOTTOM_MARGIN_DP)
+    /** [SHOULDER_TOP_DP] and [BOTTOM_MARGIN_DP] before the scale, so they stay that size on screen. */
+    val topMargin: Float get() = SHOULDER_TOP_DP / scale
+    val bottomMargin: Float get() = BOTTOM_MARGIN_DP / scale
     /** A stick part's L3/R3 badge column, and so how far the part's centre sits from its well's. */
     val stickBadgeShift: Float get() = target / 2f
-    val shoulderCenterY: Float get() = SHOULDER_TOP_DP + target / 2f
+    val shoulderCenterY: Float get() = topMargin + target / 2f
 }
 
 /**
@@ -364,8 +374,8 @@ private fun baseLayout(config: ConsoleConfig, width: Float, height: Float): Map<
 }
 
 private fun fullSizeLayout(config: ConsoleConfig, width: Float, height: Float, metrics: GamepadMetrics): Map<GamepadPart, Offset> {
-    val top = SHOULDER_TOP_DP + metrics.target + TARGET_GAP_DP
-    val bottom = height - BOTTOM_MARGIN_DP
+    val top = metrics.topMargin + metrics.target + TARGET_GAP_DP
+    val bottom = height - metrics.bottomMargin
     val area = bottom - top
 
     /**
@@ -729,6 +739,8 @@ fun GamepadView(
                     .weight(1f)
                     .fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
+                    // Above the system's bottom gesture zone too, so the lowest arm never sits in the home swipe.
+                    .windowInsetsPadding(WindowInsets.mandatorySystemGestures.only(WindowInsetsSides.Bottom))
                     // The Tune sheet is modal: while it is open, TalkBack finds only the sheet and the toolbar.
                     .then(if (tuneOpen) Modifier.clearAndSetSemantics {} else Modifier)
                     .testTag("gamepad_controls_area")
@@ -826,9 +838,9 @@ fun GamepadView(
         }
 
         SurfaceTuneSheet(visible = tuneOpen, title = "Gamepad", onDismiss = { tuneOpen = false }) {
-            TuneSection("Console") {
+            TuneSection("Console", supporting = "Button names and where the left stick sits") {
                 TuneChoice(
-                    label = "Button layout",
+                    label = null,
                     options = CONSOLES,
                     selected = config,
                     optionLabel = { it.name },
@@ -868,8 +880,8 @@ private fun ConsoleControl(config: ConsoleConfig, onClick: () -> Unit) {
             .minimumInteractiveComponentSize()
             .heightIn(min = 40.dp)
             .clip(CircleShape)
-            // Tonal, not outlined: an action to tap, unlike the outlined host chip, which reports status.
-            .background(colors.secondaryContainer)
+            // A text button: the mode button stays the toolbar's one filled pill, and with no outline it
+            // never reads as the host chip, which reports status.
             .clickable(onClickLabel = "Switch console", role = Role.Button, onClick = onClick)
             .semantics { stateDescription = config.name }
             .padding(start = 12.dp, end = 16.dp)
@@ -877,8 +889,8 @@ private fun ConsoleControl(config: ConsoleConfig, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(Icons.Default.SportsEsports, contentDescription = null, tint = colors.onSecondaryContainer, modifier = Modifier.size(18.dp))
-        Text(config.name, style = MaterialTheme.typography.labelLarge, color = colors.onSecondaryContainer, maxLines = 1)
+        Icon(Icons.Default.SportsEsports, contentDescription = null, tint = colors.primary, modifier = Modifier.size(18.dp))
+        Text(config.name, style = MaterialTheme.typography.labelLarge, color = colors.primary, maxLines = 1)
     }
 }
 
@@ -1032,10 +1044,21 @@ private enum class HandleCorner(val sx: Float, val sy: Float) {
 }
 
 /**
- * Which corner of its own frame each part's resize handle, a [size]-px square centred on it, sits on, given
- * every part's [frames] in an [area] (both px). The first of bottom-end, bottom-start, top-end and top-start
- * that lies in the area and covers no other part's frame or placed handle; failing that, the first in the
- * area; failing that, bottom-end. A part in [frozen] (its handle is being dragged) keeps its corner.
+ * The touch box of a resize handle on [corner] of [frame]: a [size]-px square centred on the corner, slid
+ * just far enough to lie wholly in [area] (all px). Near an edge it still covers its corner.
+ */
+private fun handleBox(frame: Rect, corner: HandleCorner, area: Rect, size: Float): Rect {
+    val c = corner.of(frame)
+    val left = (c.x - size / 2f).coerceIn(area.left, maxOf(area.left, area.right - size))
+    val top = (c.y - size / 2f).coerceIn(area.top, maxOf(area.top, area.bottom - size))
+    return Rect(left, top, left + size, top + size)
+}
+
+/**
+ * Which corner of its own frame each part's resize handle (its [handleBox], [size] px) sits on, given every
+ * part's [frames] in an [area] (both px). The first of bottom-end, bottom-start, top-end and top-start whose
+ * box covers its corner and no other part's frame or placed handle; failing that, the first that covers
+ * its corner; failing that, bottom-end. A part in [frozen] (its handle is being dragged) keeps its corner.
  */
 private fun resizeHandleCorners(
     frames: Map<GamepadPart, Rect>,
@@ -1043,15 +1066,16 @@ private fun resizeHandleCorners(
     size: Float,
     frozen: Map<GamepadPart, HandleCorner>,
 ): Map<GamepadPart, HandleCorner> {
-    val h = size / 2f
-    fun box(part: GamepadPart, corner: HandleCorner) = corner.of(frames.getValue(part)).let { Rect(it.x - h, it.y - h, it.x + h, it.y + h) }
-    fun inArea(r: Rect) = r.left >= area.left && r.top >= area.top && r.right <= area.right && r.bottom <= area.bottom
+    fun box(part: GamepadPart, corner: HandleCorner) = handleBox(frames.getValue(part), corner, area, size)
     val placed = linkedMapOf<GamepadPart, HandleCorner>()
     for (part in frames.keys.sortedBy { it.ordinal }) {
         val corner = frozen[part] ?: run {
             val others = frames.filterKeys { it != part }.values + placed.map { (p, c) -> box(p, c) }
-            val inside = HandleCorner.entries.filter { inArea(box(part, it)) }
-            inside.firstOrNull { c -> others.none { it.overlaps(box(part, c)) } } ?: inside.firstOrNull() ?: HandleCorner.BOTTOM_END
+            val onCorner = HandleCorner.entries.filter { c ->
+                val b = box(part, c)
+                c.of(frames.getValue(part)).let { it.x in b.left..b.right && it.y in b.top..b.bottom }
+            }
+            onCorner.firstOrNull { c -> others.none { it.overlaps(box(part, c)) } } ?: onCorner.firstOrNull() ?: HandleCorner.BOTTOM_END
         }
         placed[part] = corner
     }
@@ -1088,14 +1112,16 @@ private fun ResizeHandles(
         val area = Rect(0f, 0f, constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat())
         val corners = resizeHandleCorners(frames.toMap(), area, sizePx, dragging?.let { mapOf(it) } ?: emptyMap())
         corners.forEach { (part, corner) ->
-            val centre = corner.of(frames.getValue(part))
+            val box = handleBox(frames.getValue(part), corner, area, sizePx)
+            // Where the corner sits from the box's centre: the dot marks the corner itself.
+            val dot = corner.of(frames.getValue(part)) - box.center
             key(part) {
                 // Where the handle sits in the root, as last placed: the drag is measured in the root, so the
                 // handle moving with the corner it follows doesn't change what the finger has done.
                 val origin = remember { floatArrayOf(0f, 0f) }
                 Box(
                     Modifier
-                        .offset { IntOffset((centre.x - sizePx / 2f).roundToInt(), (centre.y - sizePx / 2f).roundToInt()) }
+                        .offset { IntOffset(box.left.roundToInt(), box.top.roundToInt()) }
                         .size(HANDLE_DP.dp)
                         .onGloballyPositioned { it.positionInRoot().let { p -> origin[0] = p.x; origin[1] = p.y } }
                         .systemGestureExclusion()
@@ -1134,6 +1160,7 @@ private fun ResizeHandles(
                 ) {
                     Box(
                         Modifier
+                            .offset { IntOffset(dot.x.roundToInt(), dot.y.roundToInt()) }
                             .size(28.dp)
                             .clip(CircleShape)
                             .background(colors.primary),
@@ -1197,13 +1224,16 @@ private fun Modifier.gamepadButton(
         }
     }
 
-/** A cap's fill and its label colour, straight from the pressed state: the pressed look lands with the touch. */
-@Composable
-private fun capColors(pressed: Boolean): Pair<Color, Color> {
-    val colors = MaterialTheme.colorScheme
-    return if (pressed) colors.secondaryContainer to colors.onSecondaryContainer
+/**
+ * A cap's fill and its label colour, straight from the pressed state: the pressed look lands with the
+ * touch. Pressed fills with primary, as Guide does, so it stands at least 3:1 off the resting cap.
+ */
+internal fun capColors(colors: ColorScheme, pressed: Boolean): Pair<Color, Color> =
+    if (pressed) colors.primary to colors.onPrimary
     else colors.surfaceContainerHighest to colors.onSurface
-}
+
+@Composable
+private fun capColors(pressed: Boolean): Pair<Color, Color> = capColors(MaterialTheme.colorScheme, pressed)
 
 private val BumperShape = RoundedCornerShape(24.dp)
 
@@ -1691,7 +1721,7 @@ private fun Dpad(onDpadChange: (Int) -> Unit) {
                     DPAD_RIGHT to Rect(c.x, start, w, start + bar),
                 )
                 arms.forEach { (bit, rect) ->
-                    if (activeDirection and bit != 0) drawRect(colors.secondaryContainer, rect.topLeft, rect.size)
+                    if (activeDirection and bit != 0) drawRect(capColors(colors, pressed = true).first, rect.topLeft, rect.size)
                 }
             }
             drawPath(cross, colors.outlineVariant, style = Stroke(1.dp.toPx()))
@@ -1699,7 +1729,7 @@ private fun Dpad(onDpadChange: (Int) -> Unit) {
 
             val arrowDist = w * 0.36f
             val arrow = w * 0.055f
-            fun arrowColor(bit: Int) = if (activeDirection and bit != 0) colors.onSecondaryContainer else colors.onSurfaceVariant
+            fun arrowColor(bit: Int) = if (activeDirection and bit != 0) capColors(colors, pressed = true).second else colors.onSurfaceVariant
             fun triangle(tip: Offset, back: Offset, side: Offset) = Path().apply {
                 moveTo(tip.x, tip.y)
                 lineTo(back.x + side.x, back.y + side.y)
