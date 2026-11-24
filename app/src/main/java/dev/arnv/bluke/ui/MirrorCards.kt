@@ -11,6 +11,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
@@ -46,6 +47,8 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.setValue
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -64,6 +67,9 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
@@ -125,8 +131,9 @@ internal fun QuietLinkChip(state: MirrorUiState) {
 /**
  * A live picture over a slow link: which computer, and its link latency, from when the latency
  * reaches [SLOW_LINK_MS] until it falls under [SLOW_LINK_CLEAR_MS], so lag a person feels has a
- * cause they can see and a link wavering at the line doesn't flicker the chip. A link that stops
- * answering is [QuietLinkChip]'s instead. TalkBack hears it once, as it appears, not each new figure.
+ * cause they can see and a link wavering at the line doesn't flicker the chip. A tap dismisses it
+ * until the link recovers (the ⋮ cell keeps the latency in view). A link that stops answering is
+ * [QuietLinkChip]'s instead. TalkBack hears it once, as it appears, not each new figure.
  */
 @Composable
 internal fun SlowLinkChip(state: MirrorUiState) {
@@ -139,6 +146,9 @@ internal fun SlowLinkChip(state: MirrorUiState) {
         else -> latency >= SLOW_LINK_MS
     }
     val slow = showing[0]
+    var dismissed by remember { mutableStateOf(false) }
+    // Dismissed for this slow spell only: the next one shows again.
+    LaunchedEffect(slow) { if (!slow) dismissed = false }
     // What fades out is what was last shown.
     val last = remember { arrayOf<String?>(null, null) }
     if (slow) {
@@ -146,7 +156,7 @@ internal fun SlowLinkChip(state: MirrorUiState) {
         last[1] = "Slow link to ${connected?.companionName}"
     }
     AnimatedVisibility(
-        visible = slow,
+        visible = slow && !dismissed,
         enter = fadeIn(EffectsSpring) + expandVertically(SpatialSizeSpring),
         exit = fadeOut(EffectsSpring) + shrinkVertically(SpatialSizeSpring),
     ) {
@@ -155,13 +165,19 @@ internal fun SlowLinkChip(state: MirrorUiState) {
                 .padding(bottom = 8.dp)
                 .clip(MaterialTheme.shapes.extraLarge)
                 .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-                .heightIn(min = 40.dp)
-                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .clickable(role = Role.Button, onClickLabel = "Dismiss") { dismissed = true }
+                .heightIn(min = 48.dp)
+                .padding(start = 16.dp, end = 12.dp, top = 8.dp, bottom = 8.dp)
+                .testTag("mirror_slow_link")
                 .clearAndSetSemantics {
                     contentDescription = last[1].orEmpty()
                     liveRegion = LiveRegionMode.Polite
-                }
-                .testTag("mirror_slow_link"),
+                    role = Role.Button
+                    onClick("Dismiss") {
+                        dismissed = true
+                        true
+                    }
+                },
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(12.dp),
         ) {
@@ -177,6 +193,13 @@ internal fun SlowLinkChip(state: MirrorUiState) {
                 color = MaterialTheme.colorScheme.onSurface,
                 maxLines = 1,
                 overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.weight(1f, fill = false),
+            )
+            Icon(
+                Icons.Filled.Close,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
             )
         }
     }

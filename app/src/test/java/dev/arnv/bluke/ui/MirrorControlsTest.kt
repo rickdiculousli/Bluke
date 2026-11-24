@@ -190,6 +190,14 @@ class MirrorControlsTest {
     }
 
     @Test
+    fun aTapDismissesTheSlowLinkChip() {
+        show(streaming.copy(latencyMs = 140))
+        rule.onNodeWithTag("mirror_slow_link").assertIsDisplayed().performClick()
+        settle(1_000)
+        rule.onNodeWithTag("mirror_slow_link").assertDoesNotExist()
+    }
+
+    @Test
     fun theTouchModeButtonSwitchesToTheOtherMode() {
         show(streaming)
         rule.onNodeWithTag("mirror_touch_mode_btn").performClick()

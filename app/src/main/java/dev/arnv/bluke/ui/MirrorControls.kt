@@ -160,11 +160,13 @@ internal object MirrorControlColors {
 internal val MIRROR_CONTROLS_WIDTH: Dp get() = CELL * 2 + GAP
 
 /**
- * The insets the overlay keeps clear of on the left: the Back gesture's zone and any cutout,
- * so a thumb resting on a control never starts Back.
+ * The insets the overlay keeps clear of: on the left the Back gesture's zone and any cutout, so a
+ * thumb resting on a control never starts Back, and at the bottom the Home gesture's zone, so the
+ * last row of hotkeys never sits on the gesture bar.
  */
 internal val MirrorControlsInsets: WindowInsets
     @Composable get() = WindowInsets.systemGestures.union(WindowInsets.displayCutout).only(WindowInsetsSides.Start)
+        .union(WindowInsets.systemGestures.only(WindowInsetsSides.Bottom))
 
 /**
  * The left-hand controls, floating over the picture's left edge in two columns: Close and the next
