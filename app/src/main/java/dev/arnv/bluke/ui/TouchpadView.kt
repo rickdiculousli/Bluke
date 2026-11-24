@@ -137,12 +137,6 @@ data class TouchpadTuneState(
     }
 }
 
-private val SCROLL_KEYS = arrayOf(
-    TOUCHPAD_SCROLL_SPEED_PREFERENCE,
-    TOUCHPAD_INVERT_SCROLL_PREFERENCE,
-    TOUCHPAD_SCROLL_MOMENTUM_PREFERENCE,
-    TOUCHPAD_SCROLL_GLIDE_PREFERENCE,
-)
 
 private fun glideLabel(glide: Float): String = when {
     glide < 0.34f -> "Short"
@@ -223,7 +217,7 @@ fun TouchpadView(
         it.getBoolean(TOUCHPAD_NUMPAD_PREFERENCE, false)
     }
     val tune by rememberPreference(sharedPrefs, *TouchpadTuneState.KEYS) { TouchpadTuneState.read(it) }
-    val scrollSettings by rememberPreference(sharedPrefs, *SCROLL_KEYS) { TouchpadScrollSettings.from(it) }
+    val scrollSettings by rememberPreference(sharedPrefs, *TouchpadScrollSettings.KEYS) { TouchpadScrollSettings.from(it) }
     var tuneOpen by rememberSaveable { mutableStateOf(false) }
     val keyboardTheme = remember(context) { KeyboardThemeRepository(context).selectedTheme() }
 
@@ -538,32 +532,6 @@ private const val POINTER_COUNTS_PER_DP = 2.625f
 private const val LEFT_BUTTON: Byte = 1
 private const val RIGHT_BUTTON: Byte = 2
 private const val MIDDLE_BUTTON: Byte = 4
-
-/**
- * The old signature, kept for the multimedia pad until it moves to the overload below: it reads the
- * scroll settings itself and treats a 20 ms vibration as the click it always marked.
- */
-@Composable
-fun TouchGestureLayer(
-    btManager: BluetoothKeyboardManager,
-    sensitivity: Float,
-    scrollSensitivity: Float,
-    buttonMode: TrackpadButtonMode,
-    triggerVibration: (Long) -> Unit,
-    showNumpadLed: Boolean,
-) {
-    val context = LocalContext.current
-    val prefs = remember(context) { context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
-    val scrollSettings by rememberPreference(prefs, *SCROLL_KEYS) { TouchpadScrollSettings.from(it) }
-    TouchGestureLayer(
-        btManager = btManager,
-        sensitivity = sensitivity,
-        scrollSettings = scrollSettings.copy(speed = scrollSensitivity),
-        buttonMode = buttonMode,
-        showNumpadLed = showNumpadLed,
-        onClick = { triggerVibration(20) },
-    )
-}
 
 /**
  * Turns touches on the pad into mouse reports: one finger points, two scroll, a tap clicks, and in

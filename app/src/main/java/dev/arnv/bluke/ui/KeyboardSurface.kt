@@ -475,7 +475,6 @@ internal fun KeyboardSurface(
     caseBrush: Brush,
     chrome: SurfaceChrome,
     isConnected: Boolean,
-    connectedDevice: BluetoothDevice?,
 ) {
     val haptics = rememberSurfaceHaptics(sharedPrefs)
     val context = LocalContext.current

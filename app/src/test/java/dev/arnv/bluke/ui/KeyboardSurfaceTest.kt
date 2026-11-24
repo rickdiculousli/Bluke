@@ -51,7 +51,6 @@ internal fun KeyboardSurfaceUnderTest(
             caseBrush = caseBrush(state.selectedKeyboardTheme),
             chrome = previewChrome(InputMode.KEYBOARD, host),
             isConnected = isConnected,
-            connectedDevice = null,
         )
     }
 }

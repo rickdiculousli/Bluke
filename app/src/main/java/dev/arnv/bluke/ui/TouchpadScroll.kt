@@ -19,6 +19,14 @@ data class TouchpadScrollSettings(
     val glide: Float = 0.5f,
 ) {
     companion object {
+        /** The keys [from] reads. */
+        val KEYS = arrayOf(
+            TOUCHPAD_SCROLL_SPEED_PREFERENCE,
+            TOUCHPAD_INVERT_SCROLL_PREFERENCE,
+            TOUCHPAD_SCROLL_MOMENTUM_PREFERENCE,
+            TOUCHPAD_SCROLL_GLIDE_PREFERENCE,
+        )
+
         fun from(prefs: SharedPreferences): TouchpadScrollSettings {
             val defaults = TouchpadScrollSettings()
             return TouchpadScrollSettings(

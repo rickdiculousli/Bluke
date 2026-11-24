@@ -223,7 +223,7 @@ internal fun MediaPresentationView(
         }
     }
 
-    val remote = remember(btManager, haptics) { RemoteSender(btManager, haptics) }
+    val remote = remember(btManager, haptics, sharedPrefs) { RemoteSender(btManager, haptics, sharedPrefs) }
     val upright = (postureOverride ?: posture) == MultimediaPosture.PORTRAIT_HELD
 
     Box(
@@ -376,13 +376,15 @@ private fun PointerArea(remote: RemoteSender, tune: MultimediaTuneState, modifie
                     .background(colors.surfaceContainerHigh)
                     .testTag("multimedia_touchpad"),
             ) {
+                // The pad scrolls with the touchpad's scroll feel (invert, momentum, glide) at this remote's speed.
+                val scrollFeel by rememberPreference(remote.prefs, *TouchpadScrollSettings.KEYS) { TouchpadScrollSettings.from(it) }
                 TouchGestureLayer(
                     btManager = remote.btManager,
                     sensitivity = tune.pointer.pointerSpeed,
-                    scrollSensitivity = tune.pointer.scrollSpeed,
+                    scrollSettings = scrollFeel.copy(speed = tune.pointer.scrollSpeed),
                     buttonMode = TrackpadButtonMode.CLICKPAD,
-                    triggerVibration = { remote.haptics.perform(HapticEvent.CLICK) },
                     showNumpadLed = false,
+                    onClick = { remote.haptics.perform(HapticEvent.CLICK) },
                 )
             }
             Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
@@ -442,7 +444,7 @@ private fun neutralColors() =
     RemoteButtonColors(MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurface)
 
 /** Sends what a remote button means and plays its touch-down haptic. */
-private class RemoteSender(val btManager: BluetoothKeyboardManager, val haptics: SurfaceHaptics) {
+private class RemoteSender(val btManager: BluetoothKeyboardManager, val haptics: SurfaceHaptics, val prefs: SharedPreferences) {
     fun press() = haptics.perform(HapticEvent.PRESS)
 
     fun send(action: RemoteAction, pressed: Boolean) {

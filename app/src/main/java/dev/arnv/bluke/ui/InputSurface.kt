@@ -30,7 +30,6 @@ internal fun InputSurface(
     launchMode: Int,
     isConnected: Boolean,
     host: SurfaceHost,
-    connectedDevice: BluetoothDevice?,
     onClose: () -> Unit,
     onModeChange: (Int) -> Unit,
 ) {
@@ -78,7 +77,6 @@ internal fun InputSurface(
                 caseBrush = caseBrush,
                 chrome = chrome,
                 isConnected = isConnected,
-                connectedDevice = connectedDevice,
             )
         }
     }
