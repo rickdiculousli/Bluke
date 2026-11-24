@@ -1,6 +1,10 @@
 package dev.arnv.bluke.ui
 
 import android.content.Context
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.LocalRippleConfiguration
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
@@ -10,7 +14,6 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
-import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import dev.arnv.bluke.ui.theme.MyApplicationTheme
 import org.junit.Before
@@ -25,6 +28,7 @@ import org.robolectric.annotation.GraphicsMode
  * Filmstrips of home's motion with the clock held still: a press on touch-down, Paired stepping aside
  * when a host connects, and Details opening. Each frame is `src/test/screenshots/home-motion-<what>-<ms>ms.png`.
  */
+@OptIn(ExperimentalMaterial3Api::class)
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(qualifiers = "w411dp-h914dp-port-notnight-xhdpi", sdk = [36])
@@ -47,23 +51,26 @@ class HomeMotionScreenshotTest {
             .edit().putInt("theme_mode", 1).putBoolean("dynamic_color", false).commit()
     }
 
+    /**
+     * Material's ripple is the platform RippleDrawable, which animates on wall-clock time, not the held compose
+     * clock, so it would make every frame after a click differ run to run. The filmstrips show home's own motion.
+     */
+    @Composable
+    private fun NoRipple(content: @Composable () -> Unit) =
+        CompositionLocalProvider(LocalRippleConfiguration provides null, content = content)
+
     private fun frames(name: String, steps: List<Long>) {
         var elapsed = 0L
         for (step in steps) {
             compose.mainClock.advanceTimeBy(step - elapsed)
             elapsed = step
-            compose.onRoot().captureRoboImage(
-                filePath = "src/test/screenshots/home-motion-$name-${step}ms.png",
-                // A frame mid-motion anti-aliases a rotating chevron a few pixels differently depending on where the
-                // click lands against the frame clock; a real change moves far more than 0.05% of the screen.
-                roborazziOptions = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0.0005f)),
-            )
+            compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/home-motion-$name-${step}ms.png")
         }
     }
 
     @Test
     fun aTilePressShowsOnTouchDown() {
-        compose.setContent { MyApplicationTheme { HomeContent(ready, HomeCallbacks()) } }
+        compose.setContent { MyApplicationTheme { NoRipple { HomeContent(ready, HomeCallbacks()) } } }
         compose.waitForIdle()
         compose.mainClock.autoAdvance = false
         compose.onNodeWithTag("mode_tile_keyboard").performTouchInput { down(center) }
@@ -74,7 +81,7 @@ class HomeMotionScreenshotTest {
     @Test
     fun pairedStepsAsideWhenAHostConnects() {
         var state by mutableStateOf(ready)
-        compose.setContent { MyApplicationTheme { HomeContent(state, HomeCallbacks()) } }
+        compose.setContent { MyApplicationTheme { NoRipple { HomeContent(state, HomeCallbacks()) } } }
         compose.waitForIdle()
         compose.mainClock.autoAdvance = false
         state = connected
@@ -83,7 +90,7 @@ class HomeMotionScreenshotTest {
 
     @Test
     fun detailsOpen() {
-        compose.setContent { MyApplicationTheme { HomeContent(connected, HomeCallbacks()) } }
+        compose.setContent { MyApplicationTheme { NoRipple { HomeContent(connected, HomeCallbacks()) } } }
         compose.waitForIdle()
         compose.mainClock.autoAdvance = false
         compose.onNodeWithTag("connection_details_toggle").performClick()
