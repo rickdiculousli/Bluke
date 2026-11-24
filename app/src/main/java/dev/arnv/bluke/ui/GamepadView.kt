@@ -13,7 +13,6 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -381,11 +380,15 @@ private class GamepadLayoutEdits(
     private fun name(part: GamepadPart, field: String) = "${consoleId}_${part.key}_$field"
 }
 
-/** Places this element with its centre at [center] (dp, in the parent's coordinates), read at placement. */
-private fun Modifier.centeredAt(center: () -> Offset) = layout { measurable, constraints ->
+/**
+ * Places this element with its centre at [center] (dp, in the parent's coordinates), given the size of
+ * the area it is placed in (dp, the parent's maximum constraints). Read at placement, so moving a part
+ * only re-places it.
+ */
+private fun Modifier.centeredAt(center: (area: Size) -> Offset) = layout { measurable, constraints ->
     val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
     layout(placeable.width, placeable.height) {
-        val c = center()
+        val c = center(Size(constraints.maxWidth.toDp().value, constraints.maxHeight.toDp().value))
         placeable.place(c.x.dp.roundToPx() - placeable.width / 2, c.y.dp.roundToPx() - placeable.height / 2)
     }
 }
@@ -564,25 +567,21 @@ fun GamepadView(
                 }
             }
 
-            BoxWithConstraints(
+            // Parts find their place from the area's size when they are placed (see centeredAt), so the
+            // controls area needs no subcomposition to know its size.
+            Box(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
             ) {
-                val areaWidth = maxWidth.value
-                val areaHeight = maxHeight.value
-                val base = remember(config, areaWidth, areaHeight) { baseLayout(config, areaWidth, areaHeight) }
-
                 @Composable
                 fun Part(part: GamepadPart, content: @Composable () -> Unit) {
-                    val origin = base.getValue(part)
                     EditablePart(
                         part = part,
                         isEditMode = isEditMode,
                         transform = edits[part],
-                        origin = origin,
-                        area = Size(areaWidth, areaHeight),
+                        originIn = { area -> baseLayout(config, area.width, area.height).getValue(part) },
                         onTransform = { edits.update(part, it) },
                         onTransformEnd = edits::commit,
                         content = content,
@@ -623,7 +622,7 @@ fun GamepadView(
                 Part(GamepadPart.START) { CenterButton(config.startButton, Icons.Default.Menu, pressButton, releaseButton) }
 
                 // The status slot between the shoulder pairs: the output profile, or how editing works.
-                Box(Modifier.centeredAt { Offset(areaWidth / 2f, SHOULDER_ROW_CENTER_DP) }) {
+                Box(Modifier.centeredAt { area -> Offset(area.width / 2f, SHOULDER_ROW_CENTER_DP) }) {
                     if (isEditMode) EditHint() else ProfileChip(tune.profile, onClick = { tuneOpen = true })
                 }
             }
@@ -721,30 +720,34 @@ private fun EditablePart(
     part: GamepadPart,
     isEditMode: Boolean,
     transform: PartTransform,
-    origin: Offset,
-    area: Size,
+    originIn: (area: Size) -> Offset,
     onTransform: (PartTransform) -> Unit,
     onTransformEnd: () -> Unit,
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current.density
     val current by rememberUpdatedState(transform)
-    val currentOrigin by rememberUpdatedState(origin)
-    val currentArea by rememberUpdatedState(area)
+    // Where the part sits and the area it sits in, as last placed; dragging clamps against them.
+    val placed = remember { PlacedArea() }
     val currentOnTransform by rememberUpdatedState(onTransform)
     val currentOnTransformEnd by rememberUpdatedState(onTransformEnd)
     val colors = MaterialTheme.colorScheme
 
     // Keep the part's centre inside the controls area.
     fun clamped(next: PartTransform) = next.copy(
-        x = next.x.coerceIn(-currentOrigin.x, currentArea.width - currentOrigin.x),
-        y = next.y.coerceIn(-currentOrigin.y, currentArea.height - currentOrigin.y),
+        x = next.x.coerceIn(-placed.origin.x, placed.area.width - placed.origin.x),
+        y = next.y.coerceIn(-placed.origin.y, placed.area.height - placed.origin.y),
         scale = next.scale.coerceIn(0.6f, 1.8f),
     )
 
     Box(
         modifier = Modifier
-            .centeredAt { Offset(origin.x + current.x, origin.y + current.y) }
+            .centeredAt { area ->
+                val origin = originIn(area)
+                placed.origin = origin
+                placed.area = area
+                Offset(origin.x + current.x, origin.y + current.y)
+            }
             .graphicsLayer {
                 scaleX = current.scale
                 scaleY = current.scale
@@ -817,6 +820,12 @@ private fun EditablePart(
             }
         }
     }
+}
+
+/** A part's last placement: not state, since only the drag handler reads it. */
+private class PlacedArea {
+    var origin: Offset = Offset.Zero
+    var area: Size = Size.Zero
 }
 
 // ── Controls ──
@@ -1036,6 +1045,7 @@ private fun FaceButton(button: ButtonDef, pressed: Boolean, onAccessibilityClick
             .semantics {
                 contentDescription = button.description
                 role = Role.Button
+                stateDescription = if (pressed) "Pressed" else "Released"
                 onClick {
                     onAccessibilityClick()
                     true
