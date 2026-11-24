@@ -11,6 +11,13 @@ import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.role
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.LayoutDirection
 
@@ -30,6 +37,10 @@ fun KeyboardView(
     keySensitivity: Float = 6f,
     selectedStyleId: String? = null,
     onKeySelected: ((KeyLayoutInfo) -> Unit)? = null,
+    /** Modifiers an accessibility click has latched, read out as such. */
+    latchedKeys: Collection<Int> = emptyList(),
+    /** An accessibility click on a key; without one, a press and a release, as a tap would send. */
+    onKeyClick: ((Int) -> Unit)? = null,
     onKeyPressChange: (Int, Boolean) -> Unit
 ) {
     // The pointer loop below outlives recompositions; read the latest callback and radius through these.
@@ -77,6 +88,8 @@ fun KeyboardView(
                 .background(Color(theme.plateArgb), RoundedCornerShape(10.dp))
                 .border(1.5.dp, PlateInk.Rim, RoundedCornerShape(10.dp))
                 .padding(platePadding)
+                // Keys are placed row by row, so focus walks the plate a row at a time.
+                .semantics { isTraversalGroup = true }
                 .pointerInput(baseUnitWidth, baseUnitHeight, allKeys, onKeySelected) {
                         awaitPointerEventScope {
                             if (onKeySelected != null) {
@@ -192,6 +205,17 @@ fun KeyboardView(
                         null
                     }
 
+                    val isLockKey = key.keyCode == KeyboardLayouts.KEY_CAPSLOCK ||
+                        key.keyCode == KeyboardLayouts.KEY_NUMLOCK ||
+                        key.keyCode == KeyboardLayouts.KEY_SCROLLLOCK
+                    val isRightHalf = key.x + key.widthRatio / 2 > totalLayoutWidthInUnits / 2
+                    val spokenName = spokenKeyName(key, displayLegend, isFnActive, isRightHalf)
+                    val keyState = when {
+                        isLockKey -> if (isIndicatorActive) "On" else "Off"
+                        key.keyCode in latchedKeys -> "Latched"
+                        else -> null
+                    }
+
                     KeyCap(
                         legend = displayLegend,
                         shiftedLegend = displayShiftedLegend,
@@ -208,13 +232,81 @@ fun KeyboardView(
                                 x = baseUnitWidth * keyX,
                                 y = baseUnitHeight * keyY
                             ),
-                        glowColor = finalGlowColor
+                        glowColor = finalGlowColor,
+                        keySemantics = {
+                            role = Role.Button
+                            contentDescription = spokenName
+                            if (keyState != null) stateDescription = keyState
+                            onClick {
+                                when {
+                                    onKeySelected != null -> onKeySelected(key)
+                                    onKeyClick != null -> onKeyClick(key.keyCode)
+                                    else -> {
+                                        onKeyPressChange(key.keyCode, true)
+                                        onKeyPressChange(key.keyCode, false)
+                                    }
+                                }
+                                true
+                            }
+                        },
                     )
                 }
             }
         }
         }
     }
+
+/**
+ * What a screen reader calls [key]: a character key by the character it shows now ([displayLegend],
+ * so the typing layout and case decide it), a named key in words, and a key Fn turns into a media
+ * control by that control. A modifier takes its side from where it sits ([isRightHalf]), as a
+ * person sees it: most layouts send left-hand codes from both sides.
+ */
+internal fun spokenKeyName(
+    key: KeyLayoutInfo,
+    displayLegend: String,
+    isFnActive: Boolean,
+    isRightHalf: Boolean,
+): String {
+    if (isFnActive) consumerControlForFnKey(key.keyCode)?.let { return it.actionLabel }
+    if (key.keyCode in KeyboardLayouts.MOD_LCTRL..KeyboardLayouts.MOD_RWIN) {
+        val side = if (isRightHalf) "Right " else "Left "
+        val modifier = when (key.keyCode) {
+            KeyboardLayouts.MOD_LCTRL, KeyboardLayouts.MOD_RCTRL -> "Control"
+            KeyboardLayouts.MOD_LSHIFT, KeyboardLayouts.MOD_RSHIFT -> "Shift"
+            // Alt and GUI carry the modifier style's label: Alt or Option, Windows or Command.
+            KeyboardLayouts.MOD_LALT, KeyboardLayouts.MOD_RALT ->
+                if (key.legend == KeyboardModifierStyle.MAC.altLabel) "Option" else "Alt"
+            else -> if (key.legend == KeyboardModifierStyle.MAC.guiLabel) "Command" else "Windows"
+        }
+        return side + modifier
+    }
+    return when (key.keyCode) {
+        KeyboardLayouts.KEY_FN -> "Fn"
+        KeyboardLayouts.KEY_ESC -> "Escape"
+        KeyboardLayouts.KEY_ENTER -> "Enter"
+        KeyboardLayouts.KEY_BACKSPACE -> "Backspace"
+        KeyboardLayouts.KEY_TAB -> "Tab"
+        KeyboardLayouts.KEY_SPACE -> "Space"
+        KeyboardLayouts.KEY_CAPSLOCK -> "Caps Lock"
+        KeyboardLayouts.KEY_NUMLOCK -> "Num Lock"
+        KeyboardLayouts.KEY_SCROLLLOCK -> "Scroll Lock"
+        KeyboardLayouts.KEY_PRINTSCREEN -> "Print Screen"
+        KeyboardLayouts.KEY_PAUSE -> "Pause"
+        KeyboardLayouts.KEY_INSERT -> "Insert"
+        KeyboardLayouts.KEY_DELETE -> "Delete"
+        KeyboardLayouts.KEY_HOME -> "Home"
+        KeyboardLayouts.KEY_END -> "End"
+        KeyboardLayouts.KEY_PAGEUP -> "Page Up"
+        KeyboardLayouts.KEY_PAGEDOWN -> "Page Down"
+        KeyboardLayouts.KEY_UP -> "Up arrow"
+        KeyboardLayouts.KEY_DOWN -> "Down arrow"
+        KeyboardLayouts.KEY_LEFT -> "Left arrow"
+        KeyboardLayouts.KEY_RIGHT -> "Right arrow"
+        in KeyboardLayouts.KEY_F1..KeyboardLayouts.KEY_F12 -> "F${key.keyCode - KeyboardLayouts.KEY_F1 + 1}"
+        else -> displayLegend.ifBlank { key.legend }.ifBlank { "Key" }
+    }
+}
 
 /** How much taller than wide a key may grow to fill a short geometry's height. */
 private const val MAX_KEY_ASPECT = 1.15f

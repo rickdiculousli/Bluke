@@ -14,6 +14,9 @@ import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.SemanticsPropertyReceiver
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -36,6 +39,11 @@ fun KeyCap(
     glowColor: Color? = null,
     /** Read while drawing, so a press shows in the frame it lands without waiting for recomposition. */
     isPressedNow: () -> Boolean = { isPressed },
+    /**
+     * What an accessibility service reads and does on this key. When set it replaces the drawn
+     * legends' semantics, so TalkBack meets one button rather than loose text.
+     */
+    keySemantics: (SemanticsPropertyReceiver.() -> Unit)? = null,
 ) {
     val keyBorderColor = keyBgColor.darker()
     
@@ -52,7 +60,16 @@ fun KeyCap(
         modifier = modifier
             .width(width)
             .height(height)
-            .testTag("key_$legend")
+            .then(
+                if (keySemantics != null) {
+                    Modifier.clearAndSetSemantics {
+                        testTag = "key_$legend"
+                        keySemantics()
+                    }
+                } else {
+                    Modifier.testTag("key_$legend")
+                }
+            )
             .padding(1.dp)
             .then(
                 if (isSelected) Modifier.border(2.dp, KeyCapInk.Selection, RoundedCornerShape(outerRadius))
