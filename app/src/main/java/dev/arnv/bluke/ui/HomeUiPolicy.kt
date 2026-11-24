@@ -1,37 +1,33 @@
 package dev.arnv.bluke.ui
 
-import dev.arnv.bluke.bluetooth.BluetoothState
+import dev.arnv.bluke.bluetooth.requiresHidDescriptorRefresh
 
-internal fun shouldShowDiscoveredHost(address: String, bondedAddresses: Set<String>, activeAddress: String?): Boolean =
-    address !in bondedAddresses && address != activeAddress
+internal fun shouldShowGamepadGuide(mode: InputMode, guideSeen: Boolean): Boolean =
+    mode == InputMode.GAMEPAD && !guideSeen
 
-internal fun shouldShowGamepadGuide(mode: Int, guideSeen: Boolean): Boolean =
-    mode == InputMode.GAMEPAD.id && !guideSeen
+/** What home says once at launch. Only a descriptor change needs words; an app update alone needs none. */
+enum class LaunchNotice { NONE, DESCRIPTOR_REFRESH }
 
-internal fun BluetoothState.blocksInputLaunch(): Boolean =
-    this is BluetoothState.InitializingCapabilities ||
-        this is BluetoothState.CheckingCapabilities ||
-        this is BluetoothState.BluetoothOff ||
-        this is BluetoothState.Unsupported ||
-        this is BluetoothState.ProfileNotSupported
-
-internal fun shouldShowBluetoothErrorToast(
-    bluetoothState: BluetoothState,
-    message: String
-): Boolean {
-    if (bluetoothState is BluetoothState.InitializingCapabilities ||
-        bluetoothState is BluetoothState.CheckingCapabilities ||
-        bluetoothState is BluetoothState.ProfileNotSupported
-    ) return false
-
-    val normalizedMessage = message.lowercase()
-    if (normalizedMessage.contains("appears incompatible") ||
-        normalizedMessage.contains("repeatedly rejected hid")
-    ) return false
-
-    return normalizedMessage.contains("timed out") ||
-        normalizedMessage.contains("rejected") ||
-        normalizedMessage.contains("failed") ||
-        normalizedMessage.contains("refused") ||
-        normalizedMessage.contains("error")
+internal fun launchNotice(
+    savedVersionCode: Int,
+    hasSeenOnboarding: Boolean,
+    savedDescriptorRevision: Int,
+): LaunchNotice {
+    // Older builds wrote these on first run; a fresh install has neither and pairs with today's descriptor.
+    val existing = savedVersionCode > 0 || hasSeenOnboarding
+    return if (requiresHidDescriptorRefresh(savedDescriptorRevision, existing)) LaunchNotice.DESCRIPTOR_REFRESH
+    else LaunchNotice.NONE
 }
+
+/** What Grant permission does: ask Android, or, once Android has stopped showing the prompt, open app settings. */
+enum class PermissionStep { REQUEST, OPEN_APP_SETTINGS }
+
+/**
+ * After a person denies a permission twice, Android stops showing the prompt and the request returns
+ * denied at once; `shouldShowRequestPermissionRationale` is then false for it. Before the first request
+ * it is false too, so [askedBefore] tells the two apart.
+ */
+internal fun permissionStep(askedBefore: Boolean, deniedShowsRationale: List<Boolean>): PermissionStep =
+    if (askedBefore && deniedShowsRationale.isNotEmpty() && deniedShowsRationale.none { it }) PermissionStep.OPEN_APP_SETTINGS
+    else PermissionStep.REQUEST
+

@@ -24,7 +24,6 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
-import dev.arnv.bluke.bluetooth.BluetoothState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -61,7 +60,7 @@ class SurfaceToolbarFitTest {
         SurfaceHost(SurfaceHostStatus.Offline, null),
         SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off"),
         SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off", onFix = {}, fixLabel = "Turn on", fixClickLabel = "Turn on Bluetooth"),
-        SurfaceHost(SurfaceHostStatus.Blocked, null, reason = blockedReason(BluetoothState.ProfileNotSupported)),
+        SurfaceHost(SurfaceHostStatus.Blocked, null, reason = BlockReason.NO_HID_ROLE.chipReason),
     )
 
     /** A portrait phone: the keyboard's toolbar used to give the host chip no width at all. */

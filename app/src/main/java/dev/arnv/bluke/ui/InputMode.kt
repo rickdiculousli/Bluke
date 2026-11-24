@@ -14,6 +14,8 @@ enum class InputMode(
     TOUCHPAD(1, "touchpad", "Touchpad"),
     GAMEPAD(2, "gamepad", "Gamepad"),
     MEDIA_PRESENTATION(4, "media_presentation", "Multimedia"),
+    // Id 3 belonged to the removed keyboard+touchpad mode: a saved launch_mode of 3 must never open Mirror.
+    MIRROR(5, "mirror", "Mirror"),
     ;
 
     companion object {
@@ -24,7 +26,10 @@ enum class InputMode(
 private val legacyDefaultModeKeys = setOf("keyboard", "touchpad", "gamepad")
 private const val REMOVED_MOUSE_MODE_KEY = "mouse"
 private const val REMOVED_KEYBOARD_TOUCHPAD_MODE_KEY = "keyboard_touchpad"
-val defaultInputModeKeys: Set<String> = InputMode.entries.mapTo(linkedSetOf()) { it.preferenceKey }
+/** Mirror needs a companion on the computer, so it joins the cycle only when the user adds it. */
+private val optInModes = setOf(InputMode.MIRROR)
+val defaultInputModeKeys: Set<String> =
+    InputMode.entries.filterNot(optInModes::contains).mapTo(linkedSetOf()) { it.preferenceKey }
 
 fun normalizeInputModeKeys(savedKeys: Set<String>?): Set<String> {
     val normalized = when {

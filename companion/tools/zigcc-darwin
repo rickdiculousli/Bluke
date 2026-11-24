@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+# cc for aarch64-apple-darwin on Linux, through zig; drops Apple-clang-only flags.
+args=()
+skip=0
+for a in "$@"; do
+  if (( skip )); then skip=0; continue; fi
+  case "$a" in
+    -arch) skip=1 ;;
+    -mmacosx-version-min=*|-gfull|--target=*) ;;
+    *) args+=("$a") ;;
+  esac
+done
+exec mise exec zig@0.15.2 -- zig cc -target aarch64-macos "${args[@]}"

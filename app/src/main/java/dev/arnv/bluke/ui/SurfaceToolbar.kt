@@ -27,14 +27,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowRight
 import androidx.compose.material.icons.filled.Close
-import androidx.compose.material.icons.filled.Gamepad
-import androidx.compose.material.icons.filled.Keyboard
-import androidx.compose.material.icons.filled.Mouse
-import androidx.compose.material.icons.filled.PlayCircle
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Tune
-import androidx.compose.material.icons.filled.Devices
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -230,15 +225,6 @@ internal val SurfaceToolbarTargetGap = 8.dp
 /** The host's name keeps at least this many characters before the controls stop giving way. */
 internal const val HostNameFloorChars = 8
 
-/** The icon each mode shows on its mode button. */
-fun InputMode.icon(): ImageVector = when (this) {
-    InputMode.KEYBOARD -> Icons.Default.Keyboard
-    InputMode.TOUCHPAD -> Icons.Default.Mouse
-    InputMode.GAMEPAD -> Icons.Default.Gamepad
-    InputMode.MEDIA_PRESENTATION -> Icons.Default.PlayCircle
-    else -> Icons.Default.Devices
-}
-
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun ModeButton(chrome: SurfaceChrome, haptics: SurfaceHaptics, compact: Boolean) {
@@ -264,7 +250,7 @@ private fun ModeButton(chrome: SurfaceChrome, haptics: SurfaceHaptics, compact: 
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(chrome.mode.icon(), contentDescription = null, tint = colors.onSecondaryContainer, modifier = Modifier.size(18.dp))
+        Icon(chrome.mode.icon, contentDescription = null, tint = colors.onSecondaryContainer, modifier = Modifier.size(18.dp))
         if (compact) {
             // The label still reaches TalkBack.
             Box(Modifier.semantics { contentDescription = chrome.mode.displayName })

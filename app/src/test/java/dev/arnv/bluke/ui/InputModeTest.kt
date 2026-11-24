@@ -48,4 +48,22 @@ class InputModeTest {
         )
         assertEquals(InputMode.KEYBOARD, InputMode.fromId(3))
     }
+
+    @Test
+    fun mirrorHasItsOwnIdAndIsNeverTheOldKeyboardTouchpadId() {
+        assertEquals(5, InputMode.MIRROR.id)
+        assertEquals(InputMode.MIRROR, InputMode.fromId(5))
+        assertEquals(InputMode.KEYBOARD, InputMode.fromId(3))
+    }
+
+    @Test
+    fun mirrorIsNotInTheDefaultCycleButCanBeAdded() {
+        assertFalse(InputMode.MIRROR.preferenceKey in defaultInputModeKeys)
+        assertFalse(InputMode.MIRROR.preferenceKey in normalizeInputModeKeys(null))
+        assertFalse(InputMode.MIRROR.preferenceKey in normalizeInputModeKeys(setOf("keyboard", "touchpad", "gamepad")))
+        assertEquals(
+            setOf("touchpad", "mirror"),
+            normalizeInputModeKeys(setOf("touchpad", "mirror")),
+        )
+    }
 }

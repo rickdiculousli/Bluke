@@ -4,7 +4,7 @@ title: Mirror the host screen onto the phone at low resolution, so cards in Slay
 kind: feature
 size: L
 judge: opus
-status: proposed
+status: done
 lens: eng
 proposed_by: coordinator on ricks-macbook, from the operator's request
 proposed_on: 2026-11-23
@@ -129,6 +129,29 @@ Judge: opus, because it spans a new protocol, a new security boundary and two la
   Record every round's scores in Shown. If three rounds in a row bring no gain, record the belief that's blocking progress and report it with `bmesh ask`.
 
 ## Shown
+- Open Mirror and pair the first time (on the emulator, the rig's synthetic companion types the code the phone shows): `tools/mirror-rig/run.sh` at 0a9722b -> `paired`
+- A low-resolution live copy fills the surface: same run -> `frame drawn: framesDrawn 3, lastDrawnSeq 10`; picture as drawn: `app/src/test/screenshots/mirror/mirror-streaming-dark-fs1-land.png`
+- A finger drags and lifts, and the computer sees press, drag, release at those points: same run -> `drag: ok (move (-1439.74, 269.75), down (-1439.74, 269.75), drag (-959.99, 539.51), drag (-480.26, 647.40), up (-480.26, 647.40))`, checked against hand-written coordinates on a display at (-1920, 0)
+- The toolbar shows fps, link latency, and Direct or Hover: `mirror-streaming-dark-fs1-land.png`, `mirror-streaming-hover-dark-fs1-land.png`; `MirrorUiStateTest.theReadoutShowsTheRateAndLatencyWhileFrameAreDrawn`, `anUnchangedScreenReadsIdleNotZero`, `aQuietLinkBlanksBothNumbersAndDimsThePicture`
+- With no companion paired, Mirror says how to start one: `mirror-unpaired-dark-fs1-land.png` (the command, the `--phone` fallback with the phone's address, where the companion comes from)
+- `./gradlew testDebugUnitTest --tests 'dev.arnv.bluke.mirror.*' --tests 'dev.arnv.bluke.ui.InputModeTest' --tests 'dev.arnv.bluke.ui.Mirror*'` -> `BUILD SUCCESSFUL in 18s`. Kotlin tests for the protocol vectors, mapping, frame pool and credit, pairing, and the mode id and cycle: `MirrorProtocolTest.everyMessageVectorDecodesToItsFieldsAndEncodesBack`, `everyInvalidVectorIsRefusedWithItsKind`, `readRefusesTooLargeFromTheHeaderAlone`; `MirrorGeometryTest` (letterbox, pillarbox, rotation, clamping); `MirrorFramesTest.thePoolNeverHandsOutEitherOfTheTwoNewestPublishedBuffers`, `theSlotKeepsTheNewestAndHandsBackWhatItDisplaced`; `MirrorPairingTest.aWrongCodeFailsBothSidesAndPinsNothing`, `threeStrikesLockTheSession`, `rePairingAfterASuccessReplacesThePinnedCompanion`, `connectionPolicyRoutesTheFirstMessage` (an unknown key gets Refused(1)), `aRelayWithItsOwnCertificatesEndsUnpinned`; `Spake2Test.rfc9382VectorsInBothRoles`; `InputModeTest.mirrorHasItsOwnIdAndIsNeverTheOldKeyboardTouchpadId`, `mirrorIsNotInTheDefaultCycleButCanBeAdded`
+- `cargo test -p bluke-mirror-core` covers the same vectors, pairing with a man-in-the-middle relay, nothing before the pin, the cap, ordering and clamping, release on a drop and on silence mid-drag, change-only sending: `vectors.rs` `every_message_vector_decodes_and_encodes_both_ways`, `length_cap_is_checked_from_the_header_alone`; `pairing.rs` `man_in_the_middle_relay_fails_on_both_sides`, `wrong_code_fails_and_pins_nothing_on_either_side`; `session.rs` `unpinned_or_mismatched_peer_gets_nothing`, `nothing_is_sent_or_injected_before_welcome`, `press_drag_release_in_order_with_mapping_and_clamping`, `connection_drop_mid_drag_releases`, `silent_link_mid_drag_releases_after_one_second`, `unchanged_frames_send_nothing`, `credit_never_exceeds_two_and_acks_are_cumulative`.
+  `cd companion && mise exec rust@1.99.0 -- cargo test -p bluke-mirror-core` -> `test result: ok. 34 passed; 0 failed` (session), `9 passed` (pairing), `8 passed` (vectors); the whole workspace with `--features bluke-mirror/rig`, including the real-TLS test phone, 60 passed, 0 failed.
+- `cargo check --target aarch64-apple-darwin` for the macOS backend (ScreenCaptureKit, xcap fallback, CGEvent), on k16 with zig as the C cross compiler: `companion/tools/check-macos.sh` -> `Finished \`dev\` profile [unoptimized + debuginfo] target(s)`
+- The mirror rig, under the HID rig's lock and its emulator boot, reached through `adb forward`, code read through `RigReceiver`'s `mirror` command, drag through `adb shell input motionevent`: `tools/mirror-rig/run.sh` at 0a9722b -> `mirror rig: ok`; also `press held still 2.0 s (34 frames meanwhile): ok` (no early release while frames flow) and `held drag, then Home: ok` (released)
+- Pipeline numbers over 100 runs, emulator over adb loopback, not Wi-Fi; host load average 26-31 during the run, so these are inflated: touch to recorded inject p50 28.1 ms p95 114.7 ms (n=100; a sum of stage quantiles, so p95 is an upper bound); frame sent to decoded p50 13.4 ms (n=1687); decoded to drawn p50 15.9 ms (n=512); capture to sent p50 11.5 ms (n=1689). An earlier tree on a quiet box: touch to inject p50 5.2 ms, frame sent to decoded p50 1.4 ms.
+- Hill-climb, a fresh Opus reviewer per round with no earlier round's text (UI rubric 1-10; feature six items 0-2):
+  - Round 1: UI 7 (capped by a P1: the rail overflowed at font scale 1.3); feature not scorable yet.
+  - Round 2: UI 8; feature not scorable yet.
+  - Round 3: UI 8; feature 9/12 (latency 1, setup 1, small and tested 1).
+  - Round 4: UI 8; feature 9/12; no gain. Found the macOS capture wasn't ScreenCaptureKit; fixed.
+  - Round 5: UI 9; feature 10/12.
+  - Round 6: UI 9 (every dimension 4 but G 3); feature 12/12 (2, 2, 2, 2, 2, 2). Its one P2 (a spurious "Wrong code" once pairing is locked) is fixed after the round: `MirrorPairingTest.onlyAnUsedTryShowsAWrongCodeNotice`.
+  - The UI's feel (gesture tracking, haptic strength, frame rate on a phone) is not verified; no `main` baseline exists for a new surface.
+- Easy to miss: until the peer's pinned key is verified, nothing but pairing messages is accepted or sent: `session.rs` `unpinned_or_mismatched_peer_gets_nothing`, `nothing_is_sent_or_injected_before_welcome`; phone `MirrorPairingTest.connectionPolicyRoutesTheFirstMessage`, and the integration test `tls_phone.rs` `pair_reconnect_stream_and_inject_over_tls` over real TLS.
+- Not shown: the companion on a Mac (ScreenCaptureKit, CGEvent drags, permission prompts, Retina mapping): k16 can only type-check it; it's the operator's step.
+- Not shown: a card played in Slay the Spire and latency on real Wi-Fi: needs the Mac and the phone; the operator's step.
+- Not shown: the verify line with the cargo test and mirror rig: it waits on the operator publishing it; this section carries their output instead.
 
 ## Risks and the alternative considered
 - **macOS permissions.** The companion needs Screen Recording and Accessibility, and an unsigned binary loses the grants when it's rebuilt. The companion prints which settings pane to open.
@@ -140,10 +163,8 @@ Judge: opus, because it spans a new protocol, a new security boundary and two la
   - Noise instead of TLS: there's no maintained Kotlin Noise library, and TLS needs no new dependency on Android.
 
 ## Needs from the operator
-- Add the cargo test and the mirror rig to the repo's verify. The lead names the exact line, with Rust run through `mise exec`, and the operator publishes it with `bmesh repos propose` from the admin box.
-- [ricks-macbook] Build and run the companion:
-  - install the pinned Rust;
-  - `cargo build --release -p bluke-mirror`;
-  - grant Screen Recording and Accessibility to the terminal;
-  - run it and pair.
-- [ricks-macbook] Play one Slay the Spire hand through Mirror. Say whether dragging cards feels right and what the latency shown reads on your Wi-Fi.
+- Publish the new verify line from the admin box with `bmesh repos propose`, so the companion's tests and the mirror rig run at every landing: `export ANDROID_HOME=${ANDROID_HOME:-$HOME/Android/Sdk} JAVA_HOME=${JAVA_HOME:-$(mise where java@temurin-21)}; ./gradlew --no-daemon -q assembleDebug testDebugUnitTest && (cd companion && mise exec rust@1.99.0 -- cargo test --workspace --features bluke-mirror/rig) && tools/hid-rig/run.sh && tools/mirror-rig/run.sh`. check: `bmesh repos show Bluke`
+- [ricks-macbook] Build the companion: install Rust 1.99.0 (rustup reads `companion/rust-toolchain.toml`), then `cargo build --release -p bluke-mirror` in `companion/`. check: `companion/target/release/bluke-mirror --help`
+- [ricks-macbook] On the phone, install this build, long-press a surface's mode button, tick Mirror in Input mode cycle, and open Mirror. On the Mac, run `companion/target/release/bluke-mirror`. The first time it asks macOS for Screen Recording and Accessibility for the terminal and opens those panes; turn both on, reopen the terminal, run it again, and type the code the phone shows.
+- [ricks-macbook] Confirm what k16 could only type-check: the companion's connect line names ScreenCaptureKit (not the xcap fallback) and its status line shows grab times; the picture is upright with correct colours; a tap lands where the finger was on a Retina display.
+- [ricks-macbook] Play one Slay the Spire hand through Mirror. Say whether dragging cards feels right, and what fps and latency the rail shows on your Wi-Fi.

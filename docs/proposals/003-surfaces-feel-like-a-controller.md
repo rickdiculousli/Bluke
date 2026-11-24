@@ -5,6 +5,7 @@ kind: ux
 size: L
 judge: opus
 status: done
+scope_grew: [002, 004]
 lens: ux
 proposed_by: coordinator on ricks-macbook, from the operator's request
 proposed_on: 2026-11-23
@@ -23,6 +24,8 @@ A baseline of 122 screenshots (`docs/proposals/assets/003-visual-audit.md`) show
 - **Tune changes don't apply.** Surfaces read their settings once (`TouchpadView.kt:84-90`) or on resume only, so a setting changed inside the surface wouldn't apply until it reopens.
 
 ## Proposal
+**Scope grew (002, the host-screen mirror, and 004, one connection state, landed first):** the host chip is wired from spec 004's `ConnectionUi`, and the Mirror mode from spec 002 routes through `InputSurface`.
+
 Use the installed `impeccable`, `material-3` and `apple-design` skills.
 
 In:

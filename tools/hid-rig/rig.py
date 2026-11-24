@@ -18,6 +18,7 @@ import re
 import shlex
 import subprocess
 import sys
+import time
 
 from bumble import hid
 from bumble.core import PhysicalTransport
@@ -62,20 +63,42 @@ class App:
         return json.loads(match.group(1))
 
     def tap_button(self, labels: tuple[str, ...]) -> bool:
-        """Tap the first on-screen button whose text is one of labels (Android's pairing prompt)."""
+        """Tap the first on-screen button whose text is one of labels (Android's pairing prompt).
+        Any adb failure, a timeout included, is logged and returns False so the caller tries again."""
         try:
-            self._run("shell", "uiautomator", "dump", "/sdcard/rig-ui.xml")
-        except RuntimeError:
-            return False  # dump fails while windows animate; the caller retries
-        xml = self._run("shell", "cat", "/sdcard/rig-ui.xml")
-        for node in re.finditer(r"<node [^>]*>", xml):
-            text = re.search(r'text="([^"]*)"', node.group(0))
-            bounds = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node.group(0))
-            if text and bounds and text.group(1).strip().lower() in labels:
-                x1, y1, x2, y2 = map(int, bounds.groups())
-                self._run("shell", "input", "tap", str((x1 + x2) // 2), str((y1 + y2) // 2))
-                return True
-        return False
+            # uiautomator waits for the UI to go idle before it dumps, so a screen that never idles makes it hang:
+            # give each dump its own short limit.
+            out = subprocess.run(self.base + ["shell", "uiautomator", "dump", "/sdcard/rig-ui.xml"],
+                                 capture_output=True, text=True, timeout=15)
+            if out.returncode != 0 or "ERROR" in out.stdout:
+                print(f"uiautomator dump failed: {(out.stdout + out.stderr).strip()[:200]}", flush=True)
+                return False
+            xml = self._run("shell", "cat", "/sdcard/rig-ui.xml")
+            for node in re.finditer(r"<node [^>]*>", xml):
+                text = re.search(r'text="([^"]*)"', node.group(0))
+                bounds = re.search(r'bounds="\[(\d+),(\d+)\]\[(\d+),(\d+)\]"', node.group(0))
+                if text and bounds and text.group(1).strip().lower() in labels:
+                    x1, y1, x2, y2 = map(int, bounds.groups())
+                    self._run("shell", "input", "tap", str((x1 + x2) // 2), str((y1 + y2) // 2))
+                    return True
+            return False
+        except (RuntimeError, subprocess.TimeoutExpired) as error:
+            print(f"pairing prompt check failed ({error}); trying again", flush=True)
+            return False
+
+    def wait_settled(self, limit: float = 600.0) -> None:
+        """Wait for the freshly booted system to stop churning. On a loaded host its post-boot work starves
+        Settings for long enough (12 s to deliver a pairing request, 17 s to draw the dialog) that the host's
+        30 s pairing window closes before anyone can press Pair."""
+        cores = int(self._run("shell", "nproc").strip() or "1")
+        deadline = time.monotonic() + limit
+        while True:
+            load = float(self._run("shell", "cat", "/proc/loadavg").split()[0])
+            if load < 2 * cores or time.monotonic() > deadline:
+                print(f"emulator load {load:.1f} on {cores} cores"
+                      f"{'' if load < 2 * cores else ', still busy after ' + str(int(limit)) + ' s; going on'}", flush=True)
+                return
+            time.sleep(5)
 
     def restart(self) -> None:
         self._run("shell", "am", "force-stop", PACKAGE)
@@ -357,6 +380,7 @@ async def run(args: argparse.Namespace) -> int:
         address = str(device.public_address).replace("/P", "")
         print(f"host {HOST_NAME} at {address}", flush=True)
 
+        await asyncio.to_thread(app.wait_settled)
         app.restart()
         await wait_state(app, lambda s: s["serviceState"] in ("PairingMode", "ReadyDisconnected"),
                          "the app to register as a HID device", timeout=60)
@@ -376,10 +400,31 @@ async def run(args: argparse.Namespace) -> int:
                 await host.wait_channels(True, timeout=60)
             finally:
                 prompt.cancel()
-            await wait_state(app, lambda s: (s["host"] or "").upper() == address.upper(), "the app to see the host")
+            state = await wait_state(app, lambda s: (s["host"] or "").upper() == address.upper(), "the app to see the host")
+            assert state["lastFailure"] is None, f"connected with a failure still published: {state}"
             host.drain()
 
-        await step("pair and connect", connect())
+        async def first_pairing(attempts: int = 3) -> None:
+            # A guest starved by a busy host can take longer to show Android's pairing prompt than the host's
+            # pairing window lasts. The attempt then ends in a refused bond, which Bluke reports as lastFailure;
+            # by the next try the guest has caught up. Every try is logged, so a retry is never silent.
+            for attempt in range(1, attempts + 1):
+                try:
+                    await connect()
+                    return
+                except AssertionError as error:
+                    if attempt == attempts:
+                        raise
+                    # Only a bond that timed out unanswered is retried; any other failure is Bluke's and fails now.
+                    try:
+                        state = await wait_state(app, lambda s: s["lastFailure"] is not None, "the failed bond to settle", timeout=60)
+                    except AssertionError:
+                        raise error
+                    if state["lastFailure"] != "HOST_REFUSED_PAIRING":
+                        raise
+                    print(f"pairing try {attempt} failed ({error}); the bond was refused unanswered, trying again", flush=True)
+
+        await step("pair and connect", first_pairing())
         if not host.interrupt_open:
             print("cannot continue without a connection", flush=True)
             return 1
@@ -411,7 +456,7 @@ async def run(args: argparse.Namespace) -> int:
         async def reconnect() -> None:
             await call(app, "disconnect")
             await host.wait_channels(False)
-            await wait_state(app, lambda s: not s["host"], "the app to drop the host")
+            await wait_state(app, lambda s: not s["host"] and not s["disconnecting"], "the app to drop the host")
             await connect()
             await check_keyboard(app, host)
         await step("disconnect and reconnect", reconnect())

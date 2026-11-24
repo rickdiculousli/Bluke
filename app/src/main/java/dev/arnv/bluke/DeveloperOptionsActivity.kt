@@ -37,28 +37,6 @@ class DeveloperOptionsActivity : ComponentActivity() {
                 val sharedPrefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
                 
                 var isDevMode by remember { mutableStateOf(sharedPrefs.getBoolean("is_developer_mode", false)) }
-                var mockUpdatePopup by remember { mutableStateOf(sharedPrefs.getBoolean("mock_update_popup", false)) }
-                var mockBtDisabled by remember { mutableStateOf(sharedPrefs.getBoolean("mock_bt_disabled", false)) }
-                var mockUnsupported by remember { mutableStateOf(sharedPrefs.getBoolean("mock_device_unsupported", false)) }
-                var mockGamepadGuide by remember { mutableStateOf(sharedPrefs.getBoolean("mock_gamepad_guide", false)) }
-                var mockTroubleshootingNudge by remember { mutableStateOf(sharedPrefs.getBoolean("mock_troubleshooting_nudge", false)) }
-
-                // Easter egg states
-                val catEmojis = listOf("🐱", "😹", "😼")
-                var catIndex by remember { mutableIntStateOf(0) }
-                var catClicked by remember { mutableStateOf(false) }
-
-                LaunchedEffect(catClicked) {
-                    if (catClicked) {
-                        catIndex = (catIndex + 1) % catEmojis.size
-                        if (catIndex == 2) {
-                            // Hit smirk
-                            delay(500)
-                            context.startActivity(Intent(Intent.ACTION_VIEW, "https://www.youtube.com/watch?v=dQw4w9WgXcQ".toUri()))
-                        }
-                        catClicked = false
-                    }
-                }
 
                 val scrollBehavior = TopAppBarDefaults.exitUntilCollapsedScrollBehavior(rememberTopAppBarState())
 
@@ -96,7 +74,7 @@ class DeveloperOptionsActivity : ComponentActivity() {
                             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer)
                         ) {
                             Text(
-                                text = "WARNING: These settings are intended for development use only. They may cause the app to malfunction, mock errors, or degrade your experience.",
+                                text = "WARNING: These settings are intended for development use only. They may cause the app to malfunction or degrade your experience.",
                                 color = MaterialTheme.colorScheme.onErrorContainer,
                                 modifier = Modifier.padding(16.dp),
                                 style = MaterialTheme.typography.bodyMedium
@@ -117,25 +95,13 @@ class DeveloperOptionsActivity : ComponentActivity() {
                                 onCheckedChange = { 
                                     isDevMode = it
                                     sharedPrefs.edit { putBoolean("is_developer_mode", it) }
-                                    if (!it) {
-                                        // Auto turn off all mocks if dev mode disabled
-                                        sharedPrefs.edit {
-                                            putBoolean("mock_update_popup", false)
-                                            putBoolean("mock_bt_disabled", false)
-                                            putBoolean("mock_device_unsupported", false)
-                                            putBoolean("mock_hid_unsupported", false)
-                                            putBoolean("mock_gamepad_guide", false)
-                                            putBoolean("mock_troubleshooting_nudge", false)
-                                        }
-                                        finish() // Exit screen
-                                    }
+                                    if (!it) finish()
                                 }
                             )
                         }
                         
                         HorizontalDivider(modifier = Modifier.padding(horizontal = 16.dp))
 
-                        // Debug & Mocks
                         SettingsCardGroup(
                             items = listOf(
                                 SettingsItemData(
@@ -146,124 +112,8 @@ class DeveloperOptionsActivity : ComponentActivity() {
                                         startActivity(Intent(this@DeveloperOptionsActivity, DeveloperLogsActivity::class.java))
                                     }
                                 ),
-                                SettingsItemData(
-                                    title = "Force App Update Popup",
-                                    subtitle = "Mocks an app update on HomeScreen",
-                                    action = {
-                                        Switch(
-                                            checked = mockUpdatePopup,
-                                            onCheckedChange = {
-                                                mockUpdatePopup = it
-                                                sharedPrefs.edit { putBoolean("mock_update_popup", it) }
-                                            }
-                                        )
-                                    }
-                                ),
-                                SettingsItemData(
-                                    title = "Force Gamepad Guide",
-                                    subtitle = "Shows the first-use controller guidance on Home",
-                                    action = {
-                                        Switch(
-                                            checked = mockGamepadGuide,
-                                            onCheckedChange = {
-                                                mockGamepadGuide = it
-                                                sharedPrefs.edit { putBoolean("mock_gamepad_guide", it) }
-                                            },
-                                        )
-                                    },
-                                ),
-                                SettingsItemData(
-                                    title = "Force Troubleshooting Nudge",
-                                    subtitle = "Shows the contextual connection-help card on Home",
-                                    action = {
-                                        Switch(
-                                            checked = mockTroubleshootingNudge,
-                                            onCheckedChange = {
-                                                mockTroubleshootingNudge = it
-                                                sharedPrefs.edit { putBoolean("mock_troubleshooting_nudge", it) }
-                                            },
-                                        )
-                                    },
-                                ),
-                                SettingsItemData(
-                                    title = "Home Screen Error State",
-                                    subtitle = "Force UI into specific error state",
-                                    action = {
-                                        var expanded by remember { mutableStateOf(false) }
-                                        val errorOptions = listOf("None", "Bluetooth Disabled", "Device Unsupported", "HID Unsupported")
-                                        val mockHidUnsupported = sharedPrefs.getBoolean("mock_hid_unsupported", false)
-                                        val currentSelection = when {
-                                            mockBtDisabled -> "Bluetooth Disabled"
-                                            mockUnsupported -> "Device Unsupported"
-                                            mockHidUnsupported -> "HID Unsupported"
-                                            else -> "None"
-                                        }
-                                        Box {
-                                            TextButton(onClick = { expanded = true }) {
-                                                Text(currentSelection)
-                                            }
-                                            DropdownMenu(expanded = expanded, onDismissRequest = { expanded = false }) {
-                                                errorOptions.forEach { option ->
-                                                    DropdownMenuItem(
-                                                        text = { Text(option) },
-                                                        onClick = {
-                                                            when (option) {
-                                                                "None" -> {
-                                                                    mockBtDisabled = false
-                                                                    mockUnsupported = false
-                                                                    sharedPrefs.edit { putBoolean("mock_hid_unsupported", false) }
-                                                                }
-                                                                "Bluetooth Disabled" -> {
-                                                                    mockBtDisabled = true
-                                                                    mockUnsupported = false
-                                                                    sharedPrefs.edit { putBoolean("mock_hid_unsupported", false) }
-                                                                }
-                                                                "Device Unsupported" -> {
-                                                                    mockBtDisabled = false
-                                                                    mockUnsupported = true
-                                                                    sharedPrefs.edit { putBoolean("mock_hid_unsupported", false) }
-                                                                }
-                                                                "HID Unsupported" -> {
-                                                                    mockBtDisabled = false
-                                                                    mockUnsupported = false
-                                                                    sharedPrefs.edit { putBoolean("mock_hid_unsupported", true) }
-                                                                }
-                                                            }
-                                                            sharedPrefs.edit {
-                                                                putBoolean("mock_bt_disabled", mockBtDisabled)
-                                                                putBoolean("mock_device_unsupported", mockUnsupported)
-                                                            }
-                                                            expanded = false
-                                                        }
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                )
                             )
                         )
-
-                        // Easter Egg
-                        Spacer(modifier = Modifier.weight(1f))
-                        Box(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(32.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = catEmojis[catIndex],
-                                style = MaterialTheme.typography.displayLarge,
-                                modifier = Modifier.clickable(
-                                    interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
-                                    indication = null
-                                ) {
-                                    catClicked = true
-                                }
-                            )
-                        }
-                        Spacer(modifier = Modifier.height(16.dp))
                     }
                 }
             }
