@@ -131,13 +131,15 @@ fun SurfaceToolbar(
             .background(colors.surfaceContainerLow)
             .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
             .height(SurfaceToolbarHeight)
-            .padding(horizontal = 4.dp)
+            // No outer padding: Close and Tune draw at 40dp inside their 48dp targets, so they already
+            // sit 4dp in from the edges, and the room goes to the 8dp gaps between targets.
             .testTag("surface_toolbar"),
     ) { constraints ->
         val height = constraints.maxHeight
         fun measure(slot: Any, maxWidth: Int = constraints.maxWidth, content: @Composable () -> Unit): Placeable =
             subcompose(slot, content).single().measure(Constraints(maxWidth = maxWidth, maxHeight = height))
-        val gap = 4.dp.roundToPx()
+        // Material's 8dp between 48dp targets, so a thumb aimed at one never lands on its neighbour.
+        val gap = SurfaceToolbarTargetGap.roundToPx()
         val close = measure("close") {
             IconButton(onClick = chrome.onClose, modifier = Modifier.testTag("surface_close")) {
                 Icon(Icons.Default.Close, contentDescription = "Close ${chrome.mode.displayName.lowercase()}", tint = colors.onSurfaceVariant)
@@ -163,7 +165,7 @@ fun SurfaceToolbar(
                 CompositionLocalProvider(LocalSurfaceToolbarRoom provides room) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        horizontalArrangement = Arrangement.spacedBy(SurfaceToolbarTargetGap),
                         content = controls,
                     )
                 }
@@ -172,7 +174,7 @@ fun SurfaceToolbar(
         fun hostRoom(controls: Placeable?) =
             if (controls == null || controls.width == 0) shared else shared - controls.width - gap
 
-        // What gives way, in order: the controls step down (all LEDs, unlit ones as bare dots, lit LEDs
+        // What gives way, in order: the controls step down (all LEDs, unlit ones as initials, lit LEDs
         // only, no LEDs) before
         // the host's name drops under eight characters; they step down again, then leave the toolbar,
         // before the chip's status words cut. With no room even for those, the chip keeps its dot.
@@ -203,9 +205,12 @@ fun SurfaceToolbar(
  * How much room the toolbar gives the surface's own controls, the widest that still leaves the host
  * chip its floor. [SurfaceToolbarLeds] reads it; other controls keep their size.
  */
-internal enum class SurfaceToolbarRoom { Full, UnlitDots, LitOnly, NoLeds }
+internal enum class SurfaceToolbarRoom { Full, UnlitInitials, LitOnly, NoLeds }
 
 internal val LocalSurfaceToolbarRoom = staticCompositionLocalOf { SurfaceToolbarRoom.Full }
+
+/** The space between two of the toolbar's 48dp targets. */
+internal val SurfaceToolbarTargetGap = 8.dp
 
 /** The host's name keeps at least this many characters before the controls stop giving way. */
 internal const val HostNameFloorChars = 8
@@ -281,7 +286,7 @@ internal fun hostChipContent(host: SurfaceHost, compact: Boolean = false): HostC
         )
         SurfaceHostStatus.Connecting -> HostChipContent(
             // On a narrow phone "to" would cost the name its floor; the ring dot already says "on the way".
-            status = if (name == null) "Connecting…" else if (compact) "Connecting" else "Connecting to",
+            status = if (name == null) "Connecting…" else if (compact) "Connecting ·" else "Connecting to",
             name = name,
             action = null,
             description = "Connecting to ${name ?: "host"}",
@@ -452,7 +457,8 @@ fun SurfaceToolbarIconButton(
 /**
  * Indicator LEDs with a label each, in one 40dp group (the keyboard's lock lights, the touchpad's
  * numpad). Each LED is its own 48dp-wide toggle; [onToggle] gets the index tapped. When the toolbar
- * is short of room for the host chip, unlit LEDs shrink to their dots, then only the lit LEDs show, then none.
+ * is short of room for the host chip, unlit LEDs shrink to their label's first letter, then only the lit
+ * LEDs show, then none. Every LED shown carries a visible label: each is a live toggle on the host.
  */
 @Composable
 fun SurfaceToolbarLeds(
@@ -463,7 +469,7 @@ fun SurfaceToolbarLeds(
     val colors = MaterialTheme.colorScheme
     // When the toolbar is tight the unlit LEDs give way to the host chip; with no room, the group goes.
     val shown = when (LocalSurfaceToolbarRoom.current) {
-        SurfaceToolbarRoom.Full, SurfaceToolbarRoom.UnlitDots -> leds.indices.toList()
+        SurfaceToolbarRoom.Full, SurfaceToolbarRoom.UnlitInitials -> leds.indices.toList()
         SurfaceToolbarRoom.LitOnly -> leds.indices.filter { leds[it].second }
         SurfaceToolbarRoom.NoLeds -> emptyList()
     }
@@ -482,11 +488,12 @@ fun SurfaceToolbarLeds(
                 )
             },
         verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(SurfaceToolbarTargetGap),
     ) {
         shown.forEach { index ->
             val (label, lit) = leds[index]
-            // A tight toolbar keeps an unlit LED as its bare dot, so "off" still reads as off, not gone.
-            val bare = !lit && LocalSurfaceToolbarRoom.current == SurfaceToolbarRoom.UnlitDots
+            // A tight toolbar keeps an unlit LED as its dot and initial, so "off" still reads as off, not gone.
+            val initial = !lit && LocalSurfaceToolbarRoom.current == SurfaceToolbarRoom.UnlitInitials
             Row(
                 modifier = Modifier
                     .minimumInteractiveComponentSize()
@@ -494,9 +501,11 @@ fun SurfaceToolbarLeds(
                     .toggleable(value = lit, role = Role.Switch, onValueChange = { onToggle(index) })
                     .semantics {
                         stateDescription = if (lit) "On" else "Off"
-                        if (bare) contentDescription = label
+                        // TalkBack says the whole name, not the initial.
+                        if (initial) contentDescription = label
                     }
-                    .padding(horizontal = if (bare) 4.dp else 8.dp),
+                    .padding(horizontal = 4.dp)
+                    .testTag("surface_led"),
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
             ) {
@@ -506,14 +515,12 @@ fun SurfaceToolbarLeds(
                         .clip(CircleShape)
                         .background(if (lit) SurfaceTokens.LedLit else colors.outline),
                 )
-                if (!bare) {
-                    Text(
-                        label,
-                        style = MaterialTheme.typography.labelMedium,
-                        color = if (lit) colors.onSurface else colors.onSurfaceVariant,
-                        maxLines = 1,
-                    )
-                }
+                Text(
+                    if (initial) label.take(1) else label,
+                    style = if (initial) MaterialTheme.typography.labelSmall else MaterialTheme.typography.labelMedium,
+                    color = if (lit) colors.onSurface else colors.onSurfaceVariant,
+                    maxLines = 1,
+                )
             }
         }
     }
