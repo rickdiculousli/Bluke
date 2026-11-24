@@ -222,6 +222,11 @@ class MirrorScreenshotTest {
             streamingHover.copy(notice = MirrorNotice.HotkeysNeedBluetooth("Rick's MacBook Pro")),
             MirrorHotkeysUi(three, enabled = false, hostName = "Rick's MacBook Pro"),
         ),
+        "overlay-hotkeys-disabled-light-picture" to Case(
+            streamingHover,
+            MirrorHotkeysUi(three, enabled = false, hostName = "Rick's MacBook Pro"),
+            lightPicture = true,
+        ),
         "overlay-hover-key-needs-pointer" to Case(streamingHover.copy(notice = MirrorNotice.KeyNeedsPointer), ready(three), lightPicture = true),
         "overlay-waiting-3" to Case(
             address.copy(phase = MirrorPhase.Waiting("Rick's MacBook Pro"), pairedName = "Rick's MacBook Pro", touchMode = MirrorTouchMode.HOVER),
@@ -244,14 +249,19 @@ class MirrorScreenshotTest {
         const val SETTLE_MS = 1_000L
         const val LONG_NAME = "Rick's MacBook Pro (Work) in the upstairs office"
         const val EMOJI_NAME = "🎮 Gaming PC 🖥️"
+        val LARGE_TEXT_OVERLAY = setOf("overlay-hover-3-dark-picture", "overlay-direct-8", "overlay-hover-key-held")
     }
 
     private data class Shot(val name: String, val case: Case, val fontScale: Float)
 
-    /** Every state, plus the overlay's cases [withOverlay]; the editor, a text-heavy pane, at every scale. */
+    /**
+     * Every state, plus the overlay's cases [withOverlay]; without them, the editor (a text-heavy
+     * pane) and the overlay's [LARGE_TEXT_OVERLAY] cases, so every scale shows the controls' print.
+     */
     private fun shots(fontScale: Float, withOverlay: Boolean): List<Shot> =
         states.map { (name, state) -> Shot(name, Case(state), fontScale) } +
-            overlay.filter { (name, _) -> withOverlay || name.startsWith("editor-") }.map { (name, case) -> Shot(name, case, fontScale) }
+            overlay.filter { (name, _) -> withOverlay || name.startsWith("editor-") || name in LARGE_TEXT_OVERLAY }
+                .map { (name, case) -> Shot(name, case, fontScale) }
 
     @Test
     fun fontScale1() = captureAll(shots(1f, withOverlay = true))

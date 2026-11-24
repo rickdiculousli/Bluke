@@ -66,7 +66,10 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Rect
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Shape
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.layout.boundsInWindow
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
@@ -149,8 +152,12 @@ internal object MirrorControlColors {
     val content: Color @Composable get() = MaterialTheme.colorScheme.onSurface
     val active: Color @Composable get() = MaterialTheme.colorScheme.primary
     val onActive: Color @Composable get() = MaterialTheme.colorScheme.onPrimary
-    /** M3's disabled content and outline opacities. */
-    val disabledContent: Color @Composable get() = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+    val activeEdge: Color @Composable get() = MaterialTheme.colorScheme.scrim
+    /**
+     * Disabled content a step above M3's 0.38, since it sits on a translucent scrim over a picture
+     * that may be light, and M3's disabled outline opacity.
+     */
+    val disabledContent: Color @Composable get() = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
     val disabledOutline: Color @Composable get() = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.12f)
 
     private const val SCRIM_ALPHA = 0.64f
@@ -172,8 +179,8 @@ internal val MirrorControlsInsets: WindowInsets
  * The left-hand controls, floating over the picture's left edge in two columns: Close and the next
  * input mode, then the touch mode and the menu, then the left-button key's slot (the key in Hover,
  * the picture in Direct, so the hotkeys sit in the same place in both), then the hotkey buttons,
- * in pages when the height left can't hold them all. Space between controls is the picture's: only
- * a control's own bounds ([bounds]) take a finger from it.
+ * in pages when the height left can't hold them all. A finger that lands on a control, or within
+ * half a gap of one ([bounds]), is the overlay's; everywhere else is the picture's.
  */
 @Composable
 internal fun MirrorControls(
@@ -243,7 +250,8 @@ private fun ControlFace(
 ) {
     val container = if (active) MirrorControlColors.active else MirrorControlColors.scrim
     val outline = when {
-        active -> MirrorControlColors.active
+        // A dark edge round the solid fill, so a held control keeps its shape over a light picture.
+        active -> MirrorControlColors.activeEdge
         enabled -> MirrorControlColors.outline
         else -> MirrorControlColors.disabledOutline
     }
@@ -281,40 +289,51 @@ private fun CloseCell(bounds: MirrorControlBounds, onClose: () -> Unit) {
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun NextModeCell(bounds: MirrorControlBounds, haptics: MirrorHaptics, onNextMode: () -> Unit, onConfigureModes: () -> Unit) {
-    ControlFace(
-        Modifier.size(CELL).controlBounds(bounds, "next_mode"),
-        input = Modifier
-            .combinedClickable(
-                role = Role.Button,
-                onClickLabel = "Next input mode",
-                onLongClickLabel = "Choose input modes",
-                onClick = {
-                    haptics.tick()
-                    onNextMode()
+    // The long press's haptic is Mirror's own, so it honours the haptics setting: the system's is muted here.
+    CompositionLocalProvider(LocalHapticFeedback provides NoSystemHaptics) {
+        ControlFace(
+            Modifier.size(CELL).controlBounds(bounds, "next_mode"),
+            input = Modifier
+                .combinedClickable(
+                    role = Role.Button,
+                    onClickLabel = "Next input mode",
+                    onLongClickLabel = "Choose input modes",
+                    onClick = {
+                        haptics.tick()
+                        onNextMode()
+                    },
+                    onLongClick = {
+                        haptics.tick()
+                        onConfigureModes()
+                    },
+                )
+                .testTag("mirror_mode_cycle_btn")
+                .clearAndSetSemantics {
+                    contentDescription = "Mirror"
+                    role = Role.Button
+                    onClick("Next input mode") {
+                        onNextMode()
+                        true
+                    }
+                    onLongClick("Choose input modes") {
+                        onConfigureModes()
+                        true
+                    }
                 },
-                onLongClick = onConfigureModes,
-            )
-            .testTag("mirror_mode_cycle_btn")
-            .clearAndSetSemantics {
-                contentDescription = "Mirror"
-                role = Role.Button
-                onClick("Next input mode") {
-                    onNextMode()
-                    true
+        ) {
+            GlyphAndLabel("Mirror") { size ->
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Icon(Icons.AutoMirrored.Filled.ScreenShare, contentDescription = null, modifier = Modifier.size(size))
+                    Icon(Icons.AutoMirrored.Filled.ArrowRight, contentDescription = null, modifier = Modifier.size(size - 4.dp))
                 }
-                onLongClick("Choose input modes") {
-                    onConfigureModes()
-                    true
-                }
-            },
-    ) {
-        GlyphAndLabel("Mirror") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Icon(Icons.AutoMirrored.Filled.ScreenShare, contentDescription = null, modifier = Modifier.size(ICON_SMALL))
-                Icon(Icons.AutoMirrored.Filled.ArrowRight, contentDescription = null, modifier = Modifier.size(ICON_SMALL - 4.dp))
             }
         }
     }
+}
+
+/** Haptics that do nothing, for a control whose feedback goes through [MirrorHaptics] instead. */
+private object NoSystemHaptics : HapticFeedback {
+    override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) = Unit
 }
 
 /**
@@ -343,31 +362,44 @@ private fun TouchModeCell(mode: MirrorTouchMode, bounds: MirrorControlBounds, on
                 }
             },
     ) {
-        GlyphAndLabel(label) { Icon(icon, contentDescription = null, modifier = Modifier.size(ICON_SMALL)) }
+        GlyphAndLabel(label) { size -> Icon(icon, contentDescription = null, modifier = Modifier.size(size)) }
     }
 }
 
 /**
- * A cell's glyph with its one-word name under it, set tight so the name still fits at font scale
- * 1.3; where it can't, the glyph alone, at full size.
+ * A cell's glyph (drawn at the size it's given) with its one-word name under it, set tight and held
+ * at its font-scale-1.3 size so the name still fits at any scale; where it can't, [short] if there
+ * is one, else the glyph alone, at full size.
  */
 @Composable
-private fun GlyphAndLabel(label: String, glyph: @Composable () -> Unit) {
+private fun GlyphAndLabel(label: String, short: String? = null, glyph: @Composable (size: Dp) -> Unit) {
     val style = CellLabelStyle
-    val fits = fitsInCell(label, style, maxLines = 1, width = CELL - 4.dp, height = CELL - ICON_SMALL - 6.dp)
+    val shown = listOfNotNull(label, short).firstOrNull { fitsInCell(it, style, maxLines = 1, width = CELL - 4.dp, height = CELL - ICON_SMALL - 6.dp) }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
-        if (fits) {
-            glyph()
-            Text(label, style = style, maxLines = 1)
+        if (shown != null) {
+            glyph(ICON_SMALL)
+            Text(shown, style = style, maxLines = 1)
         } else {
-            Box(Modifier.heightIn(min = ICON), contentAlignment = Alignment.Center) { glyph() }
+            glyph(ICON)
         }
     }
 }
 
-/** labelSmall without its letter spacing and with its line as tall as its type, for a 48dp cell. */
+/** labelSmall without its letter spacing and with its line as tall as its type, held like a key cap's print. */
 private val CellLabelStyle: TextStyle
-    @Composable get() = MaterialTheme.typography.labelSmall.let { it.copy(letterSpacing = 0.sp, lineHeight = it.fontSize) }
+    @Composable get() = MaterialTheme.typography.labelSmall.let { it.copy(letterSpacing = 0.sp, lineHeight = it.fontSize) }.heldAtFaceScale()
+
+/**
+ * A control's print is part of the control, like its glyph: it grows with the font scale up to
+ * [FACE_MAX_FONT_SCALE], then holds, so a 48dp cell still names itself at 2.0.
+ */
+@Composable
+private fun TextStyle.heldAtFaceScale(): TextStyle {
+    val fontScale = LocalDensity.current.fontScale
+    if (fontScale <= FACE_MAX_FONT_SCALE) return this
+    val hold = FACE_MAX_FONT_SCALE / fontScale
+    return copy(fontSize = fontSize * hold, lineHeight = lineHeight * hold)
+}
 
 /**
  * ⋮: which computer this is and how its link is doing, which Bluetooth host the hotkeys go to,
@@ -397,7 +429,10 @@ private fun MenuCell(
                 .testTag("mirror_menu_btn"),
         ) {
             if (live) {
-                GlyphAndLabel(readout.latency) { Icon(Icons.Default.MoreVert, contentDescription = null, modifier = Modifier.size(ICON_SMALL)) }
+                // "128 ms" where it fits, else the figure alone; TalkBack reads it in full.
+                GlyphAndLabel(readout.latency, short = state.latencyMs?.toString()) { size ->
+                    Icon(Icons.Default.MoreVert, contentDescription = null, modifier = Modifier.size(size))
+                }
             } else {
                 Icon(Icons.Default.MoreVert, contentDescription = null, modifier = Modifier.size(ICON))
             }
@@ -519,7 +554,7 @@ private fun LeftButtonKey(held: Boolean, enabled: Boolean, bounds: MirrorControl
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Filled.AdsClick, contentDescription = null, modifier = Modifier.size(ICON))
             val label = if (held) "Held" else "Hold to click"
-            val style = MaterialTheme.typography.labelMedium
+            val style = MaterialTheme.typography.labelMedium.heldAtFaceScale()
             if (fitsInCell(label, style, maxLines = 1, width = MIRROR_CONTROLS_WIDTH - 8.dp, height = KEY_HEIGHT - ICON - 12.dp)) {
                 Text(label, style = style, maxLines = 1)
             }
@@ -591,7 +626,7 @@ private fun AddHotkeyCell(bounds: MirrorControlBounds, onEdit: () -> Unit) {
             .semantics(mergeDescendants = true) { contentDescription = "Add a hotkey button" }
             .testTag("mirror_add_hotkey"),
     ) {
-        GlyphAndLabel("Keys") { Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(ICON_SMALL)) }
+        GlyphAndLabel("Add") { size -> Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(size)) }
     }
 }
 
@@ -613,9 +648,9 @@ private fun PageCell(page: Int, pages: Int, bounds: MirrorControlBounds, onNext:
                 }
             },
     ) {
-        GlyphAndLabel("${page + 1}/$pages") {
+        GlyphAndLabel("${page + 1}/$pages") { size ->
             // Down to the next page; up from the last, which goes back to the first.
-            Icon(if (page == pages - 1) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null, modifier = Modifier.size(ICON_SMALL))
+            Icon(if (page == pages - 1) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null, modifier = Modifier.size(size))
         }
     }
 }
@@ -692,7 +727,8 @@ private fun HotkeyCell(
 @Composable
 internal fun MirrorHotkeyFace(label: String) {
     val style = hotkeyLabelStyle(label)
-    ControlFace(Modifier.size(CELL), input = Modifier) {
+    // A picture of the button, not a control: the row it sits in says what it is.
+    ControlFace(Modifier.size(CELL), input = Modifier.clearAndSetSemantics {}) {
         HotkeyText(
             label,
             style = style.first,
@@ -708,17 +744,11 @@ internal fun MirrorHotkeyFace(label: String) {
 @Composable
 private fun hotkeyLabelStyle(label: String): Pair<TextStyle, Int> {
     val type = MaterialTheme.typography
-    // A key cap's print is part of the key, like a glyph: it grows with the font scale up to 1.3,
-    // then holds, so a 48dp face still names its key at 2.0.
-    val fontScale = LocalDensity.current.fontScale
-    val hold = if (fontScale > FACE_MAX_FONT_SCALE) FACE_MAX_FONT_SCALE / fontScale else 1f
-    fun TextStyle.held() = if (hold == 1f) this else copy(fontSize = fontSize * hold, lineHeight = lineHeight * hold)
-    return listOf(type.titleMedium.held() to 1, type.labelLarge.held() to 1, type.labelSmall.held() to 2)
-        .firstOrNull { (style, lines) -> fitsInCell(label, style, lines) }
-        ?: (type.labelSmall.held() to 2)
+    val choices = listOf(type.titleMedium.heldAtFaceScale() to 1, type.labelLarge.heldAtFaceScale() to 1, type.labelSmall.heldAtFaceScale() to 2)
+    return choices.firstOrNull { (style, lines) -> fitsInCell(label, style, lines) } ?: choices.last()
 }
 
-/** The font scale a hotkey face's print stops growing at. */
+/** The font scale a control's print stops growing at. */
 private const val FACE_MAX_FONT_SCALE = 1.3f
 
 /** Whether [text] fits a cell's inner area in [style] and [maxLines] at the current font scale. */

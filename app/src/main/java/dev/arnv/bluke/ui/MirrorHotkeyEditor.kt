@@ -7,7 +7,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -19,7 +18,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.safeDrawing
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
@@ -62,9 +60,7 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.paneTitle
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.input.ImeAction
-import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.style.TextOverflow
-import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 
 /**
@@ -79,7 +75,7 @@ private val MODIFIER_CHOICES = listOf(
     Triple(HotkeyModifiers.GUI, '⌘', KeyboardLayouts.MOD_LWIN),
 )
 
-private enum class AddBy(val label: String) { KEY("By key"), CHARACTER("By character") }
+private enum class AddBy(val label: String) { KEY("Key"), CHARACTER("Character") }
 
 /** The button being made: how, its modifiers, and the key or character so far. */
 @Stable
@@ -271,29 +267,17 @@ private fun NewButton(draft: NewHotkey, typingLayout: KeyboardCharacterLayout, m
                 )
             }
         }
-        BoxWithConstraints(Modifier.padding(top = 4.dp)) {
-            // Names, as the key list writes them, while all four fit one line; the glyph the face
-            // shows once large text can't, so the keys below keep their height. TalkBack reads the
-            // name either way.
-            val named = modifierNamesFit(maxWidth)
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                MODIFIER_CHOICES.forEach { (bit, glyph, keyCode) ->
-                    val name = hotkeyKeyName(keyCode)
-                    FilterChip(
-                        selected = draft.modifiers and bit != 0,
-                        onClick = { draft.modifiers = draft.modifiers xor bit },
-                        label = {
-                            if (named) {
-                                Text(name, maxLines = 1)
-                            } else {
-                                Icon(MODIFIER_GLYPH_ICONS.getValue(glyph), contentDescription = null, modifier = Modifier.size(GLYPH))
-                            }
-                        },
-                        modifier = Modifier
-                            .testTag("mirror_modifier_$name")
-                            .semantics { if (!named) contentDescription = name },
-                    )
-                }
+        // Named as the key list names them, wrapping to a second line when large text can't fit
+        // all four on one; the key list below scrolls in the height left.
+        FlowRow(Modifier.padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            MODIFIER_CHOICES.forEach { (bit, _, keyCode) ->
+                val name = hotkeyKeyName(keyCode)
+                FilterChip(
+                    selected = draft.modifiers and bit != 0,
+                    onClick = { draft.modifiers = draft.modifiers xor bit },
+                    label = { Text(name, maxLines = 1) },
+                    modifier = Modifier.testTag("mirror_modifier_$name"),
+                )
             }
         }
         Column(
@@ -360,22 +344,6 @@ private val MirrorKeyGroup.title: String
         MirrorKeyGroup.MODIFIERS -> "Modifiers on their own"
     }
 
-/** Whether the four modifier chips fit [width] on one line with their names. */
-@Composable
-private fun modifierNamesFit(width: Dp): Boolean {
-    val measurer = rememberTextMeasurer()
-    val style = MaterialTheme.typography.labelLarge
-    val density = LocalDensity.current
-    return remember(width, style, density) {
-        with(density) {
-            val names = MODIFIER_CHOICES.sumOf { measurer.measure(hotkeyKeyName(it.third), style).size.width }
-            // Each chip's padding around its name, then the gaps between chips.
-            val chrome = (CHIP_CHROME * MODIFIER_CHOICES.size + 8.dp * (MODIFIER_CHOICES.size - 1)).roundToPx()
-            names + chrome <= width.roundToPx()
-        }
-    }
-}
-
 @Composable
 private fun SectionLabel(text: String) {
     Text(
@@ -411,8 +379,3 @@ private fun KeyChoice(choice: MirrorKeyChoice, selected: Boolean, onClick: () ->
 /** Room at a scrolling column's end for its scroll cue's thumb, clear of the controls. */
 private val SCROLL_GUTTER = 16.dp
 
-/** A modifier glyph in a chip. */
-private val GLYPH = 18.dp
-
-/** A modifier chip around its name: its padding on each side, measured from the chips as drawn. */
-private val CHIP_CHROME = 32.dp
