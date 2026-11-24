@@ -61,7 +61,7 @@ class MirrorControlsTest {
     private val sent = mutableListOf<MirrorMessage>()
     private val hotkeyEvents = mutableListOf<Pair<MirrorHotkey, Boolean>>()
     private var savedHotkeys: List<MirrorHotkey>? = null
-    private var hotkeysUi = MirrorHotkeysUi()
+    private var hotkeysUi by mutableStateOf(MirrorHotkeysUi())
 
     private val streaming = MirrorUiState(
         phase = MirrorPhase.Connected("Mac", null, hasFrame = true),
@@ -296,6 +296,45 @@ class MirrorControlsTest {
         rule.onRoot().performTouchInput { up(0) }
         settle()
         assertEquals(listOf(endTurn to true, endTurn to false), hotkeyEvents)
+    }
+
+    @Test
+    fun aButtonMovedIntoACellSendsItsOwnKeyThere() {
+        hotkeysUi = MirrorHotkeysUi(listOf(endTurn, shiftTab), enabled = true)
+        show(streaming)
+        val cell = center("mirror_hotkey_0")
+        rule.onRoot().performTouchInput { down(0, cell) }
+        settle()
+        rule.onRoot().performTouchInput { up(0) }
+        settle()
+        // End turn removed: Shift Tab moves into the first cell.
+        hotkeysUi = hotkeysUi.copy(list = listOf(shiftTab))
+        settle()
+        rule.onRoot().performTouchInput { down(0, cell) }
+        settle()
+        rule.onRoot().performTouchInput { up(0) }
+        settle()
+        assertEquals(listOf(endTurn to true, endTurn to false, shiftTab to true, shiftTab to false), hotkeyEvents)
+    }
+
+    @Test
+    fun hotkeysPastWhatFitsAreOnTheNextPage() {
+        val eight = (0 until 8).map { MirrorHotkey(KeyboardLayouts.KEY_1 + it) }
+        hotkeysUi = MirrorHotkeysUi(eight, enabled = true)
+        show(streaming)
+        // A 360dp-high phone holds three rows: five hotkeys and the pager.
+        rule.onNodeWithTag("mirror_hotkey_4").assertIsDisplayed()
+        rule.onNodeWithTag("mirror_hotkey_5").assertDoesNotExist()
+        rule.onNodeWithTag("mirror_hotkey_pager").performClick()
+        settle()
+        rule.onNodeWithTag("mirror_hotkey_0").assertDoesNotExist()
+        rule.onNodeWithTag("mirror_hotkey_7").assertIsDisplayed()
+        val cell = center("mirror_hotkey_5")
+        rule.onRoot().performTouchInput { down(0, cell) }
+        settle()
+        rule.onRoot().performTouchInput { up(0) }
+        settle()
+        assertEquals(listOf(eight[5] to true, eight[5] to false), hotkeyEvents)
     }
 
     @Test
