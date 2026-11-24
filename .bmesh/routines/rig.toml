@@ -1,0 +1,8 @@
+# The emulator rigs: the HID rig (Bumble host, exact report bytes, reconnect, Bluetooth off and on) and
+# the Mirror rig (companion against the app). Verify doesn't run them. A lead runs this once on its final
+# tree before `bmesh land`, which then requires it, and runs it again under the lease when a rebase
+# changed code.
+mode = "inline"
+timeout = "45m"   # the rig lock, a cold companion build and two wiped emulator boots
+deterministic = true
+command = "tools/hid-rig/run.sh && tools/mirror-rig/run.sh"
