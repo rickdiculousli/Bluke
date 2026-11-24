@@ -4,6 +4,8 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
@@ -44,8 +46,10 @@ internal data class RemoteButtonColors(val container: Color, val content: Color)
  * A button held like a hardware key: [onPressedChange] gets true on touch-down and false on release,
  * and [onPress] (the haptic) fires on touch-down. The pressed look comes straight from the pressed
  * state, in the frame the finger lands. [description] is what TalkBack reads; [text] and [caption]
- * are what the button shows, wrapping rather than truncating.
+ * are what the button shows, wrapping between words rather than truncating, and the button
+ * grows to fit them: give it a minimum height, not a fixed one.
  */
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 internal fun RemoteHoldButton(
     description: String,
@@ -103,21 +107,30 @@ internal fun RemoteHoldButton(
                 icons.forEach { Icon(it, contentDescription = null, tint = colors.content, modifier = Modifier.size(iconSize)) }
             }
         }
-        if (text != null) {
-            Text(
-                text,
-                style = MaterialTheme.typography.labelLarge,
-                color = colors.content,
-                textAlign = TextAlign.Center,
-            )
-        }
-        if (caption != null) {
-            Text(
-                caption,
-                style = MaterialTheme.typography.labelSmall,
-                color = colors.content,
-                textAlign = TextAlign.Center,
-            )
+        // The caption sits beside the label when both fit on a line and drops below it when not;
+        // the label wraps between words, and the button grows to hold whatever lines result.
+        if (text != null || caption != null) {
+            FlowRow(
+                horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+            ) {
+                if (text != null) {
+                    Text(
+                        text,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = colors.content,
+                        textAlign = TextAlign.Center,
+                    )
+                }
+                if (caption != null) {
+                    Text(
+                        caption,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = colors.content,
+                        textAlign = TextAlign.Center,
+                        modifier = Modifier.align(Alignment.CenterVertically),
+                    )
+                }
+            }
         }
     }
 }
