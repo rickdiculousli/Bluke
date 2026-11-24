@@ -55,6 +55,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.paneTitle
@@ -114,6 +115,7 @@ internal fun MirrorHotkeyEditor(
     onChange: (List<MirrorHotkey>) -> Unit,
     onDone: () -> Unit,
     modifier: Modifier = Modifier,
+    blocksTouches: Boolean = true,
 ) {
     BackHandler(onBack = onDone)
     val draft = remember { NewHotkey() }
@@ -123,7 +125,7 @@ internal fun MirrorHotkeyEditor(
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.6f))
             // The picture and controls under it take no touches while the editor is open.
-            .pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false).consume() } }
+            .then(if (blocksTouches) Modifier.pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false).consume() } } else Modifier)
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .padding(horizontal = 16.dp, vertical = 8.dp)
             .testTag("mirror_hotkey_editor"),
@@ -159,7 +161,11 @@ internal fun MirrorHotkeyEditor(
                             enabled = adding != null,
                             modifier = Modifier.testTag("mirror_hotkey_add"),
                         ) {
-                            HotkeyText(adding?.let { "Add ${it.displayLabel}" } ?: "Add")
+                            // TalkBack hears the key's name, not its glyphs.
+                            HotkeyText(
+                                adding?.let { "Add ${it.displayLabel}" } ?: "Add",
+                                modifier = Modifier.clearAndSetSemantics { contentDescription = adding?.let { "Add ${it.spokenLabel}" } ?: "Add" },
+                            )
                         }
                     }
                     TextButton(onClick = onDone, modifier = Modifier.testTag("mirror_hotkey_editor_done")) {

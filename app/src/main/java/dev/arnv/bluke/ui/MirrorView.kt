@@ -10,6 +10,7 @@ import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.EnterExitState
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.VisibilityThreshold
@@ -297,6 +298,17 @@ fun MirrorSurface(
     val live = state.phase.isLive
     // While the editor is open, TalkBack reaches only the editor, as a finger does.
     val underEditor = if (editing) Modifier.clearAndSetSemantics {} else Modifier
+    // Where hotkeys go, once there are any and Bluetooth can send them. The streaming notice says
+    // so as the picture starts, and again whenever that host changes during the session.
+    val hotkeysTo = hotkeys.hostName?.takeIf { hotkeys.enabled && hotkeys.list.isNotEmpty() }
+    val currentPhase by rememberUpdatedState(state.phase)
+    val announcedHotkeysTo = remember { arrayOf(hotkeysTo) }
+    LaunchedEffect(hotkeysTo) {
+        if (hotkeysTo == announcedHotkeysTo[0]) return@LaunchedEffect
+        announcedHotkeysTo[0] = hotkeysTo
+        val connected = currentPhase as? MirrorPhase.Connected
+        if (hotkeysTo != null && connected?.hasFrame == true) hint = MirrorNotice.Streaming(connected.companionName)
+    }
     Box(
         modifier = modifier
             .fillMaxSize()
@@ -322,10 +334,10 @@ fun MirrorSurface(
                 .then(underEditor)
                 .windowInsetsPadding(MirrorControlsInsets.union(WindowInsets.displayCutout.only(WindowInsetsSides.End)))
                 // As far from the right edge as from the left, so the cards centre on the picture they
-                // dim; past font scale 1.3 the right side's room goes to the text instead.
+                // dim; from font scale 1.3 the right side's room goes to the text instead.
                 .padding(
                     start = MIRROR_CONTROLS_WIDTH + 24.dp,
-                    end = if (LocalDensity.current.fontScale > 1.3f) 16.dp else MIRROR_CONTROLS_WIDTH + 24.dp,
+                    end = if (LocalDensity.current.fontScale >= 1.3f) 16.dp else MIRROR_CONTROLS_WIDTH + 24.dp,
                     top = 12.dp,
                     bottom = 12.dp,
                 ),
@@ -333,6 +345,7 @@ fun MirrorSurface(
         ) {
                 MirrorNoticePill(
                     notice = hint ?: state.notice,
+                    hotkeysTo = hotkeysTo,
                     forgetPending = forgetPending,
                     pairedName = state.pairedName,
                     onShown = { if (hint != null) hint = null else onNoticeShown() },
@@ -392,6 +405,8 @@ fun MirrorSurface(
         // The editor fades in over the picture and out the same way.
         AnimatedVisibility(visible = editing, enter = fadeIn(EffectsSpring), exit = fadeOut(EffectsSpring)) {
             MirrorHotkeyEditor(
+                // Fading out, it no longer takes the picture's touches.
+                blocksTouches = transition.targetState == EnterExitState.Visible,
                 hotkeys = hotkeys.list,
                 typingLayout = typingLayout,
                 onChange = onHotkeysChange,

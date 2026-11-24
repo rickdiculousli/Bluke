@@ -353,8 +353,9 @@ private fun TouchModeCell(mode: MirrorTouchMode, bounds: MirrorControlBounds, on
             .clickable(role = Role.Button, onClick = onToggle)
             .testTag("mirror_touch_mode_btn")
             .clearAndSetSemantics {
-                contentDescription = "Touch mode"
-                stateDescription = "$label, $meaning"
+                // The name carries the word on the face, so voice control finds it by what it shows.
+                contentDescription = "$label touch mode"
+                stateDescription = meaning
                 role = Role.Button
                 onClick("Switch to $other") {
                     onToggle()
@@ -369,12 +370,12 @@ private fun TouchModeCell(mode: MirrorTouchMode, bounds: MirrorControlBounds, on
 /**
  * A cell's glyph (drawn at the size it's given) with its one-word name under it, set tight and held
  * at its font-scale-1.3 size so the name still fits at any scale; where it can't, [short] if there
- * is one, else the glyph alone, at full size.
+ * are any (the first that fits), else the glyph alone, at full size.
  */
 @Composable
-private fun GlyphAndLabel(label: String, short: String? = null, glyph: @Composable (size: Dp) -> Unit) {
+private fun GlyphAndLabel(label: String, short: List<String> = emptyList(), glyph: @Composable (size: Dp) -> Unit) {
     val style = CellLabelStyle
-    val shown = listOfNotNull(label, short).firstOrNull { fitsInCell(it, style, maxLines = 1, width = CELL - 4.dp, height = CELL - ICON_SMALL - 6.dp) }
+    val shown = (listOf(label) + short).firstOrNull { fitsInCell(it, style, maxLines = 1, width = CELL - 4.dp, height = CELL - ICON_SMALL - 6.dp) }
     Column(horizontalAlignment = Alignment.CenterHorizontally) {
         if (shown != null) {
             glyph(ICON_SMALL)
@@ -398,7 +399,7 @@ private fun TextStyle.heldAtFaceScale(): TextStyle {
     val fontScale = LocalDensity.current.fontScale
     if (fontScale <= FACE_MAX_FONT_SCALE) return this
     val hold = FACE_MAX_FONT_SCALE / fontScale
-    return copy(fontSize = fontSize * hold, lineHeight = lineHeight * hold)
+    return copy(fontSize = fontSize * hold, lineHeight = lineHeight * hold, letterSpacing = letterSpacing * hold)
 }
 
 /**
@@ -424,13 +425,15 @@ private fun MenuCell(
                 .clickable(role = Role.Button, onClick = { menuOpen = true })
                 .semantics(mergeDescendants = true) {
                     contentDescription = "More Mirror options"
-                    if (live) stateDescription = readout.description
+                    // Which computer, not the figures: a state that changed with every reading would
+                    // be read out again each time while TalkBack rests here.
+                    if (live) stateDescription = "Streaming from ${(state.phase as MirrorPhase.Connected).companionName}"
                 }
                 .testTag("mirror_menu_btn"),
         ) {
             if (live) {
-                // "128 ms" where it fits, else the figure alone; TalkBack reads it in full.
-                GlyphAndLabel(readout.latency, short = state.latencyMs?.toString()) { size ->
+                // "128 ms" where it fits, else "128ms"; TalkBack reads the link in the menu.
+                GlyphAndLabel(readout.latency, short = listOfNotNull(state.latencyMs?.let { "${it}ms" })) { size ->
                     Icon(Icons.Default.MoreVert, contentDescription = null, modifier = Modifier.size(size))
                 }
             } else {
@@ -538,7 +541,7 @@ private fun LeftButtonKey(held: Boolean, enabled: Boolean, bounds: MirrorControl
             .holdGesture { down -> currentOnKey(down) }
             .testTag("mirror_left_button")
             .clearAndSetSemantics {
-                contentDescription = "Left mouse button"
+                contentDescription = "Hold to click, left mouse button"
                 stateDescription = if (held) "Held" else "Released"
                 role = Role.Button
                 if (!enabled) disabled()
@@ -553,11 +556,11 @@ private fun LeftButtonKey(held: Boolean, enabled: Boolean, bounds: MirrorControl
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
             Icon(Icons.Filled.AdsClick, contentDescription = null, modifier = Modifier.size(ICON))
-            val label = if (held) "Held" else "Hold to click"
-            val style = MaterialTheme.typography.labelMedium.heldAtFaceScale()
-            if (fitsInCell(label, style, maxLines = 1, width = MIRROR_CONTROLS_WIDTH - 8.dp, height = KEY_HEIGHT - ICON - 12.dp)) {
-                Text(label, style = style, maxLines = 1)
-            }
+            val labels = if (held) listOf("Held") else listOf("Hold to click", "Hold")
+            // Without its letter spacing, like the cells' names, so "Hold to click" has room to its outline.
+            val style = MaterialTheme.typography.labelMedium.copy(letterSpacing = 0.sp).heldAtFaceScale()
+            labels.firstOrNull { fitsInCell(it, style, maxLines = 1, width = MIRROR_CONTROLS_WIDTH - 12.dp, height = KEY_HEIGHT - ICON - 12.dp) }
+                ?.let { Text(it, style = style, maxLines = 1) }
         }
     }
 }

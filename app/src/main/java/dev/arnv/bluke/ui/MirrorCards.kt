@@ -512,8 +512,9 @@ internal fun Modifier.scrollCue(scroll: ScrollState, thumbColor: Color): Modifie
         val inset = SCROLL_THUMB_INSET.toPx()
         val track = size.height - inset * 2
         val content = size.height + scroll.maxValue
-        val thumb = track * size.height / content
-        val thumbTop = inset + track * scroll.value / content
+        // Never shorter than a short stroke, so a long list's thumb still reads as one.
+        val thumb = (track * size.height / content).coerceIn(minOf(SCROLL_THUMB_MIN.toPx(), track), track)
+        val thumbTop = inset + (track - thumb) * scroll.value / scroll.maxValue.coerceAtLeast(1)
         val width = SCROLL_THUMB_WIDTH.toPx()
         drawRoundRect(
             color = thumbColor,
@@ -531,6 +532,7 @@ internal fun Modifier.scrollCue(scroll: ScrollState, thumbColor: Color): Modifie
 @Composable
 internal fun MirrorNoticePill(
     notice: MirrorNotice?,
+    hotkeysTo: String? = null,
     forgetPending: Boolean,
     pairedName: String?,
     onShown: () -> Unit,
@@ -546,7 +548,7 @@ internal fun MirrorNoticePill(
     }
     val text = when {
         forgetPending -> pairedName?.let { "Mirror forgot $it" } ?: FORGOTTEN_TEXT
-        notice != null -> notice.text()
+        notice != null -> notice.text(hotkeysTo)
         else -> null
     }
     // What fades out is what was last shown.
@@ -573,7 +575,7 @@ internal fun MirrorNoticePill(
                 shownText,
                 style = MaterialTheme.typography.labelLarge,
                 color = MaterialTheme.colorScheme.inverseOnSurface,
-                maxLines = 1,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
                 modifier = Modifier.weight(1f, fill = false).padding(start = 16.dp, end = if (withUndo) 4.dp else 16.dp, top = 10.dp, bottom = 10.dp),
             )
@@ -591,7 +593,8 @@ internal fun MirrorNoticePill(
     }
 }
 
-private fun MirrorNotice.text(): String = when (this) {
+/** The notice's words; the streaming one also says which Bluetooth host gets the hotkeys ([hotkeysTo]), if any. */
+private fun MirrorNotice.text(hotkeysTo: String?): String = when (this) {
     is MirrorNotice.Paired -> "Paired with $companionName"
     is MirrorNotice.WrongCode -> when (attemptsLeft) {
         0 -> "Wrong code"
@@ -600,7 +603,11 @@ private fun MirrorNotice.text(): String = when (this) {
     }
     MirrorNotice.Forgotten -> FORGOTTEN_TEXT
     is MirrorNotice.Declined -> "Declined $companionName"
-    is MirrorNotice.Streaming -> "Streaming from $companionName"
+    is MirrorNotice.Streaming -> when (hotkeysTo) {
+        null -> "Streaming from $companionName"
+        companionName -> "Streaming from $companionName · hotkeys go to it over Bluetooth"
+        else -> "Streaming from $companionName · hotkeys go to $hotkeysTo"
+    }
     MirrorNotice.KeyNeedsPointer -> "Touch the picture first, so the button knows where to press"
     is MirrorNotice.HotkeysNeedBluetooth ->
         hostName?.let { "Connect Bluetooth to $it to use hotkeys" } ?: "Connect Bluetooth to a host to use hotkeys"
@@ -622,5 +629,6 @@ private const val NOTICE_MILLIS = 3_000L
 
 private val SCROLL_FADE = 32.dp
 private val SCROLL_THUMB_WIDTH = 4.dp
+private val SCROLL_THUMB_MIN = 24.dp
 private val SCROLL_THUMB_END = 8.dp
 private val SCROLL_THUMB_INSET = 24.dp

@@ -13,7 +13,7 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.ImageBitmap
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.test.assertIsNotEnabled
-import androidx.compose.ui.test.assertTextEquals
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.assertIsDisplayed
@@ -198,6 +198,17 @@ class MirrorControlsTest {
     }
 
     @Test
+    fun whenTheHotkeysHostChangesMidSessionTheStreamingNoticeSaysWhereTheyNowGo() {
+        val e = MirrorHotkey(KeyboardLayouts.KEY_E)
+        hotkeysUi = MirrorHotkeysUi(listOf(e), enabled = true, hostName = "Studio")
+        show(streaming)
+        rule.onNodeWithTag("mirror_notice").assertDoesNotExist()
+        hotkeysUi = MirrorHotkeysUi(listOf(e), enabled = true, hostName = "Gaming PC")
+        settle()
+        rule.onNodeWithText("Streaming from Mac · hotkeys go to Gaming PC").assertIsDisplayed()
+    }
+
+    @Test
     fun theTouchModeButtonSwitchesToTheOtherMode() {
         show(streaming)
         rule.onNodeWithTag("mirror_touch_mode_btn").performClick()
@@ -365,7 +376,7 @@ class MirrorControlsTest {
         // Below the fold on a 360dp-high screen: chosen through its click action, as TalkBack would.
         rule.onNodeWithTag("mirror_key_${KeyboardLayouts.KEY_TAB}").performSemanticsAction(SemanticsActions.OnClick)
         settle()
-        rule.onNodeWithTag("mirror_hotkey_add").assertTextEquals("Add ⇧Tab").performSemanticsAction(SemanticsActions.OnClick)
+        rule.onNodeWithTag("mirror_hotkey_add").assertContentDescriptionEquals("Add Shift Tab").performSemanticsAction(SemanticsActions.OnClick)
         settle()
         assertEquals(listOf(shiftTab), savedHotkeys)
         rule.onNodeWithTag("mirror_hotkey_editor_done").performClick()

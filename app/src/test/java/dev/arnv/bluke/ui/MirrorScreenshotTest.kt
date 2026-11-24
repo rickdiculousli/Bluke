@@ -227,6 +227,10 @@ class MirrorScreenshotTest {
             MirrorHotkeysUi(three, enabled = false, hostName = "Rick's MacBook Pro"),
             lightPicture = true,
         ),
+        "overlay-streaming-notice-hotkeys" to Case(
+            streamingHover.copy(notice = MirrorNotice.Streaming("Rick's MacBook Pro")),
+            MirrorHotkeysUi(three, enabled = true, hostName = "RICK-GAMING-PC"),
+        ),
         "overlay-hover-key-needs-pointer" to Case(streamingHover.copy(notice = MirrorNotice.KeyNeedsPointer), ready(three), lightPicture = true),
         "overlay-waiting-3" to Case(
             address.copy(phase = MirrorPhase.Waiting("Rick's MacBook Pro"), pairedName = "Rick's MacBook Pro", touchMode = MirrorTouchMode.HOVER),
