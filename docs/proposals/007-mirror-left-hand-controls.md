@@ -4,7 +4,7 @@ title: Mirror puts translucent left-hand buttons over the picture (touch mode, a
 kind: feature
 size: L
 judge: opus
-status: proposed
+status: done
 lens: ux
 proposed_by: coordinator on ricks-macbook, from the operator's play test of Mirror
 proposed_on: 2026-11-23
@@ -121,6 +121,21 @@ In Hover, you rest your right finger on a card and the tooltip shows. You press 
 - **Hill-climb** against `docs/proposals/assets/ui-rubric.md`. Each round has three fresh Opus reviewers, with no earlier rounds' text. Fix and re-score until the median reads 9 or higher, fixing every P0 and P1, and every P2 that two or more reviewers raise. Record each round in Shown.
 
 ## Shown
+- The game fills the phone, with faint left-edge buttons (Direct/Hover, a big left-click key, hotkeys such as End turn (E)): `app/src/test/screenshots/mirror/mirror-overlay-hover-3-dark-picture-dark-fs1-land.png` and `mirror-overlay-hover-3-light-picture-dark-fs1-land.png`, from `MirrorScreenshotTest`
+- Hover, a finger resting on the picture, the thumb holds the key and the finger slides, the thumb lifts to drop: `MirrorControlsTest.aThumbOnTheKeyAndAFingerOnThePictureDragHeldNeverScroll` (two pointers through the real view); `tools/mirror-rig/run.sh` -> `finger drags with the key held: ok (drag (-480.76, 647.40), drag (-1152.40, 323.71))`
+- Tapping E ends the turn without leaving Mirror: `MirrorControlsTest.aHotkeyGoesDownOnPressAndUpOnLift`; `MirrorHotkeysTest.presserOrdersModifiersAroundKey`
+- Hover hold (key down, finger moves, finger lift, another finger: `buttons=1` throughout, no release until the key lifts): `MirrorTouchPolicyTest.theKeyHoldsThroughRightFingerMovesLiftsAndNewLandingsUntilItLifts`
+- Two hands (a finger on a control plus one moving on the picture give one-finger moves, never Wheel): `MirrorTouchPolicyTest.aThumbOnAControlPlusAFingerOnThePictureAreOneFingerNeverAScroll`; `MirrorControlsTest.aThumbAlreadyOnTheKeyIsNeverTheSecondFingerOfAScroll`
+- `mirror_hotkeys` round-trips, and a press and lift send key down then key up with its modifiers: `MirrorHotkeysTest.roundTripKeepsLabelsModifiersAndNullLabels`, `MirrorHotkeysTest.presserOrdersModifiersAroundKey`, `MirrorHotkeysTest.sharedModifierDropsForTheOtherHotkey`
+- The held key survives a 5 s still pointer on 250 ms heartbeats: `MirrorTouchPolicyTest.theHeldKeySurvivesAStillPointerOnHeartbeats`
+- A link drop while held resets the key: `MirrorTouchPolicyTest.aLinkDropWhileHeldReadsReleasedAndTheKeyIsInertUntilAPointIsSent`
+- Hotkeys disable without a Bluetooth host and say which host they need: `MirrorControlsTest.hotkeysWithoutABluetoothHostReadDisabledAndSayWhichHost`
+- The rig's held-key drag (one press at the last point sent, held moves, a 2 s still hold with no release, one release at the end): `tools/mirror-rig/run.sh` -> `key down after hovering: ok (move (-960.49, 539.51), down (-960.49, 539.51))`, `key up: ok (up (-1152.40, 323.71))`, `mirror rig: ok`; the rig opens Mirror in Direct for its existing checks and switches to Hover through a new `touch-mode` rig command
+- Keyboard report bytes unchanged: `bmesh routine run verify` -> `19/19 checks passed` (tools/hid-rig/run.sh, after the unit suite)
+- Screenshots (overlay over light and dark pictures, Direct and Hover, key held, 0/3/8 hotkeys, disabled, editor, at font scale 1.0 and 1.3): the `mirror-overlay-*` and `mirror-editor-*` baselines under `app/src/test/screenshots/mirror/`
+- Easy to miss: a thumb on an overlay control over the picture is part of every MotionEvent the picture sees, so it must be routed by where it landed or it reads as a second finger and scrolls: `MirrorFingerRouter` in `mirror/MirrorTouchPolicy.kt`, proved through the real view by `MirrorControlsTest.aThumbOnTheKeyAndAFingerOnThePictureDragHeldNeverScroll`
+- Hill-climb waived at median 8 by the operator: the computer's name and the hotkeys' Bluetooth host stay in the ⋮ menu (and the streaming notice), not on the surface all the time; that was the one point holding the 9
+- Not shown: how the hold-drag and hotkeys feel on a real phone, haptic strength and real gesture insets: they need the operator's play test below
 - Hill-climb round 1: scores 7/7/6, median 7; fixed: hotkeys page in a fixed last cell instead of an unscrollable list, a cell keyed by its button so an edit never sends the old key, a lift ends its press after a Bluetooth drop, ripples clipped to each control, the key's slot reserved in Direct so hotkeys don't move, the left-button key disabled (with a reject haptic) without a live link and drawn with a click glyph, Direct/Hover and Mirror labels kept at font scale 1.3, TalkBack's long-press on next mode, label insets, the editor's key list moved up with scroll cues, safe-drawing insets, a fade and a shorter placeholder, captures over a full-width light picture plus the hint pills, the open menu and the second hotkey page; left: modifier names differ between the editor's chips, its key list and the button faces
 - Hill-climb round 2: scores 8/8/8, median 8; fixed: Add moved into the editor's header so the key list gets the height, modifier chips wrap and carry the glyph the face shows under the key list's names, a slow-link chip (computer and latency at 100 ms or more), the menu names the Bluetooth host hotkeys go to, a disabled hotkey's state says it needs Bluetooth, the editor hides the surface from TalkBack and has a pane title, the editor's faces are the surface's own, control bounds take half the gap so a near miss never clicks the picture, Forget's icon, the pager's up glyph on its last page, "Your buttons"; left: in Direct the empty key slot still belongs to the picture
 - Hill-climb round 3: scores 8/8/8, median 8; fixed: the ⋮ cell shows the live link's latency (TalkBack reads the full readout), modifier glyphs drawn as icons on faces, chips and Add, measured as drawn and free to break after the glyphs at large text, modifier chips in the faces' ⌃⌥⇧⌘ order named as the key list names them (Cmd/Win) and glyph-only when the names can't fit one line, the editor's segments "By key"/"By character" and a full list taking the whole width, editor captures at font scale 2.0, status cards centred on the picture, the slow-link chip announced once and held until latency falls under 80 ms, a reject haptic with the touch-the-picture hint, the menu opening beside the column, the touch mode as a state, the + cell labelled Keys and no empty key slot above it in Direct; left: none
@@ -135,4 +150,5 @@ In Hover, you rest your right finger on a card and the tooltip shows. You press 
 - **Alternative: hotkeys over the mirror link.** It lost because it would make the companion inject keys, a wider trust boundary than the pointer-only rule spec 002 set, when a keyboard link already exists.
 
 ## Needs from the operator
+- [phone] Update Bluke on the phone, open Mirror, then ⋮ > Edit hotkey buttons and add E, named End turn.
 - [phone] Play a hand of Slay the Spire in Hover with the left-click key, and use a hotkey (E). Say whether the hold-drag and the hotkeys felt right.
