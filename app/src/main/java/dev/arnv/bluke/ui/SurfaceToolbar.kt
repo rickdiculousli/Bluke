@@ -185,8 +185,10 @@ fun SurfaceToolbar(
             ?: rooms.firstOrNull { hostRoom(controlsAt(it)) >= statusFloor }
             ?: rooms.last().takeIf { shared < statusFloor && hostRoom(controlsAt(it)) >= 48.dp.roundToPx() }
         val controls = room?.let(::controlsAt)
+        // A name cut to a bare ellipsis says nothing: under two characters' room the chip shows its status alone.
+        val withName = hostRoom(controls) >= floor(2)
         val host = measure("host", maxWidth = hostRoom(controls).coerceAtLeast(0)) {
-            HostChip(chrome.host, haptics, compact)
+            HostChip(chrome.host, haptics, compact, withName = withName)
         }
 
         layout(constraints.maxWidth, height) {
@@ -275,8 +277,10 @@ internal data class HostChipContent(
     val label: String get() = listOfNotNull(status, name).joinToString(" ")
 }
 
-internal fun hostChipContent(host: SurfaceHost, compact: Boolean = false): HostChipContent {
+/** [withName] false leaves the name out of the words shown where they'd carry it beside status words; TalkBack still hears it. */
+internal fun hostChipContent(host: SurfaceHost, compact: Boolean = false, withName: Boolean = true): HostChipContent {
     val name = host.name?.takeIf { it.isNotBlank() }
+    val shownName = name.takeIf { withName }
     return when (host.status) {
         SurfaceHostStatus.Connected -> HostChipContent(
             status = if (name == null) "Connected" else null,
@@ -286,8 +290,8 @@ internal fun hostChipContent(host: SurfaceHost, compact: Boolean = false): HostC
         )
         SurfaceHostStatus.Connecting -> HostChipContent(
             // On a narrow phone "to" would cost the name its floor; the ring dot already says "on the way".
-            status = if (name == null) "Connecting…" else if (compact) "Connecting ·" else "Connecting to",
-            name = name,
+            status = if (shownName == null) "Connecting…" else if (compact) "Connecting ·" else "Connecting to",
+            name = shownName,
             action = null,
             description = "Connecting to ${name ?: "host"}",
         )
@@ -321,9 +325,9 @@ internal val LocalHostChipTextLayout = staticCompositionLocalOf<(role: String, T
  * name cut to that many characters (none at zero, when there are status words), and no semantics or tap.
  */
 @Composable
-private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, compact: Boolean, probeNameChars: Int? = null) {
+private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, compact: Boolean, probeNameChars: Int? = null, withName: Boolean = true) {
     val colors = MaterialTheme.colorScheme
-    val content = hostChipContent(host, compact).let { full ->
+    val content = hostChipContent(host, compact, withName).let { full ->
         when {
             probeNameChars == null || full.name == null -> full
             // At zero the probe is the status words alone; a name that is the status keeps a hint of itself.

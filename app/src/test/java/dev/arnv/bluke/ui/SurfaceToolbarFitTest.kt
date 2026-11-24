@@ -214,6 +214,11 @@ class SurfaceToolbarFitTest {
         sequence { children.forEach { yield(it); yieldAll(it.descendants()) } }
 
     private fun assertStatusWhole(index: Int, layouts: Map<String, TextLayoutResult>) {
+        // A name shown at all shows some of itself, never a lone ellipsis.
+        layouts["name"]?.let { name ->
+            val visible = (0 until name.layoutInput.text.length).count { name.getBoundingBox(it).width > 0f }
+            assertTrue("row $index's name shows at least two characters, not $visible", visible >= 2)
+        }
         val content = hostChipContent(hosts[index], compact = true)
         // A Connected host's name is its status words; every other status has words of its own.
         val role = if (content.status != null) "status" else "name"

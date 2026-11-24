@@ -26,6 +26,10 @@ class SurfaceHostTest {
         assertEquals("Connecting to Desk PC", hostChipContent(SurfaceHost(SurfaceHostStatus.Connecting, "Desk PC")).label)
         assertEquals("Connecting · Desk PC", hostChipContent(SurfaceHost(SurfaceHostStatus.Connecting, "Desk PC"), compact = true).label)
         assertEquals("Connecting…", hostChipContent(SurfaceHost(SurfaceHostStatus.Connecting, null)).label)
+        // With no room for the name, the status stands alone rather than beside a bare ellipsis.
+        val nameless = hostChipContent(SurfaceHost(SurfaceHostStatus.Connecting, "Desk PC"), compact = true, withName = false)
+        assertEquals("Connecting…", nameless.label)
+        assertEquals("Connecting to Desk PC", nameless.description)
         val offline = hostChipContent(SurfaceHost(SurfaceHostStatus.Offline, "Desk PC", onReconnect = {}))
         assertEquals("Desk PC", offline.label)
         assertEquals("Reconnect", offline.action)
