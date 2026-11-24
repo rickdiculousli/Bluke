@@ -6,6 +6,10 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.Composable
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.material.icons.filled.Dialpad
+import androidx.compose.material.icons.filled.ViewSidebar
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.ui.semantics.SemanticsNode
 import androidx.compose.ui.platform.LocalDensity
@@ -119,7 +123,54 @@ class SurfaceToolbarFitTest {
         assertNull(noFix.getOrNull(SemanticsActions.OnClick))
     }
 
-    private fun showToolbars(): List<Map<String, TextLayoutResult>> {
+    /** The touchpad's two labelled toggles hold the same rules at every width, at both font scales. */
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-420dpi")
+    fun touchpadTogglesFitAPortraitPhone() = assertTouchpadTogglesFit()
+
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land-xhdpi")
+    fun touchpadTogglesFitASmallLandscapePhone() = assertTouchpadTogglesFit()
+
+    @Test
+    @Config(qualifiers = "w914dp-h411dp-land-420dpi")
+    fun touchpadTogglesFitAWideToolbar() = assertTouchpadTogglesFit()
+
+    private fun assertTouchpadTogglesFit() {
+        val layouts = showToolbars(InputMode.TOUCHPAD) {
+            SurfaceToolbarToggles(
+                listOf(
+                    SurfaceToolbarToggle("Numpad", Icons.Default.Dialpad, on = true, onToggle = {}, testTag = "fit_toggle"),
+                    SurfaceToolbarToggle("Modifiers", Icons.Default.ViewSidebar, on = false, onToggle = {}, testTag = "fit_toggle"),
+                ),
+            )
+        }
+        hosts.indices.forEach { assertStatusWhole(it, layouts[it]) }
+        assertChipsAndTuneOnScreen()
+        for (scale in listOf(1.3f, 1f)) {
+            fontScale.floatValue = scale
+            compose.waitForIdle()
+            assertTargetsSpaced(scale)
+            // Each toggle shown says what it is: its words, or its name for TalkBack beside the icon.
+            val toggles = compose.onAllNodesWithTag("fit_toggle").fetchSemanticsNodes().filter { it.layoutInfo.isPlaced }
+            // A row whose status words need the room drops its controls whole (both live in Tune too), never one of the pair.
+            assertTrue("toggles show in pairs: ${toggles.size}", toggles.isNotEmpty() && toggles.size % 2 == 0)
+            toggles.forEach { toggle ->
+                val name = toggle.config.getOrNull(SemanticsProperties.Text)?.joinToString("")
+                    ?: toggle.config.getOrNull(SemanticsProperties.ContentDescription)?.joinToString("")
+                assertTrue("a toggle at $scale is named: ${toggle.config}", !name.isNullOrBlank())
+                assertEquals(Role.Switch, toggle.config.getOrNull(SemanticsProperties.Role))
+            }
+        }
+    }
+
+    private fun showToolbars(
+        mode: InputMode = InputMode.KEYBOARD,
+        controls: @Composable RowScope.(row: Int) -> Unit = { row ->
+            SurfaceToolbarLeds(listOf("CAPS" to (row == 0), "NUM" to true, "SCR" to false), onToggle = {})
+            SurfaceToolbarIconButton(Icons.AutoMirrored.Filled.VolumeUp, "Key sound", onClick = {}, selected = true)
+        },
+    ): List<Map<String, TextLayoutResult>> {
         val layouts = hosts.map { mutableMapOf<String, TextLayoutResult>() }
         compose.setContent {
             val base = LocalDensity.current
@@ -129,10 +180,7 @@ class SurfaceToolbarFitTest {
                     Column {
                         hosts.forEachIndexed { index, host ->
                             CompositionLocalProvider(LocalHostChipTextLayout provides { role, layout -> layouts[index][role] = layout }) {
-                                SurfaceToolbar(previewChrome(InputMode.KEYBOARD, host), haptics, onTune = {}) {
-                                    SurfaceToolbarLeds(listOf("CAPS" to (index == 0), "NUM" to true, "SCR" to false), onToggle = {})
-                                    SurfaceToolbarIconButton(Icons.AutoMirrored.Filled.VolumeUp, "Key sound", onClick = {}, selected = true)
-                                }
+                                SurfaceToolbar(previewChrome(mode, host), haptics, onTune = {}) { controls(index) }
                             }
                         }
                     }

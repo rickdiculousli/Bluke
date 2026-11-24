@@ -721,7 +721,7 @@ fun GamepadView(
                         Text("Done", modifier = Modifier.padding(start = 8.dp))
                     }
                 } else {
-                    ConsoleControl(config, onClick = { selectConsole(CONSOLES[(CONSOLES.indexOf(config) + 1) % CONSOLES.size]) })
+                    ConsoleControl(config, onClick = { tuneOpen = true })
                     // A plain button: once tapped it gives way to Done, so it never shows an on state.
                     SurfaceToolbarIconButton(
                         icon = Icons.Default.Edit,
@@ -871,7 +871,11 @@ fun GamepadView(
 
 // ── Chrome on the surface ──
 
-/** The console toggle in the toolbar: shows the current console and switches to the next. */
+/**
+ * The current console in the toolbar: a quiet status like [ProfileChip], not a control to change
+ * mid-game, since a console change renames the face buttons and moves the left stick. A tap opens
+ * Tune, whose Console section changes it.
+ */
 @Composable
 private fun ConsoleControl(config: ConsoleConfig, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
@@ -880,17 +884,15 @@ private fun ConsoleControl(config: ConsoleConfig, onClick: () -> Unit) {
             .minimumInteractiveComponentSize()
             .heightIn(min = 40.dp)
             .clip(CircleShape)
-            // A text button: the mode button stays the toolbar's one filled pill, and with no outline it
-            // never reads as the host chip, which reports status.
-            .clickable(onClickLabel = "Switch console", role = Role.Button, onClick = onClick)
-            .semantics { stateDescription = config.name }
-            .padding(start = 12.dp, end = 16.dp)
+            .clickable(onClickLabel = "Change console in Tune", role = Role.Button, onClick = onClick)
+            .semantics { contentDescription = "Console: ${config.name}" }
+            .padding(horizontal = 8.dp)
             .testTag("console_selector_pill"),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(Icons.Default.SportsEsports, contentDescription = null, tint = colors.primary, modifier = Modifier.size(18.dp))
-        Text(config.name, style = MaterialTheme.typography.labelLarge, color = colors.primary, maxLines = 1)
+        Icon(Icons.Default.SportsEsports, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(16.dp))
+        Text(config.name, style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, maxLines = 1)
     }
 }
 

@@ -37,6 +37,8 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertTrue
 import org.junit.Before
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -270,6 +272,37 @@ class TouchpadSurfaceTest {
 
     private fun railToggle() = compose.onNodeWithTag("touchpad_modifier_position")
 
+    /** Where there's room, the toolbar's toggles name themselves; a bare keyboard glyph read as "switch to keyboard". */
+    @Test
+    fun theToolbarTogglesAreLabelledSwitchesThatTick() {
+        showTouchpad()
+        for ((tag, label) in listOf("touchpad_numpad_toggle" to "Numpad", "touchpad_modifier_position" to "Modifiers")) {
+            compose.onNodeWithTag(tag)
+                .assert(hasText(label))
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.Role, Role.Switch))
+                .assert(SemanticsMatcher.expectValue(SemanticsProperties.ToggleableState, ToggleableState.Off))
+            haptics.events.clear()
+            compose.onNodeWithTag(tag).performClick()
+            compose.waitForIdle()
+            compose.onNodeWithTag(tag).assert(SemanticsMatcher.expectValue(SemanticsProperties.ToggleableState, ToggleableState.On))
+            assertEquals("$label plays one tick", listOf(HapticEvent.TICK), haptics.events)
+        }
+    }
+
+    /** A portrait phone has no room for the words: the toggles keep their icons and TalkBack their names. */
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-420dpi", sdk = [36])
+    fun aNarrowToolbarKeepsTheTogglesAsNamedIcons() {
+        showTouchpad()
+        for ((tag, label) in listOf("touchpad_numpad_toggle" to "Numpad", "touchpad_modifier_position" to "Modifiers")) {
+            // The toolbar measures its controls at each room it might give them; only the placed copy shows.
+            val placed = compose.onAllNodesWithTag(tag).fetchSemanticsNodes().filter { it.layoutInfo.isPlaced }
+            assertEquals(1, placed.size)
+            assertEquals(listOf(label), placed.single().config.getOrNull(SemanticsProperties.ContentDescription))
+            assertEquals(Role.Switch, placed.single().config.getOrNull(SemanticsProperties.Role))
+        }
+    }
+
     @Test
     fun theRailToggleIsASwitchShowingWhetherTheRailIsOn() {
         showTouchpad()
@@ -398,7 +431,7 @@ class TouchpadSurfaceTest {
         compose.onNodeWithTag("surface_tune").performClick()
         compose.waitForIdle()
         compose.onNodeWithText("3-button").performClick()
-        compose.onNodeWithText("Numpad").performClick()
+        compose.onNode(hasText("Numpad") and hasAnyAncestor(hasTestTag("surface_tune_sheet"))).performClick()
         compose.waitForIdle()
 
         visible = false

@@ -162,7 +162,7 @@ fun SurfaceToolbar(
         val measuredControls = HashMap<SurfaceToolbarRoom, Placeable>()
         fun controlsAt(room: SurfaceToolbarRoom) = measuredControls.getOrPut(room) {
             measure(room) {
-                CompositionLocalProvider(LocalSurfaceToolbarRoom provides room) {
+                CompositionLocalProvider(LocalSurfaceToolbarRoom provides room, LocalSurfaceToolbarHaptics provides haptics) {
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(SurfaceToolbarTargetGap),
@@ -205,11 +205,24 @@ fun SurfaceToolbar(
 
 /**
  * How much room the toolbar gives the surface's own controls, the widest that still leaves the host
- * chip its floor. [SurfaceToolbarLeds] reads it; other controls keep their size.
+ * chip its floor. [SurfaceToolbarLeds] and [SurfaceToolbarToggles] read it; other controls keep their size.
  */
 internal enum class SurfaceToolbarRoom { Full, UnlitInitials, LitOnly, NoLeds }
 
 internal val LocalSurfaceToolbarRoom = staticCompositionLocalOf { SurfaceToolbarRoom.Full }
+
+/** The toolbar's haptics, so every toggle in its controls ticks the same way without each call site asking. */
+internal val LocalSurfaceToolbarHaptics = staticCompositionLocalOf<SurfaceHaptics?> { null }
+
+/** A toolbar toggle's tap: a switch for TalkBack, and one [HapticEvent.TICK] each time it flips. */
+@Composable
+private fun Modifier.toolbarToggle(on: Boolean, onToggle: () -> Unit): Modifier {
+    val haptics = LocalSurfaceToolbarHaptics.current
+    return toggleable(value = on, role = Role.Switch, onValueChange = {
+        haptics?.perform(HapticEvent.TICK)
+        onToggle()
+    })
+}
 
 /** The space between two of the toolbar's 48dp targets. */
 internal val SurfaceToolbarTargetGap = 8.dp
@@ -448,7 +461,7 @@ fun SurfaceToolbarIconButton(
     val clickable = if (selected == null) {
         target.clickable(role = Role.Button, onClick = onClick)
     } else {
-        target.toggleable(value = on, role = Role.Switch, onValueChange = { onClick() })
+        target.toolbarToggle(on, onClick)
     }
     Box(
         clickable.semantics { this.contentDescription = contentDescription },
@@ -482,15 +495,7 @@ fun SurfaceToolbarLeds(
     Row(
         modifier = modifier
             .height(SurfaceToolbarHeight)
-            .drawBehind {
-                val inset = 4.dp.toPx()
-                drawRoundRect(
-                    color = colors.surfaceContainerHigh,
-                    topLeft = Offset(0f, inset),
-                    size = Size(size.width, size.height - 2 * inset),
-                    cornerRadius = CornerRadius(size.height / 2 - inset),
-                )
-            },
+            .toolbarGroup(colors.surfaceContainerHigh),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(SurfaceToolbarTargetGap),
     ) {
@@ -502,7 +507,7 @@ fun SurfaceToolbarLeds(
                 modifier = Modifier
                     .minimumInteractiveComponentSize()
                     .widthIn(min = 48.dp)
-                    .toggleable(value = lit, role = Role.Switch, onValueChange = { onToggle(index) })
+                    .toolbarToggle(lit) { onToggle(index) }
                     .semantics {
                         stateDescription = if (lit) "On" else "Off"
                         // TalkBack says the whole name, not the initial.
@@ -525,6 +530,87 @@ fun SurfaceToolbarLeds(
                     color = if (lit) colors.onSurface else colors.onSurfaceVariant,
                     maxLines = 1,
                 )
+            }
+        }
+    }
+}
+
+/** The 40dp pill a group of toolbar toggles draws on; each toggle's 48dp target reaches past it. */
+private fun Modifier.toolbarGroup(color: Color): Modifier = drawBehind {
+    val inset = 4.dp.toPx()
+    drawRoundRect(
+        color = color,
+        topLeft = Offset(0f, inset),
+        size = Size(size.width, size.height - 2 * inset),
+        cornerRadius = CornerRadius(size.height / 2 - inset),
+    )
+}
+
+/** One of a surface's own on/off settings in the toolbar. [stateDescription] replaces "On"/"Off" for TalkBack. */
+@Immutable
+class SurfaceToolbarToggle(
+    val label: String,
+    val icon: ImageVector,
+    val on: Boolean,
+    val onToggle: () -> Unit,
+    val stateDescription: String? = null,
+    val testTag: String? = null,
+)
+
+/**
+ * Labelled toggles in one 40dp group, styled like [SurfaceToolbarLeds]: a dot that lights when on and
+ * the setting's name. When the toolbar is short of room for the host chip they step down to their
+ * icons, filled when on, and TalkBack still hears the name.
+ */
+@Composable
+fun SurfaceToolbarToggles(toggles: List<SurfaceToolbarToggle>, modifier: Modifier = Modifier) {
+    val colors = MaterialTheme.colorScheme
+    val labelled = LocalSurfaceToolbarRoom.current == SurfaceToolbarRoom.Full
+    Row(
+        modifier = modifier
+            .height(SurfaceToolbarHeight)
+            .toolbarGroup(colors.surfaceContainerHigh),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(SurfaceToolbarTargetGap),
+    ) {
+        toggles.forEach { toggle ->
+            val target = Modifier
+                .minimumInteractiveComponentSize()
+                .then(if (labelled) Modifier.widthIn(min = 48.dp) else Modifier.size(40.dp).clip(CircleShape).background(if (toggle.on) colors.secondaryContainer else Color.Transparent))
+                .toolbarToggle(toggle.on, toggle.onToggle)
+                .semantics {
+                    stateDescription = toggle.stateDescription ?: if (toggle.on) "On" else "Off"
+                    if (!labelled) contentDescription = toggle.label
+                }
+                .then(toggle.testTag?.let { Modifier.testTag(it) } ?: Modifier)
+            if (labelled) {
+                Row(
+                    modifier = target.padding(horizontal = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp, Alignment.CenterHorizontally),
+                ) {
+                    Box(
+                        Modifier
+                            .size(8.dp)
+                            .clip(CircleShape)
+                            .background(if (toggle.on) SurfaceTokens.LedLit else colors.outline),
+                    )
+                    Text(
+                        toggle.label,
+                        style = MaterialTheme.typography.labelMedium,
+                        color = if (toggle.on) colors.onSurface else colors.onSurfaceVariant,
+                        maxLines = 1,
+                    )
+                }
+            } else {
+                Box(target, contentAlignment = Alignment.Center) {
+                    Icon(
+                        toggle.icon,
+                        contentDescription = null,
+                        tint = if (toggle.on) colors.onSecondaryContainer else colors.onSurfaceVariant,
+                        modifier = Modifier.size(22.dp),
+                    )
+                }
             }
         }
     }

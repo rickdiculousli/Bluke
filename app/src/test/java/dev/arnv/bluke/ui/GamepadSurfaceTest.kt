@@ -30,6 +30,11 @@ import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.hasAnyAncestor
+import androidx.compose.ui.test.hasTestTag
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
 import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
@@ -153,7 +158,8 @@ class GamepadSurfaceTest {
         compose.onNodeWithText("Xbox-style").assertIsDisplayed()
 
         compose.onNodeWithTag("console_selector_pill").performClick()
-        compose.onNodeWithText("PlayStation-style").assertIsDisplayed()
+        compose.onNode(hasText("PlayStation-style") and hasAnyAncestor(hasTestTag("surface_tune_sheet"))).performClick()
+        compose.waitForIdle()
 
         shown = false
         compose.waitForIdle()
@@ -163,6 +169,23 @@ class GamepadSurfaceTest {
 
         compose.onNodeWithText("PlayStation-style").assertIsDisplayed()
         compose.onNodeWithTag("gamepad_face_Cross").assertIsDisplayed()
+    }
+
+    /** The console reads as status: a tap opens Tune to change it, and never swaps the layout mid-game. */
+    @Test
+    fun theConsoleStatusOpensTuneWithoutChangingTheConsole() {
+        setSurface()
+        val pill = compose.onNodeWithTag("console_selector_pill")
+        pill.assert(SemanticsMatcher.expectValue(SemanticsProperties.ContentDescription, listOf("Console: Xbox-style")))
+        assertEquals("Change console in Tune", pill.fetchSemanticsNode().config.getOrNull(SemanticsActions.OnClick)?.label)
+
+        pill.performClick()
+        compose.waitForIdle()
+
+        compose.onNodeWithTag("surface_tune_sheet").assertExists()
+        assertEquals(null, prefs.getString(GAMEPAD_CONSOLE_PREFERENCE, null))
+        // Under the open sheet the pad is hidden from TalkBack, but its buttons keep their Xbox names.
+        compose.onNodeWithTag("gamepad_face_A", useUnmergedTree = true).assertExists()
     }
 
     @Test

@@ -181,6 +181,21 @@ class KeyboardSurfaceTest {
         toggle.assertIsOff()
     }
 
+    /** Every toolbar toggle ticks once as it flips, the lock lights and key sound as much as the touchpad's. */
+    @Test
+    fun aLockLightAndTheSoundToggleEachPlayOneTick() {
+        showSurface()
+        haptics.events.clear()
+        compose.onNodeWithText("CAPS").performClick()
+        compose.waitForIdle()
+        assertEquals(listOf(HapticEvent.TICK), haptics.events)
+
+        haptics.events.clear()
+        compose.onNodeWithTag("keyboard_sound_toggle").performClick()
+        compose.waitForIdle()
+        assertEquals(listOf(HapticEvent.TICK), haptics.events)
+    }
+
     @Test
     fun offlineLockLightTogglesLocally() {
         showSurface()

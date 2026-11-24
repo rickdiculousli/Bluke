@@ -24,7 +24,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Dialpad
-import androidx.compose.material.icons.filled.KeyboardAlt
+import androidx.compose.material.icons.filled.ViewSidebar
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -251,30 +251,30 @@ fun TouchpadView(
     ) {
         Column(Modifier.fillMaxSize()) {
             SurfaceToolbar(chrome = chrome, haptics = haptics, onTune = { tuneOpen = true }) {
-                SurfaceToolbarIconButton(
-                    icon = Icons.Default.Dialpad,
-                    contentDescription = "Numpad",
-                    onClick = {
-                        haptics.perform(HapticEvent.TICK)
-                        setNumpad(!numpad)
-                    },
-                    selected = numpad,
-                    modifier = Modifier.testTag("touchpad_numpad_toggle"),
-                )
-                // On/off here; the side is a Tune setting, and on returns to the last side chosen.
+                // On/off here; the rail's side is a Tune setting, and on returns to the last side chosen.
                 val railOn = tune.modifierPosition != TouchpadModifierPosition.OFF
-                SurfaceToolbarIconButton(
-                    icon = Icons.Default.KeyboardAlt,
-                    contentDescription = "Modifier keys",
-                    onClick = {
-                        haptics.perform(HapticEvent.TICK)
-                        val next = if (railOn) TouchpadModifierPosition.OFF else lastModifierRailSide(sharedPrefs)
-                        tune.copy(modifierPosition = next).write(sharedPrefs)
-                    },
-                    selected = railOn,
-                    modifier = Modifier
-                        .semantics { stateDescription = if (railOn) "On, ${railLabel(tune.modifierPosition).lowercase()}" else "Off" }
-                        .testTag("touchpad_modifier_position"),
+                SurfaceToolbarToggles(
+                    listOf(
+                        SurfaceToolbarToggle(
+                            label = "Numpad",
+                            icon = Icons.Default.Dialpad,
+                            on = numpad,
+                            onToggle = { setNumpad(!numpad) },
+                            testTag = "touchpad_numpad_toggle",
+                        ),
+                        SurfaceToolbarToggle(
+                            label = "Modifiers",
+                            // A rail beside the pad: a keyboard glyph here read as "switch to keyboard".
+                            icon = Icons.Default.ViewSidebar,
+                            on = railOn,
+                            onToggle = {
+                                val next = if (railOn) TouchpadModifierPosition.OFF else lastModifierRailSide(sharedPrefs)
+                                tune.copy(modifierPosition = next).write(sharedPrefs)
+                            },
+                            stateDescription = if (railOn) "On, ${railLabel(tune.modifierPosition).lowercase()}" else "Off",
+                            testTag = "touchpad_modifier_position",
+                        ),
+                    ),
                 )
             }
 
