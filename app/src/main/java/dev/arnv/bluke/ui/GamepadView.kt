@@ -13,6 +13,7 @@ import androidx.compose.foundation.gestures.calculateZoom
 import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.WindowInsets
@@ -26,6 +27,7 @@ import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -40,6 +42,7 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.RestartAlt
+import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.outlined.FilterNone
 import androidx.compose.material3.FilledTonalButton
@@ -279,6 +282,24 @@ private const val INNER_CLUSTER_DP = 248f
 /** A stick part is wider than its well: its L3/R3 badge sits beside it on the outer side. */
 private const val STICK_BADGE_SHIFT_DP = 24f
 private const val CENTER_BUTTON_SPACING_DP = 60f
+/** The face-button cluster's square touch box. */
+private const val FACE_CLUSTER_DP = 148f
+/** A stick part's height: the well plus room for its badge. */
+private const val STICK_PART_HEIGHT_DP = 112f
+/** The clear space kept between two parts' touch boxes. */
+private const val PART_GAP_DP = 4f
+
+/**
+ * The smallest controls area the full-size layout fits with no two parts touching: the center row needs
+ * the width between the inner clusters, and each side's upper and lower clusters stack in the height.
+ * A smaller area gets the same layout scaled down whole (see [layoutScale]).
+ */
+private const val LAYOUT_MIN_WIDTH_DP = 792f
+private const val LAYOUT_MIN_HEIGHT_DP = 340f
+
+/** How much the parts shrink to fit an area [width]×[height] dp: 1 at or above the minimum layout. */
+private fun layoutScale(width: Float, height: Float): Float =
+    minOf(1f, width / LAYOUT_MIN_WIDTH_DP, height / LAYOUT_MIN_HEIGHT_DP)
 
 /**
  * Where each part's centre sits in a controls area [width]×[height] dp, before the user's edits.
@@ -286,9 +307,19 @@ private const val CENTER_BUTTON_SPACING_DP = 60f
  * a lower inner one, so both thumbs have the full height; Guide and the center buttons sit between.
  */
 private fun baseLayout(config: ConsoleConfig, width: Float, height: Float): Map<GamepadPart, Offset> {
+    // Lay out at full size in the area as the scaled-down parts see it, then scale the positions back.
+    val scale = layoutScale(width, height)
+    return fullSizeLayout(config, width / scale, height / scale).mapValues { it.value * scale }
+}
+
+private fun fullSizeLayout(config: ConsoleConfig, width: Float, height: Float): Map<GamepadPart, Offset> {
     val area = height - CLUSTER_TOP_DP - 8f
     val upperY = CLUSTER_TOP_DP + area * 0.34f
-    val lowerY = CLUSTER_TOP_DP + area * 0.76f
+    // The face cluster shares its columns with the right stick below it, so it rises toward the
+    // shoulders to keep a gap; only when there is no room left there does the lower row drop.
+    val stackGap = (FACE_CLUSTER_DP + STICK_PART_HEIGHT_DP) / 2f + PART_GAP_DP
+    val faceY = maxOf(CLUSTER_TOP_DP + FACE_CLUSTER_DP / 2f + PART_GAP_DP, minOf(upperY, CLUSTER_TOP_DP + area * 0.76f - stackGap))
+    val lowerY = maxOf(CLUSTER_TOP_DP + area * 0.76f, faceY + stackGap)
     val outerLeft = Offset(OUTER_CLUSTER_DP, upperY)
     val innerLeft = Offset(INNER_CLUSTER_DP, lowerY)
     val leftStick = if (config.leftStickAboveDpad) outerLeft else innerLeft
@@ -305,7 +336,7 @@ private fun baseLayout(config: ConsoleConfig, width: Float, height: Float): Map<
         GamepadPart.RIGHT_TRIGGER to Offset(width - triggerX, SHOULDER_ROW_CENTER_DP),
         GamepadPart.LEFT_STICK to leftStick - Offset(STICK_BADGE_SHIFT_DP, 0f),
         GamepadPart.DPAD to dpad,
-        GamepadPart.FACE_BUTTONS to Offset(width - OUTER_CLUSTER_DP, upperY),
+        GamepadPart.FACE_BUTTONS to Offset(width - OUTER_CLUSTER_DP, faceY),
         GamepadPart.RIGHT_STICK to Offset(width - INNER_CLUSTER_DP + STICK_BADGE_SHIFT_DP, lowerY),
         GamepadPart.GUIDE to Offset(centerX, guideY),
         GamepadPart.SELECT to Offset(centerX - CENTER_BUTTON_SPACING_DP, centerRowY),
@@ -390,6 +421,21 @@ private fun Modifier.centeredAt(center: (area: Size) -> Offset) = layout { measu
     layout(placeable.width, placeable.height) {
         val c = center(Size(constraints.maxWidth.toDp().value, constraints.maxHeight.toDp().value))
         placeable.place(c.x.dp.roundToPx() - placeable.width / 2, c.y.dp.roundToPx() - placeable.height / 2)
+    }
+}
+
+/** Like [centeredAt], and scales this element about its centre by [layoutScale] for the area. */
+private fun Modifier.layoutPlaced(center: (area: Size) -> Offset, onScale: (Float) -> Unit) = layout { measurable, constraints ->
+    val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+    layout(placeable.width, placeable.height) {
+        val area = Size(constraints.maxWidth.toDp().value, constraints.maxHeight.toDp().value)
+        val c = center(area)
+        val scale = layoutScale(area.width, area.height)
+        onScale(scale)
+        placeable.placeWithLayer(c.x.dp.roundToPx() - placeable.width / 2, c.y.dp.roundToPx() - placeable.height / 2) {
+            scaleX = scale
+            scaleY = scale
+        }
     }
 }
 
@@ -557,24 +603,31 @@ fun GamepadView(
                     }
                 } else {
                     ConsoleControl(config, onClick = { selectConsole(CONSOLES[(CONSOLES.indexOf(config) + 1) % CONSOLES.size]) })
+                    // A plain button: once tapped it gives way to Done, so it never shows an on state.
                     SurfaceToolbarIconButton(
                         icon = Icons.Default.Edit,
                         contentDescription = "Edit layout",
                         onClick = { isEditMode = true },
-                        selected = false,
                         modifier = Modifier.testTag("edit_layout_toggle_btn"),
                     )
                 }
             }
 
-            // Parts find their place from the area's size when they are placed (see centeredAt), so the
-            // controls area needs no subcomposition to know its size.
-            Box(
+            // Parts find their place from the area's size when they are placed (see centeredAt); the
+            // constraints only choose between the controller and the rotate state.
+            BoxWithConstraints(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
             ) {
+                // A held controller is landscape. A window taller than it is wide (split screen, or a
+                // large screen that ignores the orientation lock) gets the rotate state instead.
+                if (maxWidth < maxHeight) {
+                    TurnSidewaysState(Modifier.align(Alignment.Center))
+                    return@BoxWithConstraints
+                }
+
                 @Composable
                 fun Part(part: GamepadPart, content: @Composable () -> Unit) {
                     EditablePart(
@@ -695,12 +748,49 @@ private fun ProfileChip(profile: GamepadDpadOutputMode, onClick: () -> Unit) {
     }
 }
 
+/** The controls area when the window is taller than it is wide. The toolbar above it still works. */
+@Composable
+private fun TurnSidewaysState(modifier: Modifier) {
+    val colors = MaterialTheme.colorScheme
+    Column(
+        modifier = modifier
+            .padding(horizontal = 32.dp)
+            .widthIn(max = 360.dp)
+            .semantics(mergeDescendants = true) {}
+            .testTag("gamepad_turn_sideways"),
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(16.dp),
+    ) {
+        Box(
+            Modifier
+                .size(96.dp)
+                .clip(CircleShape)
+                .background(colors.secondaryContainer),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Default.ScreenRotation, contentDescription = null, tint = colors.onSecondaryContainer, modifier = Modifier.size(48.dp))
+        }
+        Text(
+            "Turn your phone sideways",
+            style = MaterialTheme.typography.headlineSmall,
+            color = colors.onSurface,
+            textAlign = TextAlign.Center,
+        )
+        Text(
+            "The gamepad needs a landscape window. In split screen, make Bluke's window wider than it is tall.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = colors.onSurfaceVariant,
+            textAlign = TextAlign.Center,
+        )
+    }
+}
+
 @Composable
 private fun EditHint() {
     val colors = MaterialTheme.colorScheme
     Column(
         modifier = Modifier
-            .clip(RoundedCornerShape(16.dp))
+            .clip(MaterialTheme.shapes.large)
             .background(colors.primaryContainer)
             .padding(horizontal = 16.dp, vertical = 4.dp)
             .testTag("gamepad_edit_hint"),
@@ -742,12 +832,15 @@ private fun EditablePart(
 
     Box(
         modifier = Modifier
-            .centeredAt { area ->
-                val origin = originIn(area)
-                placed.origin = origin
-                placed.area = area
-                Offset(origin.x + current.x, origin.y + current.y)
-            }
+            .layoutPlaced(
+                center = { area ->
+                    val origin = originIn(area)
+                    placed.origin = origin
+                    placed.area = area
+                    Offset(origin.x + current.x, origin.y + current.y)
+                },
+                onScale = { placed.scale = it },
+            )
             .graphicsLayer {
                 scaleX = current.scale
                 scaleY = current.scale
@@ -757,10 +850,12 @@ private fun EditablePart(
     ) {
         content()
         if (isEditMode) {
-            val shape = RoundedCornerShape(12.dp)
+            val shape = MaterialTheme.shapes.medium
             Box(
                 Modifier
                     .matchParentSize()
+                    // A selection overlay, not a container: a translucent primary state layer (M3's
+                    // dragged-state opacity) so the control under it stays visible.
                     .background(colors.primary.copy(alpha = 0.16f), shape)
                     .border(2.dp, colors.primary, shape)
                     .semantics { contentDescription = "Move ${part.description}" }
@@ -773,11 +868,13 @@ private fun EditablePart(
                                 val pan = event.calculatePan()
                                 val zoom = event.calculateZoom()
                                 val t = current
+                                // The pan is in the part's own scaled space; offsets are in the area's dp.
+                                val toArea = t.scale * placed.scale / density
                                 currentOnTransform(
                                     clamped(
                                         PartTransform(
-                                            x = t.x + pan.x * t.scale / density,
-                                            y = t.y + pan.y * t.scale / density,
+                                            x = t.x + pan.x * toArea,
+                                            y = t.y + pan.y * toArea,
                                             scale = t.scale * zoom,
                                         ),
                                     ),
@@ -826,6 +923,7 @@ private fun EditablePart(
 private class PlacedArea {
     var origin: Offset = Offset.Zero
     var area: Size = Size.Zero
+    var scale: Float = 1f
 }
 
 // ── Controls ──
@@ -972,7 +1070,7 @@ private fun FaceButtons(config: ConsoleConfig, onPress: (Int) -> Unit, onRelease
 
     Box(
         modifier = Modifier
-            .size(148.dp)
+            .size(FACE_CLUSTER_DP.dp)
             .pointerInput(config.id) {
                 val spacingPx = FACE_SPACING_DP.dp.toPx()
                 // Proximity radius covering multi-button thumb presses.
@@ -1125,7 +1223,7 @@ private fun AnalogStick(
     val currentOnStickClick by rememberUpdatedState(onStickClick)
     val currentOnMove by rememberUpdatedState(onMove)
 
-    Box(Modifier.size(width = (STICK_WELL_DP + 2 * STICK_BADGE_SHIFT_DP + 8f).dp, height = 112.dp)) {
+    Box(Modifier.size(width = (STICK_WELL_DP + 2 * STICK_BADGE_SHIFT_DP + 8f).dp, height = STICK_PART_HEIGHT_DP.dp)) {
         Box(
             modifier = Modifier
                 .align(if (badgeOnStart) Alignment.CenterEnd else Alignment.CenterStart)
