@@ -10,6 +10,7 @@ import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
+import com.github.takahirom.roborazzi.RoborazziOptions
 import com.github.takahirom.roborazzi.captureRoboImage
 import dev.arnv.bluke.ui.theme.MyApplicationTheme
 import org.junit.Before
@@ -51,7 +52,12 @@ class HomeMotionScreenshotTest {
         for (step in steps) {
             compose.mainClock.advanceTimeBy(step - elapsed)
             elapsed = step
-            compose.onRoot().captureRoboImage(filePath = "src/test/screenshots/home-motion-$name-${step}ms.png")
+            compose.onRoot().captureRoboImage(
+                filePath = "src/test/screenshots/home-motion-$name-${step}ms.png",
+                // A frame mid-motion anti-aliases a rotating chevron a few pixels differently depending on where the
+                // click lands against the frame clock; a real change moves far more than 0.05% of the screen.
+                roborazziOptions = RoborazziOptions(compareOptions = RoborazziOptions.CompareOptions(changeThreshold = 0.0005f)),
+            )
         }
     }
 
