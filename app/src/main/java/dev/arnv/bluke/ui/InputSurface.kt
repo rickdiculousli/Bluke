@@ -140,7 +140,8 @@ internal fun blockedReason(state: BluetoothState): String? = when (state) {
     is BluetoothState.BluetoothOff -> "Bluetooth off"
     is BluetoothState.PermissionRequired -> "Nearby devices permission needed"
     is BluetoothState.Unsupported -> "No Bluetooth on this phone"
-    is BluetoothState.ProfileNotSupported -> "This phone can't be a Bluetooth input"
+    // Short enough to stay whole in a portrait chip at large text; true on every surface, not just the keyboard.
+    is BluetoothState.ProfileNotSupported -> "Phone not supported"
     else -> null
 }
 

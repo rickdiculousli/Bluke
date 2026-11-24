@@ -24,6 +24,7 @@ class SurfaceHostTest {
     fun everyStatusSaysWhatItIs() {
         assertEquals("Rick's MacBook", hostChipContent(SurfaceHost(SurfaceHostStatus.Connected, "Rick's MacBook")).label)
         assertEquals("Connecting to Desk PC", hostChipContent(SurfaceHost(SurfaceHostStatus.Connecting, "Desk PC")).label)
+        assertEquals("Connecting Desk PC", hostChipContent(SurfaceHost(SurfaceHostStatus.Connecting, "Desk PC"), compact = true).label)
         assertEquals("Connecting…", hostChipContent(SurfaceHost(SurfaceHostStatus.Connecting, null)).label)
         val offline = hostChipContent(SurfaceHost(SurfaceHostStatus.Offline, "Desk PC", onReconnect = {}))
         assertEquals("Desk PC", offline.label)
@@ -55,7 +56,7 @@ class SurfaceHostTest {
     @Test
     fun aPhoneWithoutTheHidRoleSaysSoOnEverySurface() {
         val reason = blockedReason(BluetoothState.ProfileNotSupported)
-        assertEquals("This phone can't be a Bluetooth input", reason)
+        assertEquals("Phone not supported", reason)
         val content = hostChipContent(SurfaceHost(SurfaceHostStatus.Blocked, null, reason = reason))
         assertEquals(reason, content.label)
         assertNull(content.action)

@@ -270,7 +270,7 @@ internal data class HostChipContent(
     val label: String get() = listOfNotNull(status, name).joinToString(" ")
 }
 
-internal fun hostChipContent(host: SurfaceHost): HostChipContent {
+internal fun hostChipContent(host: SurfaceHost, compact: Boolean = false): HostChipContent {
     val name = host.name?.takeIf { it.isNotBlank() }
     return when (host.status) {
         SurfaceHostStatus.Connected -> HostChipContent(
@@ -280,7 +280,8 @@ internal fun hostChipContent(host: SurfaceHost): HostChipContent {
             description = "Connected to ${name ?: "host"}",
         )
         SurfaceHostStatus.Connecting -> HostChipContent(
-            status = if (name == null) "Connecting…" else "Connecting to",
+            // On a narrow phone "to" would cost the name its floor; the ring dot already says "on the way".
+            status = if (name == null) "Connecting…" else if (compact) "Connecting" else "Connecting to",
             name = name,
             action = null,
             description = "Connecting to ${name ?: "host"}",
@@ -317,7 +318,7 @@ internal val LocalHostChipTextLayout = staticCompositionLocalOf<(role: String, T
 @Composable
 private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, compact: Boolean, probeNameChars: Int? = null) {
     val colors = MaterialTheme.colorScheme
-    val content = hostChipContent(host).let { full ->
+    val content = hostChipContent(host, compact).let { full ->
         when {
             probeNameChars == null || full.name == null -> full
             // At zero the probe is the status words alone; a name that is the status keeps a hint of itself.

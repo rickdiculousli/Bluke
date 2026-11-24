@@ -18,6 +18,7 @@ import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import dev.arnv.bluke.bluetooth.BluetoothState
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -51,6 +52,7 @@ class SurfaceToolbarFitTest {
         SurfaceHost(SurfaceHostStatus.Offline, null),
         SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off"),
         SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off", onFix = {}, fixLabel = "Turn on", fixClickLabel = "Turn on Bluetooth"),
+        SurfaceHost(SurfaceHostStatus.Blocked, null, reason = blockedReason(BluetoothState.ProfileNotSupported)),
     )
 
     /** A portrait phone: the keyboard's toolbar used to give the host chip no width at all. */
@@ -102,10 +104,10 @@ class SurfaceToolbarFitTest {
     fun aBlockedChipWithAFixIsAButton() {
         showToolbars()
         val chips = compose.onAllNodesWithTag("surface_host").fetchSemanticsNodes()
-        val fix = chips[hosts.lastIndex].config
+        val fix = chips[hosts.indexOfFirst { it.onFix != null }].config
         assertEquals(Role.Button, fix.getOrNull(SemanticsProperties.Role))
         assertEquals("Turn on Bluetooth", fix.getOrNull(SemanticsActions.OnClick)?.label)
-        val noFix = chips[hosts.lastIndex - 1].config
+        val noFix = chips[hosts.indexOfFirst { it.status == SurfaceHostStatus.Blocked && it.onFix == null }].config
         assertNull(noFix.getOrNull(SemanticsActions.OnClick))
     }
 
@@ -134,7 +136,7 @@ class SurfaceToolbarFitTest {
     }
 
     private fun assertStatusWhole(index: Int, layouts: Map<String, TextLayoutResult>) {
-        val content = hostChipContent(hosts[index])
+        val content = hostChipContent(hosts[index], compact = true)
         // A Connected host's name is its status words; every other status has words of its own.
         val role = if (content.status != null) "status" else "name"
         val layout = layouts[role] ?: error("row $index shows no $role")
