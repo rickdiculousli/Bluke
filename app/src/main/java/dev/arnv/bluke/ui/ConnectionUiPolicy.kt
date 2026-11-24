@@ -134,7 +134,7 @@ val ConnectionAction.label: String
         ConnectionAction.StopScan -> "Stop scanning"
         ConnectionAction.Cancel -> "Cancel"
         ConnectionAction.Disconnect -> "Disconnect"
-        ConnectionAction.RestartHid -> "Restart keyboard service"
+        ConnectionAction.RestartHid -> "Restart Bluetooth input"
         ConnectionAction.Help -> "Help"
     }
 
@@ -157,7 +157,7 @@ fun ConnectionUi.card(): ConnectionCard = when (this) {
     )
     is ConnectionUi.Starting -> ConnectionCard(
         "Starting Bluetooth",
-        if (attempt > 1) "Getting the keyboard service ready, try $attempt." else "Getting the keyboard service ready.",
+        if (attempt > 1) "Getting Bluetooth input ready, attempt $attempt." else "Getting Bluetooth input ready.",
         StatusTone.WORKING, busy = true, primary = null,
     )
     is ConnectionUi.Blocked -> when (reason) {
@@ -228,7 +228,7 @@ private fun ConnectionUi.Failed.failedCard(): ConnectionCard {
     val name = host?.displayName ?: "the host"
     return when (reason) {
         FailReason.SERVICE_FAILED -> ConnectionCard(
-            "Keyboard service stopped",
+            "Bluetooth input stopped",
             "Restart it to connect again. If that doesn't work, turn Bluetooth off and on.",
             StatusTone.PROBLEM, busy = false, primary = ConnectionAction.RestartHid, secondary = ConnectionAction.Help,
         )

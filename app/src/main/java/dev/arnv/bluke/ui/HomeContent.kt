@@ -10,6 +10,7 @@ import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.PressInteraction
 import androidx.compose.foundation.interaction.collectIsPressedAsState
 import androidx.compose.material3.ripple
 import androidx.compose.foundation.layout.Arrangement
@@ -199,9 +200,15 @@ private fun ModeDock(
                     // The pressed tone snaps on with the finger, the same frame, with no animation in the way.
                     val interaction = remember { MutableInteractionSource() }
                     val pressed by interaction.collectIsPressedAsState()
+                    // The haptic lands with the pressed tone, on touch-down; the launch still waits for the tap.
+                    LaunchedEffect(interaction, hapticsEnabled) {
+                        interaction.interactions.collect {
+                            if (it is PressInteraction.Press && hapticsEnabled) view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                        }
+                    }
                     Surface(
                         shape = MaterialTheme.shapes.large,
-                        color = if (pressed) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                        color = if (pressed) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerLowest,
                         contentColor = if (pressed) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier
                             .weight(1f)
@@ -217,10 +224,7 @@ private fun ModeDock(
                                     onClickLabel = "Open ${mode.displayName}",
                                     onLongClickLabel = "Choose which modes the switch button cycles",
                                     onLongClick = { onModeSettings(mode) },
-                                    onClick = {
-                                        if (hapticsEnabled) view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
-                                        onLaunch(mode)
-                                    },
+                                    onClick = { onLaunch(mode) },
                                 )
                                 .heightIn(min = 64.dp)
                                 .padding(horizontal = 16.dp, vertical = 12.dp),
@@ -282,17 +286,24 @@ private fun HostSections(state: HomeUiState, showMacAddress: Boolean, callbacks:
                 }
             }
         }
+        // When the card's one step is already Scan or Stop scanning, Nearby neither repeats it nor sits empty.
+        val cardScans = connection.card().primary.let { it == ConnectionAction.Scan || it == ConnectionAction.StopScan }
+        if (cardScans && !nearbyOpen) return@Column
         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
             SectionHeader(
                 "Nearby",
                 count = state.nearby.size.takeIf { nearbyOpen },
-                // When the card's one step is already Scan or Stop scanning, the header doesn't repeat it.
-                trailing = {
-                    val cardScans = connection.card().primary.let { it == ConnectionAction.Scan || it == ConnectionAction.StopScan }
-                    if (!cardScans) ScanButton(state.isScanning, callbacks.onToggleScan)
-                },
+                trailing = { if (!cardScans) ScanButton(state.isScanning, callbacks.onToggleScan) },
                 modifier = Modifier.testTag("nearby_header"),
             )
+            if (!nearbyOpen) {
+                Text(
+                    "Scan to add another host.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.padding(horizontal = 4.dp),
+                )
+            }
             AnimatedVisibility(
                 visible = nearbyOpen,
                 enter = expandVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeIn(spring(stiffness = Spring.StiffnessMedium)),

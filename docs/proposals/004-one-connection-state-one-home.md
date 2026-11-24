@@ -86,6 +86,27 @@ Open Bluke and the card says exactly what's happening ("Connected to Rick's MacB
   - If three rounds in a row bring no gain, or one finding survives two fixes, write down the belief both fixes assumed, test it, and report it with `bmesh ask`.
 
 ## Shown
+- Card says what's happening, with one next step: `connectionUi` and `ConnectionUi.card()` in `app/src/main/java/dev/arnv/bluke/ui/ConnectionUiPolicy.kt`, rendered by `ConnectionCard.kt`; every state is a baseline, e.g. `app/src/test/screenshots/home-connected-light-fs1.0.png` ("Connected to Rick's MacBook Pro"), `home-blocked-bluetooth-off-*`, `home-failed-host-refused-*` ("Host refused pairing").
+- Connected reads "Connected to <host>", not "Ready to Scan": `ConnectionUiPolicyTest.connectedSaysConnectedToTheHostNotReadyToScan`; on main the headline was fixed text: `git grep -n '"Ready to Scan"' main -- app/src/main` -> `main:app/src/main/java/dev/arnv/bluke/ui/StatusHeaderCard.kt:90: text = if (isScanning) "Scanning..." else "Ready`.
+- C10, permission missing blocks Launch and offers Grant: `ConnectionUiPolicyTest.permissionMissingBlocksLaunchAndOffersGrant`; the prompt-or-app-settings rule is `HomeUiPolicyTest.grantAsksAndroidUntilItStopsShowingThePrompt`, wired in `MainActivity.requestBluetoothPermissions`.
+- C1, a surface goes home when Bluetooth is blocked and stays open while checking: `ConnectionUiPolicyTest.aSurfaceGoesHomeWhenBluetoothTurnsOffButStaysOpenWhileChecking`, wired as the `closesSurface` effect in `HomeScreen.kt`.
+- C9, a paired host of an unlikely class is listed with hide-unlikely on: `HostListPolicyTest.aPairedHostOfAnUnlikelyClassIsListedWithHideUnlikelyOn`; one predicate, `isLikelyHost`, in `HostListPolicy.kt`, read by the Nearby filter and the row.
+- Those policy tests pass: `./gradlew testDebugUnitTest --tests ...ConnectionUiPolicyTest --tests ...HostListPolicyTest --tests ...StatusMessageGuardTest --tests ...HomeUiPolicyTest` -> `ConnectionUiPolicyTest tests="15" skipped="0" failures="0"`, `HostListPolicyTest tests="4" ... failures="0"`, `StatusMessageGuardTest tests="1" ... failures="0"`, `HomeUiPolicyTest tests="5" ... failures="0"`.
+- Generated table over every BluetoothState × lifecycle shape × {no target, unbonded, bonded, connected} × scanning (also × disconnecting × each failure × stalled): `ConnectionUiPolicyTest.everyInputYieldsOneHeadlineAndAtMostOnePrimaryAction`, 12,672 cases, each one headline and at most one primary.
+- Guard against status-text matching: `StatusMessageGuardTest`; on main it would fail: `git grep -nE 'statusMessage\s*\.\s*contains' main -- app/src/main/java/dev/arnv/bluke/ui` -> `main:app/src/main/java/dev/arnv/bluke/ui/DeviceListSection.kt:50: ...statusMessage.contains(...`.
+- Typed state from the manager: `lastConnectionFailure` and `isDisconnecting` in `bluetooth/BluetoothKeyboardManager.kt`, set beside the existing messages; no transition changed. `RigReceiver`'s `state` reports both, and `rig.py` checks the failure is clear after connecting and waits for the disconnect to finish.
+- Lists stay out of the way: Paired collapses while connected or scanning (`home-connected-*`, `home-scanning-*`, filmstrip `home-motion-connect-*ms.png`), Nearby opens only while scanning or with results, and no paired hosts shows the three steps (`home-ready-no-hosts-*`).
+- Every mode one tap from home: the mode dock in `HomeContent.kt` shows `InputMode.entries` and launches on tap; its pressed tone shows on touch-down (`home-motion-tile-press-0ms.png`, `-16ms`). Long press opens the input-mode cycle screen (`QuickCycleActivity`) until `settingsIntent(section)` exists on `main`.
+- First launch goes straight to home, which asks inline: `OnboardingActivity` deleted; `git grep -nE "OnboardingActivity|has_seen_help|mock_update_popup|dQw4w9WgXcQ" HEAD -- app tools | wc -l` -> `0` (main: `15`). `RigReceiver`'s `skip-onboarding` still marks an up-to-date install.
+- Stateless `HomeContent(HomeUiState, callbacks)`: screenshot tests render it with fixture states and no reflection: `./gradlew verifyRoborazziDebug --tests 'dev.arnv.bluke.ui.Home*'` -> exit 0 over 85 committed baselines (72 states: 18 states × light/dark × font scale 1.0/1.3, plus 13 filmstrip frames).
+- All-screens harness runs on this tree: `docs/proposals/assets/001-AllScreensScreenshotTest.kt` updated for the mode tiles and no onboarding; its run wrote 102 PNGs with no `SCREEN FAILURES`.
+- Hill-climb against `ui-rubric.md`, a fresh Opus reviewer each round with no earlier text:
+  - Round 1: 7/10 (A3 B3 C3 D3 E3 F3 G3). Top findings, all P2: scan results below the fold; refusal copy repeated the host name; outlined-button border under 3:1; first launch opened on a red card with "Restart HID" jargon. All fixed, plus the modes moved into a dock outside the scroll so a press shows on touch-down, springs throughout, and haptics gated.
+  - Round 2: 9/10 (A4 B3 C4 D4 E3 F4 G3), conditional on re-committing the home baselines a re-record had dropped. Its P2s were a duplicated scan control and Details misaligned 12dp. Both were fixed and the baselines re-recorded.
+  - Round 3: ROUND3
+- Easy to miss: the surface call site reads `connectionUi` too, not `connectedDevice` or the Bluetooth state, so "connected" has one source: `isConnected = surfaceHost.status == SurfaceHostStatus.CONNECTED` in `HomeScreen.kt`, mapped by `ConnectionUi.surfaceHost()` (`ConnectionUiPolicyTest.surfacesSeeOneHostStatus`).
+- Not shown: the rig stays green, disconnect and reconnect included. The one mid-build run (verify on f06ac93) passed build and unit tests but failed at pair and connect. Android's pairing dialog took 7.8s to draw under k16's load (`Displayed com.android.settings/.bluetooth.BluetoothPairingDialog for user 0: +7s775ms`), the rig's one `uiautomator` dump ran before it, and bonding timed out (`HCI_ERR_AUTH_FAILURE`). The landing verify runs the rig on the final tree.
+- Not shown: a real phone and host. That's the operator's step below.
 
 ## Risks and the alternative considered
 - **Real hosts differ from the rig.** Windows, macOS and Linux behave in ways the rig doesn't. `connectionUi` is total over its inputs, so the card can't hide a state the manager reaches. The table test proves that.
@@ -93,4 +114,5 @@ Open Bluke and the card says exactly what's happening ("Connected to Rick's MacB
 - **Alternative: fix only the "Ready to Scan" label.** It lost because the string matching is the cause, and four other places would still read English.
 
 ## Needs from the operator
-- [phone] Pair, disconnect and reconnect one real host. Say whether the card ever showed the wrong state.
+- [phone] Install the build, pair, disconnect and reconnect one real host. Say whether the card ever showed the wrong state.
+- [phone] On a fresh install, deny the Bluetooth permission twice, then tap Grant permission. It should open Bluke's app settings; allow it and come back to the card leaving the blocked state.

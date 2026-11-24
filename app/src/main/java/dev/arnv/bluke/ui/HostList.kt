@@ -230,12 +230,22 @@ private fun HostRow(
             when (state) {
                 HostRowState.CONNECTED -> Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(24.dp))
                 HostRowState.WORKING -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                HostRowState.FAILED -> Text("Try again", style = MaterialTheme.typography.labelLarge, color = scheme.onSurfaceVariant)
-                HostRowState.IDLE -> if (likely) {
-                    Text("Connect", style = MaterialTheme.typography.labelLarge, color = scheme.onSurfaceVariant)
-                }
+                HostRowState.FAILED -> ConnectPill("Try again")
+                HostRowState.IDLE -> if (likely) ConnectPill("Connect")
             }
         }
+    }
+}
+
+/** What a tap on a row does, drawn as a tonal pill; the whole row is the target. */
+@Composable
+private fun ConnectPill(text: String) {
+    Box(
+        modifier = Modifier
+            .background(MaterialTheme.colorScheme.secondaryContainer, CircleShape)
+            .padding(horizontal = 12.dp, vertical = 6.dp),
+    ) {
+        Text(text, style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSecondaryContainer)
     }
 }
 

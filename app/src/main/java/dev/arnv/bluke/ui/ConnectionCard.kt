@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
@@ -146,7 +147,7 @@ internal fun ConnectionCard(
                 .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)
                 .animateContentSize(spring(stiffness = Spring.StiffnessMedium)),
         ) {
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(verticalAlignment = Alignment.Top) {
                 StatusBadge(connection.icon(), card.tone, card.busy, container)
                 Spacer(Modifier.width(16.dp))
                 Column(
@@ -265,10 +266,10 @@ private fun CardDetails(
     )
     TextButton(
         onClick = { expanded = !expanded },
-        // The label sits on the card's content edge, in line with the button and detail lines above and below.
-        contentPadding = PaddingValues(start = 0.dp, end = 12.dp),
         colors = ButtonDefaults.textButtonColors(contentColor = content),
+        // Shifted so the label sits on the card's content edge, keeping the button's own padding for its pressed state.
         modifier = Modifier
+            .offset(x = (-12).dp)
             .heightIn(min = 48.dp)
             .semantics { stateDescription = if (expanded) "Expanded" else "Collapsed" }
             .testTag("connection_details_toggle"),
