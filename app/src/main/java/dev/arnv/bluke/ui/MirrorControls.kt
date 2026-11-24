@@ -706,10 +706,18 @@ internal fun MirrorHotkeyFace(label: String) {
 @Composable
 private fun hotkeyLabelStyle(label: String): Pair<TextStyle, Int> {
     val type = MaterialTheme.typography
-    return listOf(type.titleMedium to 1, type.labelLarge to 1, type.labelSmall to 2)
+    // A key cap's print is part of the key, like a glyph: it grows with the font scale up to 1.3,
+    // then holds, so a 48dp face still names its key at 2.0.
+    val fontScale = LocalDensity.current.fontScale
+    val hold = if (fontScale > FACE_MAX_FONT_SCALE) FACE_MAX_FONT_SCALE / fontScale else 1f
+    fun TextStyle.held() = if (hold == 1f) this else copy(fontSize = fontSize * hold, lineHeight = lineHeight * hold)
+    return listOf(type.titleMedium.held() to 1, type.labelLarge.held() to 1, type.labelSmall.held() to 2)
         .firstOrNull { (style, lines) -> fitsInCell(label, style, lines) }
-        ?: (type.labelSmall to 2)
+        ?: (type.labelSmall.held() to 2)
 }
+
+/** The font scale a hotkey face's print stops growing at. */
+private const val FACE_MAX_FONT_SCALE = 1.3f
 
 /** Whether [text] fits a cell's inner area in [style] and [maxLines] at the current font scale. */
 @Composable

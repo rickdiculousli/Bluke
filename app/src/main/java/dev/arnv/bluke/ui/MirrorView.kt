@@ -60,6 +60,7 @@ import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.clearAndSetSemantics
@@ -320,8 +321,14 @@ fun MirrorSurface(
                 .fillMaxSize()
                 .then(underEditor)
                 .windowInsetsPadding(MirrorControlsInsets.union(WindowInsets.displayCutout.only(WindowInsetsSides.End)))
-                // As far from the right edge as from the left, so the cards centre on the picture they dim.
-                .padding(horizontal = MIRROR_CONTROLS_WIDTH + 24.dp, vertical = 12.dp),
+                // As far from the right edge as from the left, so the cards centre on the picture they
+                // dim; past font scale 1.3 the right side's room goes to the text instead.
+                .padding(
+                    start = MIRROR_CONTROLS_WIDTH + 24.dp,
+                    end = if (LocalDensity.current.fontScale > 1.3f) 16.dp else MIRROR_CONTROLS_WIDTH + 24.dp,
+                    top = 12.dp,
+                    bottom = 12.dp,
+                ),
             horizontalAlignment = Alignment.CenterHorizontally,
         ) {
                 MirrorNoticePill(

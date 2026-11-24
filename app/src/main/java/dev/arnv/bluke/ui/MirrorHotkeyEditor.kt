@@ -172,7 +172,9 @@ internal fun MirrorHotkeyEditor(
                 }
                 Row(Modifier.weight(1f).padding(top = 4.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                     // A full list takes the whole width; there's nothing to add beside it.
-                    ButtonList(hotkeys, onChange, Modifier.weight(1f))
+                    // Past font scale 1.3 the list's names need more of the width than the keys do.
+                    val listWeight = if (LocalDensity.current.fontScale > 1.3f) 1.4f else 1f
+                    ButtonList(hotkeys, onChange, Modifier.weight(listWeight))
                     if (!full) NewButton(draft, typingLayout, Modifier.weight(1f))
                 }
             }
