@@ -164,12 +164,14 @@ fun SurfaceToolbar(
             if (controls == null || controls.width == 0) shared else shared - controls.width - gap
 
         // What gives way, in order: the controls step down (all LEDs, lit LEDs only, no LEDs) before
-        // the host's name drops under eight characters; they step down again before its status words
-        // cut; and they leave the toolbar only when the chip would otherwise lose its dot.
-        val floors = listOf(floor(HostNameFloorChars), floor(HostStatusFloorChars), 48.dp.roundToPx())
-        val room = floors.firstNotNullOfOrNull { min ->
-            SurfaceToolbarRoom.entries.firstOrNull { hostRoom(controlsAt(it)) >= min }
-        }
+        // the host's name drops under eight characters; they step down again, then leave the toolbar,
+        // before the chip's status words cut. With no room even for those, the chip keeps its dot.
+        val nameFloor = floor(HostNameFloorChars)
+        val statusFloor = floor(0)
+        val rooms = SurfaceToolbarRoom.entries
+        val room: SurfaceToolbarRoom? = rooms.firstOrNull { hostRoom(controlsAt(it)) >= nameFloor }
+            ?: rooms.firstOrNull { hostRoom(controlsAt(it)) >= statusFloor }
+            ?: rooms.last().takeIf { shared < statusFloor && hostRoom(controlsAt(it)) >= 48.dp.roundToPx() }
         val controls = room?.let(::controlsAt)
         val host = measure("host", maxWidth = hostRoom(controls).coerceAtLeast(0)) {
             HostChip(chrome.host, haptics, compact)
@@ -197,7 +199,6 @@ internal val LocalSurfaceToolbarRoom = staticCompositionLocalOf { SurfaceToolbar
 
 /** The host's name keeps at least this many characters before the controls stop giving way. */
 internal const val HostNameFloorChars = 8
-private const val HostStatusFloorChars = 2
 
 /** The icon each mode shows on its mode button. */
 fun InputMode.icon(): ImageVector = when (this) {
@@ -291,14 +292,19 @@ internal val LocalHostChipTextLayout = staticCompositionLocalOf<(role: String, T
 
 /**
  * The host chip. With [probeNameChars] set it is a measuring probe the toolbar never places: the
- * name cut to that many characters, and no semantics or tap.
+ * name cut to that many characters (none at zero, when there are status words), and no semantics or tap.
  */
 @Composable
 private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, compact: Boolean, probeNameChars: Int? = null) {
     val colors = MaterialTheme.colorScheme
     val content = hostChipContent(host, compact).let { full ->
-        if (probeNameChars == null || full.name == null || full.name.length <= probeNameChars + 1) full
-        else full.copy(name = full.name.take(probeNameChars) + "…")
+        when {
+            probeNameChars == null || full.name == null -> full
+            // At zero the probe is the status words alone; a name that is the status keeps a hint of itself.
+            probeNameChars == 0 && full.status != null -> full.copy(name = null)
+            full.name.length <= maxOf(probeNameChars, 2) + 1 -> full
+            else -> full.copy(name = full.name.take(maxOf(probeNameChars, 2)) + "…")
+        }
     }
     val observe = LocalHostChipTextLayout.current.takeIf { probeNameChars == null } ?: { _, _ -> }
     val reconnect = host.onReconnect.takeIf { host.status == SurfaceHostStatus.Offline }

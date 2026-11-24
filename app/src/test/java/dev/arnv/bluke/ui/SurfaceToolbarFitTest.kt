@@ -101,7 +101,9 @@ class SurfaceToolbarFitTest {
         val role = if (content.status != null) "status" else "name"
         val layout = layouts[role] ?: error("row $index shows no $role")
         if (role == "status") {
-            assertFalse("row $index's status \"${content.status}\" is whole", layout.isLineEllipsized(0) || layout.hasVisualOverflow)
+            val whole = !layout.isLineEllipsized(0) && !layout.hasVisualOverflow &&
+                layout.size.width >= layout.multiParagraph.intrinsics.maxIntrinsicWidth - 0.5f
+            assertTrue("row $index's status \"${content.status}\" is whole: ${layout.size.width}px", whole)
         }
     }
 
