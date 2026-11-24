@@ -1,5 +1,6 @@
 package dev.arnv.bluke.bluetooth
 
+import android.bluetooth.BluetoothAdapter
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.first
@@ -59,6 +60,54 @@ internal fun shouldBlockServiceStatePublication(
 ): Boolean =
     (incompatibleVerdictLatched && !publishingIncompatibleVerdict) ||
         (capabilityCheckRunning && currentStateIsCapabilityCheck && publishingOperationalState)
+
+/** Where the phone's Bluetooth adapter is in its power cycle, read from `BluetoothAdapter.getState()`. */
+enum class AdapterPower {
+    OFF, TURNING_ON, ON, TURNING_OFF;
+
+    companion object {
+        /** The BLE-only states read as off: classic Bluetooth, and so HID, is down in them. */
+        fun of(state: Int): AdapterPower = when (state) {
+            BluetoothAdapter.STATE_ON -> ON
+            BluetoothAdapter.STATE_TURNING_ON -> TURNING_ON
+            BluetoothAdapter.STATE_TURNING_OFF -> TURNING_OFF
+            else -> OFF
+        }
+    }
+}
+
+/**
+ * What the manager may publish when a step asks for [requested]: while the adapter is anything but on,
+ * Bluetooth is off, whatever a proxy or registration step concluded. A missing adapter and missing
+ * permissions still show, since they are what the user fixes first.
+ */
+internal fun publishableServiceState(adapter: AdapterPower, requested: BluetoothState): BluetoothState = when {
+    adapter == AdapterPower.ON -> requested
+    requested is BluetoothState.Unsupported || requested is BluetoothState.PermissionRequired -> requested
+    else -> BluetoothState.BluetoothOff
+}
+
+enum class HidFailureResponse {
+    /** The failure stands: it is published, and a rejection may become the incompatible verdict. */
+    REPORT,
+
+    /** The adapter's off/on transition caused it: registration starts again once the adapter is on. */
+    RETRY_ON_STATE_ON,
+}
+
+/**
+ * A binding or registration failure from an attempt the adapter left on during ([attemptAdapterCycle] is the
+ * adapter cycle the attempt began in, [currentAdapterCycle] the one now) says nothing about the phone, so it
+ * retries on STATE_ON. Only a failure with the adapter on throughout the attempt is reported, which keeps a
+ * persistent rejection the signal for firmware without a usable HID Device role.
+ */
+internal fun hidFailureResponse(
+    attemptAdapterCycle: Long,
+    currentAdapterCycle: Long,
+    adapter: AdapterPower,
+): HidFailureResponse =
+    if (adapter != AdapterPower.ON || attemptAdapterCycle != currentAdapterCycle) HidFailureResponse.RETRY_ON_STATE_ON
+    else HidFailureResponse.REPORT
 
 data class RetryPolicy(
     val maxAttempts: Int = 3,
