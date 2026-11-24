@@ -166,29 +166,38 @@ private fun ModeButton(chrome: SurfaceChrome, haptics: SurfaceHaptics) {
     }
 }
 
-/** The words and dot colour a [SurfaceHost] shows; pure so a test can read every status. */
-internal data class HostChipContent(val label: String, val action: String?, val description: String)
+/**
+ * The words a [SurfaceHost] shows; pure so a test can read every status. [status] words never
+ * truncate; only [name], the host's own name, ellipsizes when it's long.
+ */
+internal data class HostChipContent(val status: String?, val name: String?, val action: String?, val description: String) {
+    val label: String get() = listOfNotNull(status, name).joinToString(" ")
+}
 
 internal fun hostChipContent(host: SurfaceHost): HostChipContent {
     val name = host.name?.takeIf { it.isNotBlank() }
     return when (host.status) {
         SurfaceHostStatus.Connected -> HostChipContent(
-            label = name ?: "Connected",
+            status = if (name == null) "Connected" else null,
+            name = name,
             action = null,
             description = "Connected to ${name ?: "host"}",
         )
         SurfaceHostStatus.Connecting -> HostChipContent(
-            label = name?.let { "Connecting to $it…" } ?: "Connecting…",
+            status = if (name == null) "Connecting…" else "Connecting to",
+            name = name,
             action = null,
             description = "Connecting to ${name ?: "host"}",
         )
         SurfaceHostStatus.Offline -> HostChipContent(
-            label = name ?: "No host",
+            status = if (name == null) "No host" else null,
+            name = name,
             action = if (host.onReconnect != null) "Reconnect" else null,
             description = if (name != null) "Offline. Last host $name" else "Offline. No host paired",
         )
         SurfaceHostStatus.Blocked -> HostChipContent(
-            label = "Bluetooth unavailable",
+            status = "Bluetooth unavailable",
+            name = null,
             action = null,
             description = "Bluetooth unavailable",
         )
@@ -224,14 +233,22 @@ private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         HostDot(host.status)
-        Text(
-            text = content.label,
-            style = MaterialTheme.typography.labelLarge,
-            color = if (host.status == SurfaceHostStatus.Connected) colors.onSurface else colors.onSurfaceVariant,
-            maxLines = 1,
-            overflow = TextOverflow.Ellipsis,
-            modifier = Modifier.widthIn(max = 180.dp),
-        )
+        val textColor = if (host.status == SurfaceHostStatus.Connected) colors.onSurface else colors.onSurfaceVariant
+        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+            if (content.status != null) {
+                Text(content.status, style = MaterialTheme.typography.labelLarge, color = textColor, maxLines = 1, softWrap = false)
+            }
+            if (content.name != null) {
+                Text(
+                    text = content.name,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = textColor,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.widthIn(max = 180.dp),
+                )
+            }
+        }
         if (content.action != null) {
             Icon(Icons.Default.Refresh, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))
             Text(content.action, style = MaterialTheme.typography.labelLarge, color = colors.primary, maxLines = 1)
