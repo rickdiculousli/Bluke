@@ -106,4 +106,45 @@ class HidLifecycleTest {
         assertEquals(BluetoothCapability.Checking, result.first())
         assertEquals(BluetoothCapability.Inconclusive(8_000), result.last())
     }
+    @Test
+    fun adapterThatIsNotOnPublishesOnlyBluetoothOff() {
+        val lifecycleSteps = listOf(
+            BluetoothState.InitializingCapabilities,
+            BluetoothState.CheckingCapabilities,
+            BluetoothState.ReadyDisconnected,
+            BluetoothState.ProfileNotSupported,
+            BluetoothState.PairingMode("Phone"),
+            BluetoothState.Connected("Mac"),
+            BluetoothState.BluetoothOff,
+        )
+        for (adapter in listOf(AdapterPower.OFF, AdapterPower.TURNING_ON, AdapterPower.TURNING_OFF)) {
+            for (state in lifecycleSteps) {
+                assertEquals("$state while $adapter", BluetoothState.BluetoothOff, publishableServiceState(adapter, state))
+            }
+            assertEquals(BluetoothState.PermissionRequired, publishableServiceState(adapter, BluetoothState.PermissionRequired))
+            assertEquals(BluetoothState.Unsupported, publishableServiceState(adapter, BluetoothState.Unsupported))
+        }
+        for (state in lifecycleSteps) assertEquals(state, publishableServiceState(AdapterPower.ON, state))
+    }
+
+    @Test
+    fun adapterPowerReadsTheBleOnlyStatesAsOff() {
+        assertEquals(AdapterPower.ON, AdapterPower.of(12))
+        assertEquals(AdapterPower.TURNING_ON, AdapterPower.of(11))
+        assertEquals(AdapterPower.TURNING_OFF, AdapterPower.of(13))
+        for (state in listOf(10, 14, 15, 16, -1)) assertEquals(AdapterPower.OFF, AdapterPower.of(state))
+    }
+
+    @Test
+    fun failureDuringTheOffOnTransitionRetriesOnStateOn() {
+        // Seen while the adapter is still off or changing.
+        for (adapter in listOf(AdapterPower.OFF, AdapterPower.TURNING_ON, AdapterPower.TURNING_OFF)) {
+            assertEquals(HidFailureResponse.RETRY_ON_STATE_ON, hidFailureResponse(3, 3, adapter))
+        }
+        // Begun before Bluetooth went off, seen after it came back on.
+        assertEquals(HidFailureResponse.RETRY_ON_STATE_ON, hidFailureResponse(3, 4, AdapterPower.ON))
+        // With the adapter on throughout, a rejection stands, so the incompatible verdict still works.
+        assertEquals(HidFailureResponse.REPORT, hidFailureResponse(4, 4, AdapterPower.ON))
+        assertTrue(shouldDiagnoseHidIncompatibility(HidFailure.REGISTRATION_REJECTED, false, true))
+    }
 }

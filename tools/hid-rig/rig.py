@@ -461,6 +461,33 @@ async def run(args: argparse.Namespace) -> int:
             await check_keyboard(app, host)
         await step("disconnect and reconnect", reconnect())
 
+        async def bluetooth_off_and_on() -> None:
+            # Bluetooth toggled from the system, as a person would: Bluke says "off" for as long as it is off,
+            # then registers and reconnects the host by itself once it is back on, with no command from here.
+            await asyncio.to_thread(app._run, "shell", "cmd", "bluetooth_manager", "disable")
+            await wait_state(app, lambda s: s["serviceState"] == "BluetoothOff", "the app to say Bluetooth is off")
+            off_until = asyncio.get_running_loop().time() + 8
+            while asyncio.get_running_loop().time() < off_until:
+                state = await asyncio.to_thread(app.cmd, "state")
+                assert state["serviceState"] == "BluetoothOff", f"Bluetooth is off but the app says {state}"
+                await asyncio.sleep(0.5)
+            await host.wait_channels(False)
+            await asyncio.to_thread(app._run, "shell", "cmd", "bluetooth_manager", "enable")
+            seen: list[str] = []
+
+            def back(s: dict) -> bool:
+                if not seen or seen[-1] != s["lifecycle"]:
+                    seen.append(s["lifecycle"])
+                assert not s["lifecycle"].startswith("Error"), f"failed after Bluetooth came back on: {s}; lifecycle went {seen}"
+                return (s["host"] or "").upper() == address.upper() and s["serviceState"] == "Connected"
+
+            await wait_state(app, back, "the app to re-register and reconnect the host by itself", timeout=45)
+            print(f"back on: lifecycle went {' -> '.join(seen)}", flush=True)
+            await host.wait_channels(True)
+            host.drain()
+            await check_keyboard(app, host)
+        await step("Bluetooth off and on", bluetooth_off_and_on())
+
         await call(app, "mode", value="native_hat")
 
     failed = [name for name, outcome in results if outcome != "ok"]
