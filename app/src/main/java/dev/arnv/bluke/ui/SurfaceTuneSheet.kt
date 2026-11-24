@@ -34,7 +34,6 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.windowInsetsPadding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.toggleable
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
@@ -44,6 +43,7 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.foundation.shape.ZeroCornerSize
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.SegmentedButton
@@ -117,7 +117,7 @@ fun SurfaceTuneSheet(
                     Modifier
                         .width(panelWidth)
                         .fillMaxHeight()
-                        .background(colors.surfaceContainerLow, RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp))
+                        .background(colors.surfaceContainerLow, MaterialTheme.shapes.extraLarge.copy(topEnd = ZeroCornerSize, bottomEnd = ZeroCornerSize))
                         .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.End))
                         .semantics { paneTitle = title; isTraversalGroup = true }
                         .testTag("surface_tune_sheet"),

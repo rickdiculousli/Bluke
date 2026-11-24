@@ -24,6 +24,7 @@ class SurfaceHostTest {
     fun everyStatusSaysWhatItIs() {
         assertEquals("Rick's MacBook", hostChipContent(SurfaceHost(SurfaceHostStatus.Connected, "Rick's MacBook")).label)
         assertEquals("Connecting to Desk PC", hostChipContent(SurfaceHost(SurfaceHostStatus.Connecting, "Desk PC")).label)
+        assertEquals("Connecting Desk PC", hostChipContent(SurfaceHost(SurfaceHostStatus.Connecting, "Desk PC"), compact = true).label)
         assertEquals("Connecting…", hostChipContent(SurfaceHost(SurfaceHostStatus.Connecting, null)).label)
         val offline = hostChipContent(SurfaceHost(SurfaceHostStatus.Offline, "Desk PC", onReconnect = {}))
         assertEquals("Desk PC", offline.label)

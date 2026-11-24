@@ -40,7 +40,13 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.minimumInteractiveComponentSize
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.Immutable
+import androidx.compose.runtime.staticCompositionLocalOf
+import androidx.compose.ui.layout.Placeable
+import androidx.compose.ui.layout.SubcomposeLayout
+import androidx.compose.ui.text.TextLayoutResult
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -110,7 +116,7 @@ fun SurfaceToolbar(
     val colors = MaterialTheme.colorScheme
     // On a narrow phone the mode button keeps only its icon, so the host chip keeps its words.
     val compact = LocalConfiguration.current.screenWidthDp < 720
-    Row(
+    SubcomposeLayout(
         modifier = modifier
             .fillMaxWidth()
             .background(colors.surfaceContainerLow)
@@ -118,27 +124,81 @@ fun SurfaceToolbar(
             .height(SurfaceToolbarHeight)
             .padding(horizontal = 4.dp)
             .testTag("surface_toolbar"),
-        verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        IconButton(onClick = chrome.onClose, modifier = Modifier.testTag("surface_close")) {
-            Icon(Icons.Default.Close, contentDescription = "Close ${chrome.mode.displayName.lowercase()}", tint = colors.onSurfaceVariant)
+    ) { constraints ->
+        val height = constraints.maxHeight
+        fun measure(slot: Any, maxWidth: Int = constraints.maxWidth, content: @Composable () -> Unit): Placeable =
+            subcompose(slot, content).single().measure(Constraints(maxWidth = maxWidth, maxHeight = height))
+        val gap = 4.dp.roundToPx()
+        val close = measure("close") {
+            IconButton(onClick = chrome.onClose, modifier = Modifier.testTag("surface_close")) {
+                Icon(Icons.Default.Close, contentDescription = "Close ${chrome.mode.displayName.lowercase()}", tint = colors.onSurfaceVariant)
+            }
         }
-        ModeButton(chrome, haptics, compact)
-        // The host chip is the one element that gives way on a narrow phone: its name ellipsizes.
-        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
-            HostChip(chrome.host, haptics, Modifier.weight(1f, fill = false))
+        val mode = measure("mode") { ModeButton(chrome, haptics, compact) }
+        val tune = measure("tune") {
+            IconButton(onClick = onTune, modifier = Modifier.testTag("surface_tune")) {
+                Icon(Icons.Default.Tune, contentDescription = "Tune ${chrome.mode.displayName.lowercase()}", tint = colors.onSurfaceVariant)
+            }
         }
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(4.dp),
-            content = controls,
-        )
-        IconButton(onClick = onTune, modifier = Modifier.testTag("surface_tune")) {
-            Icon(Icons.Default.Tune, contentDescription = "Tune ${chrome.mode.displayName.lowercase()}", tint = colors.onSurfaceVariant)
+        // Room the host chip and the surface's controls share.
+        val shared = constraints.maxWidth - close.width - mode.width - tune.width - 3 * gap
+
+        // The chip's floors: its dot and status words plus the first few characters of the name.
+        // Probes are measured, never placed, and carry no semantics.
+        fun floor(nameChars: Int) = measure("floor$nameChars") {
+            HostChip(chrome.host, haptics, compact, probeNameChars = nameChars)
+        }.width
+        val measuredControls = HashMap<SurfaceToolbarRoom, Placeable>()
+        fun controlsAt(room: SurfaceToolbarRoom) = measuredControls.getOrPut(room) {
+            measure(room) {
+                CompositionLocalProvider(LocalSurfaceToolbarRoom provides room) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp),
+                        content = controls,
+                    )
+                }
+            }
+        }
+        fun hostRoom(controls: Placeable?) =
+            if (controls == null || controls.width == 0) shared else shared - controls.width - gap
+
+        // What gives way, in order: the controls step down (all LEDs, lit LEDs only, no LEDs) before
+        // the host's name drops under eight characters; they step down again, then leave the toolbar,
+        // before the chip's status words cut. With no room even for those, the chip keeps its dot.
+        val nameFloor = floor(HostNameFloorChars)
+        val statusFloor = floor(0)
+        val rooms = SurfaceToolbarRoom.entries
+        val room: SurfaceToolbarRoom? = rooms.firstOrNull { hostRoom(controlsAt(it)) >= nameFloor }
+            ?: rooms.firstOrNull { hostRoom(controlsAt(it)) >= statusFloor }
+            ?: rooms.last().takeIf { shared < statusFloor && hostRoom(controlsAt(it)) >= 48.dp.roundToPx() }
+        val controls = room?.let(::controlsAt)
+        val host = measure("host", maxWidth = hostRoom(controls).coerceAtLeast(0)) {
+            HostChip(chrome.host, haptics, compact)
+        }
+
+        layout(constraints.maxWidth, height) {
+            fun Placeable.placeAt(x: Int) = place(x, (height - this.height) / 2)
+            close.placeAt(0)
+            mode.placeAt(close.width + gap)
+            host.placeAt(close.width + mode.width + 2 * gap)
+            val tuneX = constraints.maxWidth - tune.width
+            tune.placeAt(tuneX)
+            controls?.placeAt(tuneX - gap - controls.width)
         }
     }
 }
+
+/**
+ * How much room the toolbar gives the surface's own controls, the widest that still leaves the host
+ * chip its floor. [SurfaceToolbarLeds] reads it; other controls keep their size.
+ */
+internal enum class SurfaceToolbarRoom { Full, LitOnly, NoLeds }
+
+internal val LocalSurfaceToolbarRoom = staticCompositionLocalOf { SurfaceToolbarRoom.Full }
+
+/** The host's name keeps at least this many characters before the controls stop giving way. */
+internal const val HostNameFloorChars = 8
 
 /** The icon each mode shows on its mode button. */
 fun InputMode.icon(): ImageVector = when (this) {
@@ -193,7 +253,7 @@ internal data class HostChipContent(val status: String?, val name: String?, val 
     val label: String get() = listOfNotNull(status, name).joinToString(" ")
 }
 
-internal fun hostChipContent(host: SurfaceHost): HostChipContent {
+internal fun hostChipContent(host: SurfaceHost, compact: Boolean = false): HostChipContent {
     val name = host.name?.takeIf { it.isNotBlank() }
     return when (host.status) {
         SurfaceHostStatus.Connected -> HostChipContent(
@@ -203,7 +263,8 @@ internal fun hostChipContent(host: SurfaceHost): HostChipContent {
             description = "Connected to ${name ?: "host"}",
         )
         SurfaceHostStatus.Connecting -> HostChipContent(
-            status = if (name == null) "Connecting…" else "Connecting to",
+            // On a narrow phone the ring dot already says "on the way", so the name gets the room.
+            status = if (name == null) "Connecting…" else if (compact) "Connecting" else "Connecting to",
             name = name,
             action = null,
             description = "Connecting to ${name ?: "host"}",
@@ -223,32 +284,55 @@ internal fun hostChipContent(host: SurfaceHost): HostChipContent {
     }
 }
 
+/**
+ * Sees each host chip text's layout as it's drawn, by role ("status", "name"); a test reads it to
+ * prove nothing it must show was cut.
+ */
+internal val LocalHostChipTextLayout = staticCompositionLocalOf<(role: String, TextLayoutResult) -> Unit> { { _, _ -> } }
+
+/**
+ * The host chip. With [probeNameChars] set it is a measuring probe the toolbar never places: the
+ * name cut to that many characters (none at zero, when there are status words), and no semantics or tap.
+ */
 @Composable
-private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, modifier: Modifier = Modifier) {
+private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, compact: Boolean, probeNameChars: Int? = null) {
     val colors = MaterialTheme.colorScheme
-    val content = hostChipContent(host)
+    val content = hostChipContent(host, compact).let { full ->
+        when {
+            probeNameChars == null || full.name == null -> full
+            // At zero the probe is the status words alone; a name that is the status keeps a hint of itself.
+            probeNameChars == 0 && full.status != null -> full.copy(name = null)
+            full.name.length <= maxOf(probeNameChars, 2) + 1 -> full
+            else -> full.copy(name = full.name.take(maxOf(probeNameChars, 2)) + "…")
+        }
+    }
+    val observe = LocalHostChipTextLayout.current.takeIf { probeNameChars == null } ?: { _, _ -> }
     val reconnect = host.onReconnect.takeIf { host.status == SurfaceHostStatus.Offline }
     val shape = CircleShape
-    var chip = modifier
-        .semantics { liveRegion = LiveRegionMode.Polite }
+    var chip = Modifier
         .minimumInteractiveComponentSize()
         .heightIn(min = 40.dp)
+        .widthIn(min = 48.dp)
         .clip(shape)
         .border(1.dp, colors.outlineVariant, shape)
-    chip = if (reconnect != null) {
-        chip.semantics { stateDescription = "Offline" }.clickable(
+    chip = when {
+        probeNameChars != null -> chip.clearAndSetSemantics {}
+        reconnect != null -> chip.semantics { liveRegion = LiveRegionMode.Polite; stateDescription = "Offline" }.clickable(
             onClickLabel = "Reconnect",
             role = Role.Button,
             onClick = {
                 haptics.perform(HapticEvent.PRESS)
                 reconnect()
             },
-        )
-    } else {
-        chip.clearAndSetSemantics { contentDescription = content.description }
+        ).testTag("surface_host")
+        // The tag goes first: clearAndSetSemantics drops what comes after it.
+        else -> chip.testTag("surface_host").clearAndSetSemantics {
+            liveRegion = LiveRegionMode.Polite
+            contentDescription = content.description
+        }
     }
     Row(
-        modifier = chip.padding(horizontal = 12.dp).testTag("surface_host"),
+        modifier = chip.padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
@@ -268,6 +352,7 @@ private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, modifier: Modif
                     maxLines = 1,
                     softWrap = false,
                     overflow = TextOverflow.Ellipsis,
+                    onTextLayout = { observe("status", it) },
                     modifier = if (content.name == null) Modifier.weight(1f, fill = false) else Modifier,
                 )
             }
@@ -277,14 +362,17 @@ private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, modifier: Modif
                     style = MaterialTheme.typography.labelLarge,
                     color = textColor,
                     maxLines = 1,
+                    softWrap = false,
                     overflow = TextOverflow.Ellipsis,
+                    onTextLayout = { observe("name", it) },
                     modifier = Modifier.weight(1f, fill = false).widthIn(max = 180.dp),
                 )
             }
         }
         if (content.action != null) {
-            Icon(Icons.Default.Refresh, contentDescription = null, tint = colors.primary, modifier = Modifier.size(16.dp))
-            Text(content.action, style = MaterialTheme.typography.labelLarge, color = colors.primary, maxLines = 1)
+            Icon(Icons.Default.Refresh, contentDescription = null, tint = colors.primary, modifier = Modifier.size(if (compact) 20.dp else 16.dp))
+            // On a narrow phone the icon alone is the action, so the name keeps the room; TalkBack still hears "Reconnect".
+            if (!compact) Text(content.action, style = MaterialTheme.typography.labelLarge, color = colors.primary, maxLines = 1)
         }
     }
 }
@@ -333,7 +421,8 @@ fun SurfaceToolbarIconButton(
 
 /**
  * Indicator LEDs with a label each, in one 40dp group (the keyboard's lock lights, the touchpad's
- * numpad). Each LED is its own 48dp-wide toggle; [onToggle] gets the index tapped.
+ * numpad). Each LED is its own 48dp-wide toggle; [onToggle] gets the index tapped. When the toolbar
+ * is short of room for the host chip, only the lit LEDs show, then none.
  */
 @Composable
 fun SurfaceToolbarLeds(
@@ -342,6 +431,13 @@ fun SurfaceToolbarLeds(
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
+    // When the toolbar is tight the unlit LEDs give way to the host chip; with no room, the group goes.
+    val shown = when (LocalSurfaceToolbarRoom.current) {
+        SurfaceToolbarRoom.Full -> leds.indices.toList()
+        SurfaceToolbarRoom.LitOnly -> leds.indices.filter { leds[it].second }
+        SurfaceToolbarRoom.NoLeds -> emptyList()
+    }
+    if (shown.isEmpty()) return
     // The pill draws at 40dp like the other toolbar pills; each LED's 48dp target reaches past it.
     Row(
         modifier = modifier
@@ -357,7 +453,8 @@ fun SurfaceToolbarLeds(
             },
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        leds.forEachIndexed { index, (label, lit) ->
+        shown.forEach { index ->
+            val (label, lit) = leds[index]
             Row(
                 modifier = Modifier
                     .minimumInteractiveComponentSize()
