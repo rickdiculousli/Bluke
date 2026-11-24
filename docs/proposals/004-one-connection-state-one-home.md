@@ -5,6 +5,7 @@ kind: ux
 size: L
 judge: opus
 status: done
+scope_grew: [002]
 lens: ux
 proposed_by: coordinator on ricks-macbook, from the operator's request
 proposed_on: 2026-11-23
@@ -60,6 +61,8 @@ No transition changes.
 - `InputMode.kt`, `MainActivity.kt`, `OnboardingActivity.kt`, `DeveloperOptionsActivity.kt`;
 - the typed failure flow in `bluetooth/`, `RigReceiver.kt` and `rig.py`.
 
+**Scope grew (002, the host-screen mirror, landed first):** its end-to-end rig opened Mirror by tapping home's old "Launch Mirror" button, and its README line described that button. Both now use the Mirror tile, and the rig receiver's `setup` no longer writes `launch_mode`.
+
 Out:
 - the input surfaces' files, which belong to the surfaces spec;
 - Settings and Help, which belong to the settings spec;
@@ -113,6 +116,15 @@ Open Bluke and the card says exactly what's happening ("Connected to Rick's MacB
 - The filmstrips are stable run to run. `verifyRoborazziDebug` once failed on `home-motion-details-50ms`. The cause: Material's ripple is the platform `RippleDrawable`, which animates on wall-clock time, not the held compose clock. `HomeMotionScreenshotTest` now turns the ripple off (`LocalRippleConfiguration provides null`). After a full `testDebugUnitTest`, three runs of `./gradlew -q verifyRoborazziDebug --tests 'dev.arnv.bluke.ui.Home*'` -> `exit 0` each time. Roborazzi's results mark all frames `unchanged`; the two mid-spring Details frames still differ by a few pixels, under its default threshold.
 - Easy to miss: the surface call site reads `connectionUi` too, not `connectedDevice` or the Bluetooth state, so "connected" has one source: `isConnected = surfaceHost.status == SurfaceHostStatus.CONNECTED` in `HomeScreen.kt`, mapped by `ConnectionUi.surfaceHost()` (`ConnectionUiPolicyTest.surfacesSeeOneHostStatus`).
 - The rig stays green: pending the landing verify on this tree. Two earlier runs failed at pair and connect: the mid-build one on f06ac93 and the first landing verify (t:6300e336). The belief both had assumed was "the rig fails here only when load slows the prompt tap". Tested on the landing run's log: the guest was starved before Bluke started. `ANR in com.android.systemui`, launcher, Google Play services and the phone app all fired between 17:33 and 17:35, with Bluke absent from the CPU lists. Bluke's `createBond` went out at once, but Settings took 12 s to receive the pairing request and 17 s to draw its dialog (`+16s943ms`), and `uiautomator` timed out connecting. The host's 30 s pairing window closed first (`HCI_ERR_AUTH_FAILURE`). Fix at the cause, in `rig.py`. It waits (`App.wait_settled`, up to 600 s) until the emulator's load average drops below twice its core count before it starts the app. The second landing verify (t:e8f3e18d) showed the guest still at `emulator load 46.2 on 4 cores` after 240 s, before Bluke had started. So the first pairing now gets up to three tries (`first_pairing`), each logged. A try lost to a stall ends in a refused bond, which Bluke reports as `lastFailure`, and the next try runs once the guest has caught up. The third landing verify (t:a6b241f6) settled (`emulator load 7.6 on 4 cores`) and still failed all three tries, which ruled out load as the whole cause. In that run's log, the dialog drew within 2 s, but each try ran one `uiautomator dump` and never another. The dump waits for the UI to go idle, so it hung, hit `_run`'s 60 s timeout, and `subprocess.TimeoutExpired`, which the prompt loop didn't catch, ended the task silently. The likely trigger was this branch's card spinning under the prompt while pairing; on main nothing animated there, because the rig's host is in no list. Two fixes. Pairing waits on a person, so the card holds still while pairing (`ConnectionUiPolicyTest.pairingWaitsOnAPersonSoTheCardHoldsStill`). And the rig gives each dump its own 15 s limit and logs and retries on any failure.
+- Landing review (Opus, high effort), first pass failed with seven findings, all fixed:
+  - The Mirror rig tapped a button that's gone; it now taps the Mirror tile (see Scope grew).
+  - The stall clock keyed on the address alone, so a 15 s pairing read "Still connecting" the instant connecting began. The key now carries the phase: `attemptKey`, `ConnectionUiPolicyTest.pairingThatTurnsIntoConnectingRestartsTheStallClock`.
+  - A stale "Host refused pairing" outlived a new scan. The manager clears the failure when discovery starts, and scanning reads as scanning: `aNewScanReplacesAStaleFailure`.
+  - The C9 test now goes through `hostLists`, the function `HomeViewModel.build` uses, with hide-unlikely on.
+  - The rig retries a first pairing only when the bond was refused unanswered.
+  - Every adb step of the rig's prompt check logs and retries.
+  - Grant permission records "asked" only after a real denial, not a dismissed prompt.
+  - The landing verify on 32fdb2a passed, the HID rig included: `bmesh result find verify --commit HEAD` -> `ok 3ba6057f…`.
 - Rebased onto main with the mirror spec (002) landed: Mirror is a fifth mode, so the dock shows it with its `DesktopWindows` icon and every home baseline was re-recorded. `./gradlew -q assembleDebug testDebugUnitTest` -> exit 0. `verifyRoborazziDebug` passes every home baseline. Its one failure is `GreetingScreenshotTest`, whose `greeting.png` has been unreadable since the initial commit (`file` -> `data`) and fails the same way on main; the surfaces spec (003) replaces it.
 - Not shown: a real phone and host. That's the operator's step below.
 

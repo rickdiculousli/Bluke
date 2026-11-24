@@ -623,6 +623,7 @@ class BluetoothKeyboardManager(private val context: Context) {
             val started = bluetoothAdapter.startDiscovery()
             if (started) {
                 _isScanning.value = true
+                _lastConnectionFailure.value = null // a new scan is a new start
                 _statusMessage.value = "Scanning for other Bluetooth hosts..."
             } else {
                 _statusMessage.value = "Failed to start Bluetooth discovery scanning."

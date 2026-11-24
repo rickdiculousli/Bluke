@@ -294,7 +294,7 @@ def main() -> int:
         phone.run("shell", "am", "start", "-n", f"{PACKAGE}/.MainActivity")
         # A tap that lands while the home screen is still settling is lost; tap again, as a person would.
         for attempt in range(3):
-            phone.tap_text("Launch Mirror")
+            phone.tap_text("Mirror")  # the Mirror tile in home's mode dock
             try:
                 phone.wait_mirror(lambda s: s["phase"] in ("Waiting", "NoWifi"), "Mirror to start listening", timeout=8)
                 break

@@ -13,7 +13,10 @@ class HostListPolicyTest {
     @Test
     fun aPairedHostOfAnUnlikelyClassIsListedWithHideUnlikelyOn() {
         // C9: the list and the row used to disagree on "supported", hiding a paired host by default.
-        assertEquals(listOf(buds, mac), pairedHosts(listOf(buds, mac)))
+        val speaker = HostRef("CC", "Kitchen speaker", bonded = false, type = DeviceType.AUDIO)
+        val (paired, nearby) = hostLists(listOf(buds, mac), listOf(speaker), hideUnnamed = true, hideUnlikely = true)
+        assertEquals(listOf(buds, mac), paired)
+        assertEquals(emptyList<HostRef>(), nearby)
         assertTrue(isLikelyHost(buds))
     }
 

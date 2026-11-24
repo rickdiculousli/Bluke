@@ -88,6 +88,10 @@ fun connectionUi(input: ConnectionInputs): ConnectionUi {
         return if (pairing) ConnectionUi.Pairing(target) else ConnectionUi.Connecting(target)
     }
 
+    // A new scan is a new start: it reads as scanning, not as the failure before it.
+    if (input.isScanning) {
+        return ConnectionUi.Ready(input.reconnectAddress?.let(input::host)?.takeIf { it.bonded }, scanning = true)
+    }
     input.lastFailure?.let {
         return ConnectionUi.Failed(FailReason.HOST_REFUSED, input.host(it.hostAddress), cause = it.failure)
     }
@@ -98,6 +102,16 @@ fun connectionUi(input: ConnectionInputs): ConnectionUi {
         reconnectHost = input.reconnectAddress?.let(input::host)?.takeIf { it.bonded },
         scanning = input.isScanning,
     )
+}
+
+/**
+ * What identifies one attempt for the stall clock: the host and its phase. Pairing that turns into connecting is a
+ * new phase, so the clock restarts instead of reading a healthy connection as stalled.
+ */
+fun attemptKey(connectedAddress: String?, targetAddress: String?, lifecycle: HidLifecycleState, bondedAddresses: Set<String>): String? {
+    if (connectedAddress != null) return null
+    val address = targetAddress ?: (lifecycle as? HidLifecycleState.Connecting)?.deviceAddress ?: return null
+    return "$address/${if (address in bondedAddresses) "connecting" else "pairing"}"
 }
 
 /** Input modes can launch unless something blocks Bluetooth outright. */

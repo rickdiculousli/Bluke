@@ -203,7 +203,6 @@ class RigReceiver : BroadcastReceiver() {
                 val mirror = (context.applicationContext as BlukeApplication).mirrorController
                 when (intent.getStringExtra("action") ?: "state") {
                     "setup" -> context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE).edit {
-                        putInt("launch_mode", InputMode.MIRROR.id)
                         putStringSet("cycle_connection_modes", defaultInputModeKeys + InputMode.MIRROR.preferenceKey)
                         putString("mirror_touch_mode", intent.getStringExtra("touch") ?: "DIRECT")
                     }
