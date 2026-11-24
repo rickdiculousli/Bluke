@@ -32,6 +32,9 @@ fun KeyboardView(
     onKeySelected: ((KeyLayoutInfo) -> Unit)? = null,
     onKeyPressChange: (Int, Boolean) -> Unit
 ) {
+    // The pointer loop below outlives recompositions; read the latest callback and radius through these.
+    val currentOnKeyPressChange by rememberUpdatedState(onKeyPressChange)
+    val currentKeySensitivity by rememberUpdatedState(keySensitivity)
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
         BoxWithConstraints(
             modifier = Modifier.fillMaxSize(),
@@ -53,12 +56,12 @@ fun KeyboardView(
         val widthBasedUnit = usableWidthDp / totalLayoutWidthInUnits
         val heightBasedUnit = usableHeightDp / totalLayoutHeightInUnits
         val baseUnitWidth = minOf(widthBasedUnit, heightBasedUnit)
+        // A short geometry (HHKB's five rows) would leave bands of empty case: let its keys grow a
+        // little taller than wide to use the height, never so much that they stop reading as keys.
+        val baseUnitHeight = minOf(heightBasedUnit, baseUnitWidth * MAX_KEY_ASPECT)
 
         val plateWidth = baseUnitWidth * totalLayoutWidthInUnits
-        val plateHeight = baseUnitWidth * totalLayoutHeightInUnits
-
-        val context = androidx.compose.ui.platform.LocalContext.current
-        val sharedPrefs = remember { context.getSharedPreferences("app_prefs", android.content.Context.MODE_PRIVATE) }
+        val plateHeight = baseUnitHeight * totalLayoutHeightInUnits
 
         // Keyboard Case plate well holding absolutely-positioned keycaps (guarantees perfect grid alignments)
         Box(
@@ -68,13 +71,13 @@ fun KeyboardView(
                 .shadow(
                     elevation = 4.dp,
                     shape = RoundedCornerShape(10.dp),
-                    spotColor = Color.Black.copy(alpha = 0.5f),
-                    ambientColor = Color.Black
+                    spotColor = PlateInk.Shadow,
+                    ambientColor = PlateInk.AmbientShadow,
                 )
                 .background(Color(theme.plateArgb), RoundedCornerShape(10.dp))
-                .border(1.5.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
+                .border(1.5.dp, PlateInk.Rim, RoundedCornerShape(10.dp))
                 .padding(platePadding)
-                .pointerInput(baseUnitWidth, allKeys, onKeySelected) {
+                .pointerInput(baseUnitWidth, baseUnitHeight, allKeys, onKeySelected) {
                         awaitPointerEventScope {
                             if (onKeySelected != null) {
                                 var pointerWasDown = false
@@ -86,8 +89,8 @@ fun KeyboardView(
                                         allKeys.lastOrNull { key ->
                                             val keyLeft = baseUnitWidth.toPx() * key.x
                                             val keyRight = keyLeft + baseUnitWidth.toPx() * key.widthRatio
-                                            val keyTop = baseUnitWidth.toPx() * key.y
-                                            val keyBottom = keyTop + baseUnitWidth.toPx() * key.heightRatio
+                                            val keyTop = baseUnitHeight.toPx() * key.y
+                                            val keyBottom = keyTop + baseUnitHeight.toPx() * key.heightRatio
                                             pos.x in keyLeft..keyRight && pos.y in keyTop..keyBottom
                                         }?.let(onKeySelected)
                                     }
@@ -108,14 +111,14 @@ fun KeyboardView(
                                 eventChanges.forEach { change ->
                                     if (change.pressed) {
                                         val pos = change.position
-                                        val touchRadius = keySensitivity.dp.toPx()
+                                        val touchRadius = currentKeySensitivity.dp.toPx()
                                         
                                         // Find all keys that intersect the touch radius
                                         val intersectedKeys = allKeys.filter { key ->
                                             val keyLeft = baseUnitWidth.toPx() * key.x
                                             val keyRight = keyLeft + baseUnitWidth.toPx() * key.widthRatio
-                                            val keyTop = baseUnitWidth.toPx() * key.y
-                                            val keyBottom = keyTop + baseUnitWidth.toPx() * key.heightRatio
+                                            val keyTop = baseUnitHeight.toPx() * key.y
+                                            val keyBottom = keyTop + baseUnitHeight.toPx() * key.heightRatio
                                             
                                             // Closest point on the rectangle to the touch center
                                             val closestX = pos.x.coerceIn(keyLeft, keyRight)
@@ -140,10 +143,10 @@ fun KeyboardView(
                                 val newlyReleased = oldAllPressed - newAllPressed
                                 
                                 newlyReleased.forEach { keyCode ->
-                                    onKeyPressChange(keyCode, false)
+                                    currentOnKeyPressChange(keyCode, false)
                                 }
                                 newlyPressed.forEach { keyCode ->
-                                    onKeyPressChange(keyCode, true)
+                                    currentOnKeyPressChange(keyCode, true)
                                 }
                                 
                                 currentPointers.clear()
@@ -157,13 +160,12 @@ fun KeyboardView(
                     val keyY = key.y
 
                     val keyWidth = baseUnitWidth * key.widthRatio
-                    val keyHeight = baseUnitWidth * key.heightRatio
+                    val keyHeight = baseUnitHeight * key.heightRatio
 
                     val keyStyle = theme.styleFor(key)
                     val keyColor = Color(keyStyle.backgroundArgb)
                     val legendColor = Color(keyStyle.legendArgb)
 
-                    val isPressed = activePressedKeys.contains(key.keyCode)
 
                     val isShiftActive = activePressedKeys.contains(0xE1) || activePressedKeys.contains(0xE5)
                     val isUppercase = isCapsLockActive xor isShiftActive
@@ -195,7 +197,7 @@ fun KeyboardView(
                         shiftedLegend = displayShiftedLegend,
                         width = keyWidth,
                         height = keyHeight,
-                        isPressed = isPressed,
+                        isPressedNow = { activePressedKeys.contains(key.keyCode) },
                         keyBgColor = keyColor,
                         legendColor = legendColor,
                         legendScale = keyStyle.legendScale,
@@ -204,7 +206,7 @@ fun KeyboardView(
                         modifier = Modifier
                             .offset(
                                 x = baseUnitWidth * keyX,
-                                y = baseUnitWidth * keyY
+                                y = baseUnitHeight * keyY
                             ),
                         glowColor = finalGlowColor
                     )
@@ -213,3 +215,13 @@ fun KeyboardView(
         }
         }
     }
+
+/** How much taller than wide a key may grow to fill a short geometry's height. */
+private const val MAX_KEY_ASPECT = 1.15f
+
+/** The plate's own light and shadow: part of the keyboard's material, drawn the same under every theme. */
+private object PlateInk {
+    val Shadow = Color.Black.copy(alpha = 0.5f)
+    val AmbientShadow = Color.Black
+    val Rim = Color.White.copy(alpha = 0.15f)
+}

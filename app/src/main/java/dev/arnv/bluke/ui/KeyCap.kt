@@ -8,8 +8,11 @@ import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
@@ -23,14 +26,16 @@ fun KeyCap(
     shiftedLegend: String,
     width: androidx.compose.ui.unit.Dp,
     height: androidx.compose.ui.unit.Dp,
-    isPressed: Boolean,
+    isPressed: Boolean = false,
     keyBgColor: Color,
     legendColor: Color,
     legendScale: Float = 1f,
     isSelected: Boolean = false,
     baseUnitWidth: androidx.compose.ui.unit.Dp,
     modifier: Modifier = Modifier,
-    glowColor: Color? = null
+    glowColor: Color? = null,
+    /** Read while drawing, so a press shows in the frame it lands without waiting for recomposition. */
+    isPressedNow: () -> Boolean = { isPressed },
 ) {
     val keyBorderColor = keyBgColor.darker()
     
@@ -50,7 +55,7 @@ fun KeyCap(
             .testTag("key_$legend")
             .padding(1.dp)
             .then(
-                if (isSelected) Modifier.border(2.dp, Color(0xFF00BCD4), RoundedCornerShape(outerRadius))
+                if (isSelected) Modifier.border(2.dp, KeyCapInk.Selection, RoundedCornerShape(outerRadius))
                 else Modifier
             )
     ) {
@@ -70,7 +75,7 @@ fun KeyCap(
             modifier = Modifier
                 .fillMaxSize()
                 .background(keyBorderColor, RoundedCornerShape(outerRadius))
-                .border(1.dp, Color.Black.copy(alpha = 0.85f), RoundedCornerShape(outerRadius))
+                .border(1.dp, KeyCapInk.BezelEdge, RoundedCornerShape(outerRadius))
         )
 
         // 2. Key Top Bevel (KBSim .keytop, inset and styled)
@@ -83,33 +88,31 @@ fun KeyCap(
                     top = insetTop,
                     bottom = insetBottom
                 )
-                .background(
-                    color = if (isPressed) keyBorderColor else keyBgColor,
-                    shape = RoundedCornerShape(innerRadius)
-                )
-                .border(1.dp, Color.Black.copy(alpha = 0.15f), RoundedCornerShape(innerRadius)),
+                .drawBehind {
+                    drawRoundRect(
+                        color = if (isPressedNow()) keyBorderColor else keyBgColor,
+                        cornerRadius = CornerRadius(innerRadius.toPx()),
+                    )
+                }
+                .border(1.dp, KeyCapInk.TopEdge, RoundedCornerShape(innerRadius)),
             contentAlignment = Alignment.Center
         ) {
-            val keyWidthRatio = (width.value / baseUnitWidth.value).coerceAtLeast(1f)
-            val normalizedLegendLength = legend.length / keyWidthRatio
-            val legendLengthScale = when {
-                normalizedLegendLength >= 8f -> 0.62f
-                normalizedLegendLength >= 6f -> 0.74f
-                normalizedLegendLength >= 4.5f -> 0.88f
-                else -> 1f
+            // Every word legend (Shift, Delete, Backspace, F1) shares one size, smaller than a letter;
+            // a legend shrinks below it only when it would not fit its cap at the current font scale.
+            val fontScale = LocalDensity.current.fontScale
+            val topWidth = (width - insetX * 2 - 2.dp).value - (baseUnitWidth.value * 0.16f)
+            val topHeight = (height - insetTop - insetBottom - 2.dp).value
+            fun fit(text: String, desired: Float, heightShare: Float): Float {
+                val byWidth = topWidth / (LEGEND_EM_WIDTH * text.length.coerceAtLeast(1) * fontScale)
+                val byHeight = topHeight * heightShare / (LEGEND_LINE_HEIGHT * fontScale)
+                return minOf(desired, byWidth, byHeight).coerceAtLeast(3f)
             }
-            val shiftedLengthScale = when {
-                shiftedLegend.length >= 4 -> 0.72f
-                else -> 1f
-            }
-            val mainFontSize = (
-                (baseUnitWidth.value * 0.24f).coerceIn(3f, 13f) *
-                    legendScale * legendLengthScale
-                ).sp
-            val shiftFontSize = (
-                (baseUnitWidth.value * 0.17f).coerceIn(2.5f, 9f) *
-                    legendScale * shiftedLengthScale
-                ).sp
+            val letterSize = (baseUnitWidth.value * 0.24f).coerceIn(3f, 13f) * legendScale
+            val desiredMain = if (legend.length > 1) letterSize * WORD_LEGEND_SCALE else letterSize
+            val desiredShift = (baseUnitWidth.value * 0.17f).coerceIn(2.5f, 9f) * legendScale
+            val stacked = shiftedLegend.isNotEmpty()
+            val mainFontSize = fit(legend, desiredMain, if (stacked) 0.55f else 0.9f).sp
+            val shiftFontSize = fit(shiftedLegend, desiredShift, 0.4f).sp
 
             if (shiftedLegend.isNotEmpty()) {
                 // Stack legends inside a column so the secondary text sits exactly slightly above the primary with perfect alignment
@@ -166,6 +169,9 @@ fun KeyCap(
                     maxLines = 1,
                     softWrap = false,
                     overflow = TextOverflow.Clip,
+                    style = androidx.compose.ui.text.TextStyle(
+                        platformStyle = androidx.compose.ui.text.PlatformTextStyle(includeFontPadding = false)
+                    ),
                     modifier = Modifier.padding(
                         (baseUnitWidth.value * 0.04f).coerceIn(0.5f, 2f).dp,
                     ),
@@ -188,4 +194,15 @@ fun Color.darker(): Color {
     )
 }
 
+/** A word legend's size against a letter's. */
+private const val WORD_LEGEND_SCALE = 0.78f
+/** A bold sans character's average advance, in ems: enough to tell whether a legend fits its cap. */
+private const val LEGEND_EM_WIDTH = 0.56f
+private const val LEGEND_LINE_HEIGHT = 1.2f
 
+/** The keycap's own edges and the theme editor's selection ring, the same under every theme. */
+private object KeyCapInk {
+    val Selection = Color(0xFF00BCD4)
+    val BezelEdge = Color.Black.copy(alpha = 0.85f)
+    val TopEdge = Color.Black.copy(alpha = 0.15f)
+}
