@@ -10,6 +10,7 @@ import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
@@ -131,8 +132,8 @@ internal fun ConnectionCard(
 ) {
     val card = connection.card()
     val colors = cardColors(card.tone)
-    val container by animateColorAsState(colors.container, tween(200), label = "card-container")
-    val content by animateColorAsState(colors.content, tween(200), label = "card-content")
+    val container by animateColorAsState(colors.container, spring(stiffness = Spring.StiffnessMediumLow), label = "card-container")
+    val content by animateColorAsState(colors.content, spring(stiffness = Spring.StiffnessMediumLow), label = "card-content")
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -192,7 +193,7 @@ private fun StatusBadge(icon: ImageVector, tone: StatusTone, busy: Boolean, card
     Box(modifier = Modifier.size(48.dp), contentAlignment = Alignment.Center) {
         Box(
             modifier = Modifier
-                .size(48.dp)
+                .size(40.dp)
                 .background(MaterialTheme.colorScheme.surfaceContainerLowest, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
@@ -238,6 +239,7 @@ private fun PrimaryActionButton(
             OutlinedButton(
                 onClick = { onAction(action) },
                 modifier = buttonModifier,
+                border = BorderStroke(1.dp, scheme.outline),
                 colors = ButtonDefaults.outlinedButtonColors(contentColor = cardColors(tone).content),
             ) { label() }
         tone == StatusTone.PROBLEM -> Button(
@@ -275,8 +277,8 @@ private fun CardDetails(
     }
     AnimatedVisibility(
         visible = expanded,
-        enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(tween(150)),
-        exit = shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(tween(100)),
+        enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(spring(stiffness = Spring.StiffnessMediumLow)),
+        exit = shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(spring(stiffness = Spring.StiffnessMedium)),
     ) {
         Column(modifier = Modifier.padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             HorizontalDivider()
@@ -286,6 +288,7 @@ private fun CardDetails(
             if (connection.offersRestartInDetails) {
                 OutlinedButton(
                     onClick = { onAction(ConnectionAction.RestartHid) },
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline),
                     colors = ButtonDefaults.outlinedButtonColors(contentColor = content),
                     modifier = Modifier.heightIn(min = 48.dp),
                 ) {

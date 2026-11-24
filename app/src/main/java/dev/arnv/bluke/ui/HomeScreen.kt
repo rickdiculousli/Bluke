@@ -14,7 +14,8 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.togetherWith
@@ -123,7 +124,7 @@ fun HomeScreen(
 
     AnimatedContent(
         targetState = openMode,
-        transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(150)) },
+        transitionSpec = { fadeIn(spring(stiffness = Spring.StiffnessMediumLow)) togetherWith fadeOut(spring(stiffness = Spring.StiffnessMedium)) },
         label = "home-surface",
     ) { mode ->
         if (mode != null) {
@@ -143,6 +144,7 @@ fun HomeScreen(
             HomeContent(
                 state = homeUiState,
                 showMacAddress = showMacAddress,
+                hapticsEnabled = isHapticsEnabled,
                 callbacks = HomeCallbacks(
                     onAction = { action ->
                         when (action) {

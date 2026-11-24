@@ -13,7 +13,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.shape.CornerBasedShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Bluetooth
 import androidx.compose.material.icons.filled.Check
@@ -111,16 +111,16 @@ internal fun SectionHeader(
     }
 }
 
-/** Rows in one group share a container: large corners at the ends, small between. */
+/** Rows in one group share a container: the theme's large corners at the ends, extra-small between. */
 @Composable
-private fun groupShape(index: Int, last: Int): RoundedCornerShape {
-    val outer = 20.dp
-    val inner = 4.dp
-    return RoundedCornerShape(
-        topStart = if (index == 0) outer else inner,
-        topEnd = if (index == 0) outer else inner,
-        bottomStart = if (index == last) outer else inner,
-        bottomEnd = if (index == last) outer else inner,
+private fun groupShape(index: Int, last: Int): CornerBasedShape {
+    val outer = MaterialTheme.shapes.large
+    val inner = MaterialTheme.shapes.extraSmall
+    return outer.copy(
+        topStart = if (index == 0) outer.topStart else inner.topStart,
+        topEnd = if (index == 0) outer.topEnd else inner.topEnd,
+        bottomStart = if (index == last) outer.bottomStart else inner.bottomStart,
+        bottomEnd = if (index == last) outer.bottomEnd else inner.bottomEnd,
     )
 }
 
@@ -151,7 +151,7 @@ private fun HostRow(
     host: HostRef,
     state: HostRowState,
     showAddress: Boolean,
-    shape: RoundedCornerShape,
+    shape: CornerBasedShape,
     onConnect: () -> Unit,
 ) {
     val likely = isLikelyHost(host)
@@ -230,7 +230,7 @@ private fun HostRow(
             when (state) {
                 HostRowState.CONNECTED -> Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(24.dp))
                 HostRowState.WORKING -> CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
-                HostRowState.FAILED -> Icon(Icons.Default.ErrorOutline, contentDescription = null, tint = scheme.error, modifier = Modifier.size(24.dp))
+                HostRowState.FAILED -> Text("Try again", style = MaterialTheme.typography.labelLarge, color = scheme.onSurfaceVariant)
                 HostRowState.IDLE -> if (likely) {
                     Text("Connect", style = MaterialTheme.typography.labelLarge, color = scheme.onSurfaceVariant)
                 }

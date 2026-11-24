@@ -10,6 +10,9 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsPressedAsState
+import androidx.compose.material3.ripple
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -19,6 +22,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
@@ -41,7 +45,14 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.remember
+import androidx.compose.ui.hapticfeedback.HapticFeedback
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.platform.LocalView
+import android.view.HapticFeedbackConstants
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.saveable.rememberSaveable
@@ -89,7 +100,26 @@ fun HomeContent(
     state: HomeUiState,
     callbacks: HomeCallbacks,
     showMacAddress: Boolean = false,
+    hapticsEnabled: Boolean = true,
 ) {
+    val connection = state.connection
+    val haptics = LocalHapticFeedback.current
+    // Long-press haptics follow the app's haptics switch, like every other buzz in Bluke.
+    val gatedHaptics = remember(haptics, hapticsEnabled) {
+        object : HapticFeedback {
+            override fun performHapticFeedback(hapticFeedbackType: HapticFeedbackType) {
+                if (hapticsEnabled) haptics.performHapticFeedback(hapticFeedbackType)
+            }
+        }
+    }
+    CompositionLocalProvider(LocalHapticFeedback provides gatedHaptics) {
+        HomeScaffold(state, callbacks, showMacAddress, hapticsEnabled)
+    }
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+private fun HomeScaffold(state: HomeUiState, callbacks: HomeCallbacks, showMacAddress: Boolean, hapticsEnabled: Boolean) {
     val connection = state.connection
     Scaffold(
         modifier = Modifier.fillMaxSize(),
@@ -106,6 +136,12 @@ fun HomeContent(
                 },
                 colors = TopAppBarDefaults.topAppBarColors(containerColor = MaterialTheme.colorScheme.surface),
             )
+        },
+        bottomBar = {
+            // The modes sit outside the scrolling list, in thumb reach, so a press shows the instant it lands.
+            if (connection.allowsLaunch) {
+                ModeDock(hapticsEnabled = hapticsEnabled, onLaunch = callbacks.onLaunch, onModeSettings = callbacks.onModeSettings)
+            }
         },
         containerColor = MaterialTheme.colorScheme.surface,
     ) { padding ->
@@ -127,13 +163,6 @@ fun HomeContent(
                     ConnectionCard(connection, state.statusLine, callbacks.onAction)
                 }
                 if (connection is ConnectionUi.Blocked) return@LazyColumn
-                item(key = "modes") {
-                    ModeTiles(
-                        enabled = connection.allowsLaunch,
-                        onLaunch = callbacks.onLaunch,
-                        onModeSettings = callbacks.onModeSettings,
-                    )
-                }
                 item(key = "hosts") {
                     HostSections(state, showMacAddress, callbacks)
                 }
@@ -144,49 +173,70 @@ fun HomeContent(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ModeTiles(
-    enabled: Boolean,
+private fun ModeDock(
+    hapticsEnabled: Boolean,
     onLaunch: (InputMode) -> Unit,
     onModeSettings: (InputMode) -> Unit,
 ) {
-    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-        SectionHeader("Use this phone as")
+    val view = LocalView.current
+    Surface(color = MaterialTheme.colorScheme.surfaceContainer, modifier = Modifier.fillMaxWidth().testTag("mode_dock")) {
+    Box(contentAlignment = Alignment.TopCenter) {
+    Column(
+        modifier = Modifier
+            .widthIn(max = 640.dp)
+            .navigationBarsPadding()
+            .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Text(
+            "Use this phone as",
+            style = MaterialTheme.typography.labelLarge,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.padding(start = 4.dp).semantics { heading() },
+        )
         InputMode.entries.chunked(2).forEach { row ->
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 row.forEach { mode ->
+                    // The pressed tone snaps on with the finger, the same frame, with no animation in the way.
+                    val interaction = remember { MutableInteractionSource() }
+                    val pressed by interaction.collectIsPressedAsState()
                     Surface(
                         shape = MaterialTheme.shapes.large,
-                        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-                        contentColor = MaterialTheme.colorScheme.onSurface,
+                        color = if (pressed) MaterialTheme.colorScheme.secondaryContainer else MaterialTheme.colorScheme.surfaceContainerHighest,
+                        contentColor = if (pressed) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurface,
                         modifier = Modifier
                             .weight(1f)
-                            .heightIn(min = 88.dp)
+                            .heightIn(min = 64.dp)
                             .testTag("mode_tile_${mode.preferenceKey}"),
                     ) {
-                        Column(
+                        Row(
                             modifier = Modifier
                                 .combinedClickable(
-                                    enabled = enabled,
+                                    interactionSource = interaction,
+                                    indication = ripple(),
                                     role = Role.Button,
                                     onClickLabel = "Open ${mode.displayName}",
                                     onLongClickLabel = "Choose which modes the switch button cycles",
                                     onLongClick = { onModeSettings(mode) },
-                                    onClick = { onLaunch(mode) },
+                                    onClick = {
+                                        if (hapticsEnabled) view.performHapticFeedback(HapticFeedbackConstants.VIRTUAL_KEY)
+                                        onLaunch(mode)
+                                    },
                                 )
-                                .heightIn(min = 88.dp)
-                                .padding(16.dp),
-                            verticalArrangement = Arrangement.spacedBy(8.dp),
+                                .heightIn(min = 64.dp)
+                                .padding(horizontal = 16.dp, vertical = 12.dp),
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            verticalAlignment = Alignment.CenterVertically,
                         ) {
                             Icon(
                                 mode.icon,
                                 contentDescription = null,
-                                tint = if (enabled) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.outline,
+                                tint = if (pressed) MaterialTheme.colorScheme.onSecondaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.size(24.dp),
                             )
                             Text(
                                 mode.displayName,
                                 style = MaterialTheme.typography.titleMedium,
-                                color = if (enabled) MaterialTheme.colorScheme.onSurface else MaterialTheme.colorScheme.onSurfaceVariant,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                             )
@@ -197,16 +247,19 @@ private fun ModeTiles(
             }
         }
     }
+    }
+    }
 }
 
 @Composable
 private fun HostSections(state: HomeUiState, showMacAddress: Boolean, callbacks: HomeCallbacks) {
     val connection = state.connection
     val connected = connection is ConnectionUi.Connected
-    // Paired collapses itself while connected; a tap overrides that until the connection changes.
+    // Paired steps aside while connected or scanning, so Nearby's results show; a tap overrides that until either changes.
+    val stepAside = connected || state.isScanning
     var pairedOverride by rememberSaveable { mutableStateOf<Boolean?>(null) }
-    LaunchedEffect(connected) { pairedOverride = null }
-    val pairedExpanded = pairedOverride ?: !connected
+    LaunchedEffect(stepAside) { pairedOverride = null }
+    val pairedExpanded = pairedOverride ?: !stepAside
     val nearbyOpen = state.isScanning || state.nearby.isNotEmpty()
 
     Column(verticalArrangement = Arrangement.spacedBy(24.dp)) {
@@ -223,8 +276,8 @@ private fun HostSections(state: HomeUiState, showMacAddress: Boolean, callbacks:
                 )
                 AnimatedVisibility(
                     visible = pairedExpanded,
-                    enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(tween(150)),
-                    exit = shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(tween(100)),
+                    enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(spring(stiffness = Spring.StiffnessMediumLow)),
+                    exit = shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(spring(stiffness = Spring.StiffnessMedium)),
                 ) {
                     HostGroup(state.paired, connection, showMacAddress, callbacks.onConnectHost)
                 }
@@ -239,8 +292,8 @@ private fun HostSections(state: HomeUiState, showMacAddress: Boolean, callbacks:
             )
             AnimatedVisibility(
                 visible = nearbyOpen,
-                enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(tween(150)),
-                exit = shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(tween(100)),
+                enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(spring(stiffness = Spring.StiffnessMediumLow)),
+                exit = shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(spring(stiffness = Spring.StiffnessMedium)),
             ) {
                 if (state.nearby.isEmpty()) {
                     Text(

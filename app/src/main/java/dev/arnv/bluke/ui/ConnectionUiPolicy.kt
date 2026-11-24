@@ -134,7 +134,7 @@ val ConnectionAction.label: String
         ConnectionAction.StopScan -> "Stop scanning"
         ConnectionAction.Cancel -> "Cancel"
         ConnectionAction.Disconnect -> "Disconnect"
-        ConnectionAction.RestartHid -> "Restart HID"
+        ConnectionAction.RestartHid -> "Restart keyboard service"
         ConnectionAction.Help -> "Help"
     }
 
@@ -165,12 +165,12 @@ fun ConnectionUi.card(): ConnectionCard = when (this) {
             "Bluetooth permission needed",
             "Bluke pairs with your computer, TV or tablet and acts as its keyboard, mouse and controller. " +
                 "Android asks first: allow Nearby devices.",
-            StatusTone.PROBLEM, busy = false, primary = ConnectionAction.GrantPermission,
+            StatusTone.NEUTRAL, busy = false, primary = ConnectionAction.GrantPermission,
         )
         BlockReason.BLUETOOTH_OFF -> ConnectionCard(
             "Bluetooth is off",
             "Turn it on to connect to a host.",
-            StatusTone.PROBLEM, busy = false, primary = ConnectionAction.TurnOnBluetooth,
+            StatusTone.NEUTRAL, busy = false, primary = ConnectionAction.TurnOnBluetooth,
         )
         BlockReason.NO_ADAPTER -> ConnectionCard(
             "No Bluetooth on this phone",
@@ -246,7 +246,7 @@ private fun ConnectionUi.Failed.failedCard(): ConnectionCard {
             when (cause) {
                 ConnectionFailure.HOST_REFUSED_PAIRING -> ConnectionCard(
                     "Host refused pairing",
-                    "Accept the prompt on both devices. If it keeps failing, forget Bluke on $name and $name on this phone, then pair again.",
+                    "Accept the prompt on both devices. If it keeps failing, remove Bluke on $name, forget $name on this phone, then pair again.",
                     StatusTone.PROBLEM, busy = false, primary = retry, secondary = ConnectionAction.Help,
                 )
                 ConnectionFailure.PAIRING_REQUEST_FAILED -> ConnectionCard(

@@ -20,6 +20,7 @@ import androidx.compose.ui.test.junit4.createEmptyComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
@@ -108,7 +109,6 @@ class AllScreensScreenshotTest {
     private fun baselinePrefs() {
         prefs.edit().clear()
             .putBoolean("has_seen_onboarding", true)
-            .putBoolean("has_seen_help", true)
             .putBoolean("has_seen_gamepad_guide", true)
             .putInt("last_run_version_code", BuildConfig.VERSION_CODE)
             .putInt(HID_DESCRIPTOR_REVISION_PREFERENCE, CURRENT_HID_DESCRIPTOR_REVISION)
@@ -253,12 +253,6 @@ class AllScreensScreenshotTest {
                     shot("home-$name-$t")
                 }
             }
-            attempt("home-nudge-$t") {
-                baselinePrefs(); theme(dark, PORTRAIT)
-                prefs.edit().putBoolean("is_developer_mode", true).putBoolean("mock_troubleshooting_nudge", true).commit()
-                home(states.getValue("paired-list"))
-                shot("home-troubleshooting-nudge-$t")
-            }
             attempt("home-update-dialog-$t") {
                 baselinePrefs(); theme(dark, PORTRAIT)
                 prefs.edit().putInt(HID_DESCRIPTOR_REVISION_PREFERENCE, 1).commit()
@@ -267,20 +261,11 @@ class AllScreensScreenshotTest {
             }
             attempt("home-gamepad-guide-$t") {
                 baselinePrefs(); theme(dark, PORTRAIT)
-                prefs.edit().putBoolean("has_seen_gamepad_guide", false)
-                    .putInt("launch_mode", InputMode.GAMEPAD.id).commit()
+                prefs.edit().putBoolean("has_seen_gamepad_guide", false).commit()
                 home(states.getValue("connected")) {
-                    composeRule.onNodeWithTag("start_keyboard_btn").performClick()
+                    composeRule.onNodeWithTag("mode_tile_gamepad").performScrollTo().performClick()
                 }
                 shot("home-dialog-gamepad-guide-$t")
-            }
-            for (mode in listOf(InputMode.TOUCHPAD, InputMode.GAMEPAD, InputMode.MEDIA_PRESENTATION)) {
-                attempt("home-launchbar-${mode.preferenceKey}-$t") {
-                    baselinePrefs(); theme(dark, PORTRAIT)
-                    prefs.edit().putInt("launch_mode", mode.id).commit()
-                    home(states.getValue("connected"))
-                    shot("home-connected-launch-${mode.preferenceKey}-$t")
-                }
             }
         }
     }
@@ -318,7 +303,8 @@ class AllScreensScreenshotTest {
             baselinePrefs(); theme(dark, size)
             prefs.edit().apply(setup).commit()
             home(connectedState) {
-                composeRule.onNodeWithTag("start_keyboard_btn").performClick()
+                val mode = InputMode.fromId(prefs.getInt("launch_mode", InputMode.KEYBOARD.id))
+                composeRule.onNodeWithTag("mode_tile_${mode.preferenceKey}").performScrollTo().performClick()
                 composeRule.waitForIdle()
                 after()
             }
@@ -398,39 +384,6 @@ class AllScreensScreenshotTest {
                 }
                 shot("keyboard-layout-switcher-overlay-landscape-$t")
             }
-        }
-    }
-
-    // ---------- onboarding ----------
-
-    @Test
-    fun onboarding() {
-        themes { dark, t ->
-            attempt("onboarding-$t") {
-                baselinePrefs(); theme(dark, PORTRAIT)
-                prefs.edit().putBoolean("has_seen_onboarding", false).commit()
-                launch(OnboardingActivity::class.java)
-                shot("onboarding-1-welcome-$t")
-                composeRule.onNodeWithText("Let's Start").performClick()
-                composeRule.mainClock.advanceTimeBy(1_000)
-                shot("onboarding-2-permissions-needed-$t")
-                composeRule.onNodeWithText("Grant Permissions").performClick()
-                composeRule.mainClock.advanceTimeBy(1_000)
-                shot("onboarding-2-permissions-after-deny-$t")
-                grantBluetooth()
-                composeRule.mainClock.advanceTimeBy(1_000)
-                shot("onboarding-2-permissions-granted-$t")
-                composeRule.onNodeWithText("Continue").performClick()
-                composeRule.mainClock.advanceTimeBy(1_000)
-                shot("onboarding-3-connection-guide-countdown-$t")
-                composeRule.mainClock.advanceTimeBy(6_000)
-                shot("onboarding-3-connection-guide-ready-$t")
-            }
-            shadowOf(app).denyPermissions(
-                Manifest.permission.BLUETOOTH_CONNECT, Manifest.permission.BLUETOOTH_SCAN,
-                Manifest.permission.BLUETOOTH_ADVERTISE, Manifest.permission.ACCESS_FINE_LOCATION,
-                Manifest.permission.ACCESS_COARSE_LOCATION,
-            )
         }
     }
 
