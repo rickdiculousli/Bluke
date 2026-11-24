@@ -3,7 +3,6 @@ package dev.arnv.bluke.ui
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -102,7 +101,6 @@ fun HomeContent(
     showMacAddress: Boolean = false,
     hapticsEnabled: Boolean = true,
 ) {
-    val connection = state.connection
     val haptics = LocalHapticFeedback.current
     // Long-press haptics follow the app's haptics switch, like every other buzz in Bluke.
     val gatedHaptics = remember(haptics, hapticsEnabled) {
@@ -162,7 +160,8 @@ private fun HomeScaffold(state: HomeUiState, callbacks: HomeCallbacks, showMacAd
                 item(key = "card") {
                     ConnectionCard(connection, state.statusLine, callbacks.onAction)
                 }
-                if (connection is ConnectionUi.Blocked) return@LazyColumn
+                // Hosts wait until Bluetooth is checked: before that, nothing in them can be acted on.
+                if (connection is ConnectionUi.Blocked || connection == ConnectionUi.Checking) return@LazyColumn
                 item(key = "hosts") {
                     HostSections(state, showMacAddress, callbacks)
                 }
@@ -276,7 +275,7 @@ private fun HostSections(state: HomeUiState, showMacAddress: Boolean, callbacks:
                 )
                 AnimatedVisibility(
                     visible = pairedExpanded,
-                    enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(spring(stiffness = Spring.StiffnessMediumLow)),
+                    enter = expandVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeIn(spring(stiffness = Spring.StiffnessMedium)),
                     exit = shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(spring(stiffness = Spring.StiffnessMedium)),
                 ) {
                     HostGroup(state.paired, connection, showMacAddress, callbacks.onConnectHost)
@@ -287,12 +286,16 @@ private fun HostSections(state: HomeUiState, showMacAddress: Boolean, callbacks:
             SectionHeader(
                 "Nearby",
                 count = state.nearby.size.takeIf { nearbyOpen },
-                trailing = { ScanButton(state.isScanning, callbacks.onToggleScan) },
+                // When the card's one step is already Scan or Stop scanning, the header doesn't repeat it.
+                trailing = {
+                    val cardScans = connection.card().primary.let { it == ConnectionAction.Scan || it == ConnectionAction.StopScan }
+                    if (!cardScans) ScanButton(state.isScanning, callbacks.onToggleScan)
+                },
                 modifier = Modifier.testTag("nearby_header"),
             )
             AnimatedVisibility(
                 visible = nearbyOpen,
-                enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(spring(stiffness = Spring.StiffnessMediumLow)),
+                enter = expandVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeIn(spring(stiffness = Spring.StiffnessMedium)),
                 exit = shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(spring(stiffness = Spring.StiffnessMedium)),
             ) {
                 if (state.nearby.isEmpty()) {

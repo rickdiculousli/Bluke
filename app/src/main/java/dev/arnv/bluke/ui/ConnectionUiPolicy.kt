@@ -239,7 +239,7 @@ private fun ConnectionUi.Failed.failedCard(): ConnectionCard {
             } else {
                 "Check that $name is on and nearby. If it's stuck, cancel and try again."
             },
-            StatusTone.PROBLEM, busy = true, primary = ConnectionAction.Cancel, secondary = ConnectionAction.Help,
+            StatusTone.WORKING, busy = true, primary = ConnectionAction.Cancel, secondary = ConnectionAction.Help,
         )
         FailReason.HOST_REFUSED -> {
             val retry = host?.let { ConnectionAction.Retry(it) } ?: ConnectionAction.Scan

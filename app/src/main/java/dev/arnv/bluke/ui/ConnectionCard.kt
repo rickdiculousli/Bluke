@@ -5,7 +5,6 @@ import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.animateContentSize
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.tween
 import androidx.compose.animation.expandVertically
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
@@ -16,6 +15,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -132,8 +132,8 @@ internal fun ConnectionCard(
 ) {
     val card = connection.card()
     val colors = cardColors(card.tone)
-    val container by animateColorAsState(colors.container, spring(stiffness = Spring.StiffnessMediumLow), label = "card-container")
-    val content by animateColorAsState(colors.content, spring(stiffness = Spring.StiffnessMediumLow), label = "card-content")
+    val container by animateColorAsState(colors.container, spring(stiffness = Spring.StiffnessMedium), label = "card-container")
+    val content by animateColorAsState(colors.content, spring(stiffness = Spring.StiffnessMedium), label = "card-content")
     Card(
         modifier = modifier
             .fillMaxWidth()
@@ -144,7 +144,7 @@ internal fun ConnectionCard(
         Column(
             modifier = Modifier
                 .padding(start = 20.dp, end = 20.dp, top = 20.dp, bottom = 8.dp)
-                .animateContentSize(spring(stiffness = Spring.StiffnessMediumLow)),
+                .animateContentSize(spring(stiffness = Spring.StiffnessMedium)),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 StatusBadge(connection.icon(), card.tone, card.busy, container)
@@ -265,6 +265,8 @@ private fun CardDetails(
     )
     TextButton(
         onClick = { expanded = !expanded },
+        // The label sits on the card's content edge, in line with the button and detail lines above and below.
+        contentPadding = PaddingValues(start = 0.dp, end = 12.dp),
         colors = ButtonDefaults.textButtonColors(contentColor = content),
         modifier = Modifier
             .heightIn(min = 48.dp)
@@ -277,7 +279,7 @@ private fun CardDetails(
     }
     AnimatedVisibility(
         visible = expanded,
-        enter = expandVertically(spring(stiffness = Spring.StiffnessMediumLow)) + fadeIn(spring(stiffness = Spring.StiffnessMediumLow)),
+        enter = expandVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeIn(spring(stiffness = Spring.StiffnessMedium)),
         exit = shrinkVertically(spring(stiffness = Spring.StiffnessMedium)) + fadeOut(spring(stiffness = Spring.StiffnessMedium)),
     ) {
         Column(modifier = Modifier.padding(bottom = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
