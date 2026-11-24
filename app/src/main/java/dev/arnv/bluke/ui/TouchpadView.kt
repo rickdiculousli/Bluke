@@ -3,68 +3,208 @@ package dev.arnv.bluke.ui
 import android.annotation.SuppressLint
 import android.content.Context
 import android.content.SharedPreferences
-import android.content.Intent
-import android.os.VibrationEffect
-import android.os.Vibrator
-import androidx.compose.animation.*
-import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.tween
-import androidx.compose.animation.core.spring
-import androidx.compose.animation.core.Spring
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.border
-import androidx.compose.foundation.clickable
-import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.gestures.detectTapGestures
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.RowScope
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.*
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material.icons.filled.AlignHorizontalLeft
+import androidx.compose.material.icons.filled.AlignHorizontalRight
+import androidx.compose.material.icons.filled.Dialpad
+import androidx.compose.material.icons.filled.Keyboard
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
-import androidx.compose.ui.input.pointer.*
+import androidx.compose.ui.input.pointer.PointerId
+import androidx.compose.ui.input.pointer.changedToUp
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.text.font.FontFamily
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.selected
+import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
-import dev.arnv.bluke.bluetooth.BluetoothKeyboardManager
-import androidx.compose.ui.res.painterResource
 import androidx.core.content.edit
-import dev.arnv.bluke.R
-import dev.arnv.bluke.QuickCycleActivity
+import dev.arnv.bluke.bluetooth.BluetoothKeyboardManager
 import dev.arnv.bluke.data.KeyboardThemeRepository
-import androidx.lifecycle.Lifecycle
-import androidx.lifecycle.LifecycleEventObserver
-import androidx.lifecycle.compose.LocalLifecycleOwner
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
 
-enum class TrackpadButtonMode(val displayName: String) {
-    CLICKPAD("Clickpad"),
-    TWO_BUTTONS("2-Button L/R"),
-    THREE_BUTTONS("3-Button L/M/R")
+/** How the pad's bottom edge clicks. [preferenceValue] is stored in [TOUCHPAD_BUTTON_MODE_PREFERENCE]. */
+enum class TrackpadButtonMode(val preferenceValue: String, val displayName: String) {
+    CLICKPAD("clickpad", "Clickpad"),
+    TWO_BUTTONS("two_buttons", "2-button"),
+    THREE_BUTTONS("three_buttons", "3-button"),
+    ;
+
+    companion object {
+        /** An unknown or missing value reads as [CLICKPAD]. */
+        fun fromPreference(value: String?): TrackpadButtonMode =
+            entries.firstOrNull { it.preferenceValue == value } ?: CLICKPAD
+    }
+}
+
+/** Where a mouse report goes. The app sends it to the manager; tests provide a recorder through [LocalMouseReportSink]. */
+fun interface MouseReportSink {
+    fun send(buttons: Byte, x: Byte, y: Byte, wheel: Byte, pan: Byte)
+}
+
+/** Replaces the manager as the touchpad's report sink; tests set it to read what a gesture sends. */
+val LocalMouseReportSink = compositionLocalOf<MouseReportSink?> { null }
+
+/**
+ * The touchpad's own settings: pointer and scroll speed, scroll direction and momentum, and the
+ * modifier rail. Settings hosts [TouchpadTuneContent] with the same state, so the keys are its contract.
+ */
+data class TouchpadTuneState(
+    val speeds: PointerTuneState = PointerTuneState(),
+    val invertScroll: Boolean = TouchpadScrollSettings().inverted,
+    val momentum: Boolean = TouchpadScrollSettings().momentum,
+    val glide: Float = TouchpadScrollSettings().glide,
+    val modifierPosition: TouchpadModifierPosition = TouchpadModifierPosition.OFF,
+) {
+    fun write(prefs: SharedPreferences) {
+        speeds.write(prefs)
+        prefs.edit {
+            putBoolean(TOUCHPAD_INVERT_SCROLL_PREFERENCE, invertScroll)
+            putBoolean(TOUCHPAD_SCROLL_MOMENTUM_PREFERENCE, momentum)
+            putFloat(TOUCHPAD_SCROLL_GLIDE_PREFERENCE, glide.coerceIn(0f, 1f))
+            putString(TOUCHPAD_MODIFIER_POSITION_PREFERENCE, modifierPosition.preferenceValue)
+        }
+    }
+
+    companion object {
+        val KEYS = PointerTuneState.KEYS + arrayOf(
+            TOUCHPAD_INVERT_SCROLL_PREFERENCE,
+            TOUCHPAD_SCROLL_MOMENTUM_PREFERENCE,
+            TOUCHPAD_SCROLL_GLIDE_PREFERENCE,
+            TOUCHPAD_MODIFIER_POSITION_PREFERENCE,
+        )
+
+        fun read(prefs: SharedPreferences): TouchpadTuneState {
+            val scroll = TouchpadScrollSettings.from(prefs)
+            return TouchpadTuneState(
+                speeds = PointerTuneState.read(prefs),
+                invertScroll = scroll.inverted,
+                momentum = scroll.momentum,
+                glide = scroll.glide,
+                modifierPosition = TouchpadModifierPosition.fromPreference(
+                    prefs.getString(TOUCHPAD_MODIFIER_POSITION_PREFERENCE, null),
+                ),
+            )
+        }
+    }
+}
+
+private val SCROLL_KEYS = arrayOf(
+    TOUCHPAD_SCROLL_SPEED_PREFERENCE,
+    TOUCHPAD_INVERT_SCROLL_PREFERENCE,
+    TOUCHPAD_SCROLL_MOMENTUM_PREFERENCE,
+    TOUCHPAD_SCROLL_GLIDE_PREFERENCE,
+)
+
+private fun glideLabel(glide: Float): String = when {
+    glide < 0.34f -> "Short"
+    glide < 0.67f -> "Medium"
+    else -> "Long"
+}
+
+/** The touchpad's settings, for its Tune sheet and the Settings screen. Glide shows only while momentum is on. */
+@Composable
+fun TouchpadTuneContent(
+    state: TouchpadTuneState,
+    onChange: (TouchpadTuneState) -> Unit,
+    haptics: SurfaceHaptics? = null,
+) {
+    TuneSection("Speed") {
+        PointerSpeedTune(state.speeds, { onChange(state.copy(speeds = it)) }, haptics)
+    }
+    TuneSection("Scrolling") {
+        TuneSwitch(
+            label = "Invert scroll",
+            checked = state.invertScroll,
+            onCheckedChange = { onChange(state.copy(invertScroll = it)) },
+            supporting = "Content follows your fingers, like a phone",
+        )
+        TuneSwitch(
+            label = "Momentum",
+            checked = state.momentum,
+            onCheckedChange = { onChange(state.copy(momentum = it)) },
+            supporting = "Keep scrolling after a flick",
+        )
+        if (state.momentum) {
+            TuneSlider(
+                label = "Glide",
+                value = state.glide,
+                valueRange = 0f..1f,
+                steps = 0,
+                valueLabel = glideLabel(state.glide),
+                onValueChange = { glide ->
+                    if (glideLabel(glide) != glideLabel(state.glide)) haptics?.perform(HapticEvent.TICK)
+                    onChange(state.copy(glide = glide))
+                },
+            )
+        }
+    }
+    TuneSection("Modifier keys") {
+        TuneChoice(
+            label = "Ctrl, Shift, Alt and Meta beside the pad",
+            options = TouchpadModifierPosition.entries,
+            selected = state.modifierPosition,
+            optionLabel = ::railLabel,
+            onSelect = { onChange(state.copy(modifierPosition = it)) },
+        )
+    }
+}
+
+private fun railLabel(position: TouchpadModifierPosition): String = when (position) {
+    TouchpadModifierPosition.OFF -> "Off"
+    TouchpadModifierPosition.LEFT -> "Left"
+    TouchpadModifierPosition.RIGHT -> "Right"
 }
 
 @SuppressLint("MissingPermission")
-@OptIn(ExperimentalComposeUiApi::class, ExperimentalFoundationApi::class)
 @Composable
 fun TouchpadView(
     btManager: BluetoothKeyboardManager,
@@ -73,441 +213,162 @@ fun TouchpadView(
     caseBrush: Brush,
     modifierStyle: KeyboardModifierStyle = KeyboardModifierStyle.PC,
 ) {
-    // Shim until this surface adopts SurfaceToolbar: the old toolbar's inputs, from the chrome.
-    val onClose = chrome.onClose
-    val launchMode = chrome.mode.id
-    val onModeChange: (Int) -> Unit = { chrome.onNextMode() }
     val context = LocalContext.current
-    val scope = rememberCoroutineScope()
-    
-    // Preferences & Config States
-    var buttonMode by remember { mutableStateOf(TrackpadButtonMode.CLICKPAD) }
-    var showNumpadLed by rememberSaveable { mutableStateOf(false) }
-    var isVibrationEnabled by remember {
-        mutableStateOf(sharedPrefs.getBoolean("touchpad_vibration_enabled", true))
-    }
-    var sensitivity by remember {
-        mutableFloatStateOf(sharedPrefs.getFloat("touchpad_sensitivity", 1.5f))
-    }
-    var scrollSensitivity by remember {
-        mutableFloatStateOf(sharedPrefs.getFloat("touchpad_scroll_sensitivity", 1.0f))
-    }
-    var modifierPosition by remember {
-        mutableStateOf(
-            TouchpadModifierPosition.fromPreference(
-                sharedPrefs.getString(TOUCHPAD_MODIFIER_POSITION_PREFERENCE, null),
-            ),
-        )
-    }
-    val keyboardTheme = remember(context) { KeyboardThemeRepository(context).selectedTheme() }
-    // Haptic buzz function using Android's Vibrator
-    @Suppress("DEPRECATION")
-    val triggerVibration = { milliseconds: Long ->
-        if (isVibrationEnabled) {
-            try {
-                val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-                vibrator?.vibrate(VibrationEffect.createOneShot(milliseconds, VibrationEffect.DEFAULT_AMPLITUDE))
-            } catch (_: Exception) {
-                // Fail-safe catch for security/hardware vibration errors
-            }
-        }
-    }
+    val haptics = rememberSurfaceHaptics(sharedPrefs)
 
-    val sendNumpadKey = { legend: String, isPress: Boolean ->
-        scope.launch {
-            if (isPress) triggerVibration(15)
-            btManager.sendNumpadKey(legend, isPress)
-        }
-        Unit
+    val buttonMode by rememberPreference(sharedPrefs, TOUCHPAD_BUTTON_MODE_PREFERENCE) {
+        TrackpadButtonMode.fromPreference(it.getString(TOUCHPAD_BUTTON_MODE_PREFERENCE, null))
     }
+    val numpad by rememberPreference(sharedPrefs, TOUCHPAD_NUMPAD_PREFERENCE) {
+        it.getBoolean(TOUCHPAD_NUMPAD_PREFERENCE, false)
+    }
+    val tune by rememberPreference(sharedPrefs, *TouchpadTuneState.KEYS) { TouchpadTuneState.read(it) }
+    val scrollSettings by rememberPreference(sharedPrefs, *SCROLL_KEYS) { TouchpadScrollSettings.from(it) }
+    var tuneOpen by rememberSaveable { mutableStateOf(false) }
+    val keyboardTheme = remember(context) { KeyboardThemeRepository(context).selectedTheme() }
+
+    fun setNumpad(on: Boolean) = sharedPrefs.edit { putBoolean(TOUCHPAD_NUMPAD_PREFERENCE, on) }
+    fun setButtonMode(mode: TrackpadButtonMode) =
+        sharedPrefs.edit { putString(TOUCHPAD_BUTTON_MODE_PREFERENCE, mode.preferenceValue) }
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .background(caseBrush)
             .navigationBarsPadding()
-            .testTag("touchpad_view_root")
+            .testTag("touchpad_view_root"),
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize(),
-            verticalArrangement = Arrangement.SpaceBetween,
-            horizontalAlignment = Alignment.CenterHorizontally
-        ) {
-            
-            // 1. Sleek Frosted Settings Bar for Touchpad (replaces standard Keyboard bar)
-            Row(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(38.dp)
-                    .background(Color.Black.copy(alpha = 0.45f))
-                    .padding(horizontal = 8.dp, vertical = 2.dp),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                // Left side actions: close and switch modes
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    // Exit Button
-                    Row(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.15f))
-                            .clickable { onClose() }
-                            .padding(horizontal = 8.dp)
-                            .testTag("exit_touchpad_btn"),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Close,
-                            contentDescription = "Exit",
-                            tint = Color.White,
-                            modifier = Modifier.size(10.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text(
-                            text = "Close",
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    // Rotating Mode Switcher (cycles active connection modes)
-                    Row(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.15f))
-                            .combinedClickable(
-                                onClickLabel = "Next input mode",
-                                onLongClickLabel = "Configure input mode cycle",
-                                onClick = {
-                                    val enabledModes = sharedPrefs.enabledInputModes().map(InputMode::id)
-                                    val currentIndexInEnabled = enabledModes.indexOf(launchMode)
-                                    val nextIndex = (currentIndexInEnabled + 1) % enabledModes.size
-                                    val nextMode = enabledModes[nextIndex]
-                                    onModeChange(nextMode)
-                                    triggerVibration(25)
-                                },
-                                onLongClick = {
-                                    context.startActivity(Intent(context, QuickCycleActivity::class.java))
-                                },
-                            )
-                            .padding(horizontal = 8.dp)
-                            .testTag("touchpad_mode_cycle_btn"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Mouse,
-                            contentDescription = "Switch Mode",
-                            tint = Color.White,
-                            modifier = Modifier.size(11.dp)
-                        )
-                        Text(
-                            text = "Touchpad Mode",
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    // Connection status
-                    val connectedDevNow by btManager.connectedDevice.collectAsState()
-                    val isConnected = connectedDevNow != null
-                    val deviceName = (connectedDevNow ?: btManager.getReconnectTarget())?.name ?: "No Host"
-                    val statusLedColor = if (isConnected) Color(0xFF39FF14) else Color(0xFFFF9800)
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(statusLedColor)
-                    )
-                    Text(
-                        text = deviceName,
-                        color = Color.White,
-                        fontSize = 11.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontFamily = FontFamily.SansSerif
-                    )
-                }
-
-                ReconnectHostButton(btManager, iconOnly = true)
-
-                // Right side configurations: Trackpad Button layout, Numpad LED toggle, Case Color, Sensitivity, Vibration haptics
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.15f))
-                            .clickable {
-                                modifierPosition = modifierPosition.next()
-                                sharedPrefs.edit {
-                                    putString(
-                                        TOUCHPAD_MODIFIER_POSITION_PREFERENCE,
-                                        modifierPosition.preferenceValue,
-                                    )
-                                }
-                                triggerVibration(15)
-                            }
-                            .padding(horizontal = 8.dp)
-                            .testTag("touchpad_modifier_position"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp),
-                    ) {
-                        Icon(Icons.Default.Keyboard, "Modifier key position", tint = Color.White, modifier = Modifier.size(12.dp))
-                        Text(
-                            modifierPosition.displayName,
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold,
-                        )
-                    }
-
-                    Row(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.15f))
-                            .clickable {
-                                showNumpadLed = !showNumpadLed
-                                triggerVibration(30)
-                            }
-                            .padding(horizontal = 8.dp)
-                            .testTag("led_numpad_toggle"),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        if (showNumpadLed) {
-                            Icon(
-                                imageVector = Icons.Default.Dialpad,
-                                contentDescription = "LED Pad",
-                                tint = Color.White,
-                                modifier = Modifier.size(12.dp)
-                            )
-                        } else {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_dialpad_off),
-                                contentDescription = "LED Pad",
-                                tint = Color.White,
-                                modifier = Modifier.size(12.dp)
-                            )
-                        }
-                        Text(
-                            text = "Numpad",
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    // Button Partition Mode selector
-                    Row(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.15f))
-                            .clickable {
-                                val values = TrackpadButtonMode.entries
-                                val nextMode = values[(buttonMode.ordinal + 1) % values.size]
-                                buttonMode = nextMode
-                                triggerVibration(15)
-                            }
-                            .padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Mouse,
-                            contentDescription = "Button Mode",
-                            tint = Color.White,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Text(
-                            text = buttonMode.displayName,
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    // Mouse Sensitivity pill rotation (1.0x, 1.5x, 2.0x, 2.5x)
-                    Row(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.15f))
-                            .clickable {
-                                val currentSens = nextTouchpadSpeed(sensitivity)
-                                sensitivity = currentSens
-                                sharedPrefs.edit { putFloat("touchpad_sensitivity", currentSens) }
-                                triggerVibration(15)
-                            }
-                            .padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.Speed,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Text(
-                            text = "Pointer ${sensitivity}x",
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    // Scroll Speed pill rotation (1.0x, 1.5x, 2.0x, 2.5x)
-                    Row(
-                        modifier = Modifier
-                            .height(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.15f))
-                            .clickable {
-                                val currentScroll = nextTouchpadSpeed(scrollSensitivity)
-                                scrollSensitivity = currentScroll
-                                sharedPrefs.edit { putFloat("touchpad_scroll_sensitivity", currentScroll) }
-                                triggerVibration(15)
-                            }
-                            .padding(horizontal = 8.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.KeyboardDoubleArrowUp,
-                            contentDescription = null,
-                            tint = Color.White,
-                            modifier = Modifier.size(12.dp)
-                        )
-                        Text(
-                            text = "Scroll ${scrollSensitivity}x",
-                            color = Color.White,
-                            fontSize = 9.sp,
-                            fontWeight = FontWeight.Bold
-                        )
-                    }
-
-                    // Vibration Toggle
-                    Box(
-                        modifier = Modifier
-                            .size(28.dp)
-                            .clip(RoundedCornerShape(6.dp))
-                            .background(Color.White.copy(alpha = 0.15f))
-                            .clickable {
-                                val active = !isVibrationEnabled
-                                isVibrationEnabled = active
-                                sharedPrefs.edit { putBoolean("touchpad_vibration_enabled", active) }
-                                if (active) {
-                                    triggerVibration(50)
-                                }
-                            }
-                            .testTag("vibration_toggle"),
-                        contentAlignment = Alignment.Center
-                    ) {
-                        if (isVibrationEnabled) {
-                            Icon(
-                                imageVector = Icons.Default.Vibration,
-                                contentDescription = "Haptics Vibration",
-                                tint = Color.White,
-                                modifier = Modifier.size(12.dp)
-                            )
-                        } else {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_vibration_off),
-                                contentDescription = "Haptics Vibration",
-                                tint = Color.White,
-                                modifier = Modifier.size(12.dp)
-                            )
-                        }
-                    }
-                }
+        Column(Modifier.fillMaxSize()) {
+            SurfaceToolbar(chrome = chrome, haptics = haptics, onTune = { tuneOpen = true }) {
+                SurfaceToolbarIconButton(
+                    icon = Icons.Default.Dialpad,
+                    contentDescription = "Numpad",
+                    onClick = {
+                        haptics.perform(HapticEvent.TICK)
+                        setNumpad(!numpad)
+                    },
+                    selected = numpad,
+                    modifier = Modifier.testTag("touchpad_numpad_toggle"),
+                )
+                val rail = tune.modifierPosition
+                SurfaceToolbarIconButton(
+                    icon = when (rail) {
+                        TouchpadModifierPosition.OFF -> Icons.Default.Keyboard
+                        TouchpadModifierPosition.LEFT -> Icons.Default.AlignHorizontalLeft
+                        TouchpadModifierPosition.RIGHT -> Icons.Default.AlignHorizontalRight
+                    },
+                    contentDescription = "Modifier keys: ${railLabel(rail).lowercase()}",
+                    onClick = {
+                        haptics.perform(HapticEvent.TICK)
+                        tune.copy(modifierPosition = rail.next()).write(sharedPrefs)
+                    },
+                    modifier = Modifier.testTag("touchpad_modifier_position"),
+                )
             }
 
-            // 2. Large Glass-like Centered Touchpad Surface
             Row(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 24.dp, vertical = 12.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    .padding(horizontal = 24.dp, vertical = 16.dp),
+                horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
             ) {
-                if (modifierPosition == TouchpadModifierPosition.LEFT) {
-                    TouchpadModifierRail(
-                        modifier = Modifier.width(72.dp).fillMaxHeight(),
-                        rightHandKeys = false,
-                        modifierStyle = modifierStyle,
-                        theme = keyboardTheme,
-                        btManager = btManager,
-                        triggerVibration = triggerVibration,
-                    )
+                if (tune.modifierPosition == TouchpadModifierPosition.LEFT) {
+                    TouchpadModifierRail(false, modifierStyle, keyboardTheme, btManager, haptics)
                 }
-
-                // Glass panel plate backing container with high-end polished styling
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .fillMaxHeight()
-                        .shadow(
-                            elevation = 4.dp,
-                            shape = RoundedCornerShape(10.dp),
-                            spotColor = Color.Black.copy(alpha = 0.5f),
-                            ambientColor = Color.Black
-                        )
-                        .clip(RoundedCornerShape(10.dp))
-                        .background(Color(0xFF1E1E1E))
-                        .border(1.5.dp, Color.White.copy(alpha = 0.15f), RoundedCornerShape(10.dp))
-                        .testTag("glass_touch_surface")
-                ) {
-                    
-                    // Gesture and move touch capture layer
-                    TouchGestureLayer(
-                        btManager = btManager,
-                        sensitivity = sensitivity,
-                        scrollSensitivity = scrollSensitivity,
-                        buttonMode = buttonMode,
-                        triggerVibration = triggerVibration,
-                        showNumpadLed = showNumpadLed,
-                    )
-
-                    // Asus-Style backlit LED number keyboard overlay (absolutely drawn over the trackpad background area)
-                    androidx.compose.animation.AnimatedVisibility(
-                        visible = showNumpadLed,
-                        enter = fadeIn(),
-                        exit = fadeOut()
-                    ) {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .fillMaxHeight(if (buttonMode != TrackpadButtonMode.CLICKPAD) 0.82f else 1f)
-                                    .padding(12.dp)
-                            ) {
-                                NumpadLedGrid(onKeyPress = sendNumpadKey)
-                            }
-                    }
+                TouchpadPad(
+                    btManager = btManager,
+                    sensitivity = tune.speeds.pointerSpeed,
+                    scrollSettings = scrollSettings,
+                    buttonMode = buttonMode,
+                    numpad = numpad,
+                    haptics = haptics,
+                )
+                if (tune.modifierPosition == TouchpadModifierPosition.RIGHT) {
+                    TouchpadModifierRail(true, modifierStyle, keyboardTheme, btManager, haptics)
                 }
+            }
+        }
 
-                if (modifierPosition == TouchpadModifierPosition.RIGHT) {
-                    TouchpadModifierRail(
-                        modifier = Modifier.width(72.dp).fillMaxHeight(),
-                        rightHandKeys = true,
-                        modifierStyle = modifierStyle,
-                        theme = keyboardTheme,
-                        btManager = btManager,
-                        triggerVibration = triggerVibration,
-                    )
-                }
+        SurfaceTuneSheet(visible = tuneOpen, title = "Touchpad", onDismiss = { tuneOpen = false }) {
+            TuneSection("This pad") {
+                TuneChoice(
+                    label = "Click buttons",
+                    options = TrackpadButtonMode.entries,
+                    selected = buttonMode,
+                    optionLabel = { it.displayName },
+                    onSelect = ::setButtonMode,
+                )
+                TuneSwitch(
+                    label = "Numpad",
+                    checked = numpad,
+                    onCheckedChange = ::setNumpad,
+                    supporting = "Number keys drawn on the pad",
+                )
+            }
+            TouchpadTuneContent(state = tune, onChange = { it.write(sharedPrefs) }, haptics = haptics)
+        }
+    }
+}
+
+@Composable
+private fun RowScope.TouchpadPad(
+    btManager: BluetoothKeyboardManager,
+    sensitivity: Float,
+    scrollSettings: TouchpadScrollSettings,
+    buttonMode: TrackpadButtonMode,
+    numpad: Boolean,
+    haptics: SurfaceHaptics,
+) {
+    val colors = MaterialTheme.colorScheme
+    val shape = MaterialTheme.shapes.large
+    Box(
+        modifier = Modifier
+            .weight(1f)
+            .fillMaxHeight()
+            .clip(shape)
+            .background(colors.surfaceContainer)
+            .border(1.dp, colors.outlineVariant, shape)
+            .testTag("glass_touch_surface"),
+    ) {
+        if (!numpad) {
+            Box(
+                Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(if (buttonMode == TrackpadButtonMode.CLICKPAD) 1f else 1f - BUTTON_STRIP_FRACTION),
+                contentAlignment = Alignment.Center,
+            ) {
+                Text(
+                    text = "Tap to click · Two fingers to scroll",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = colors.onSurfaceVariant,
+                    textAlign = TextAlign.Center,
+                    modifier = Modifier.padding(24.dp).testTag("touchpad_hint"),
+                )
+            }
+        }
+
+        TouchGestureLayer(
+            btManager = btManager,
+            sensitivity = sensitivity,
+            scrollSettings = scrollSettings,
+            buttonMode = buttonMode,
+            showNumpadLed = numpad,
+            onClick = { haptics.perform(HapticEvent.CLICK) },
+        )
+
+        if (numpad) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .fillMaxHeight(if (buttonMode != TrackpadButtonMode.CLICKPAD) 1f - BUTTON_STRIP_FRACTION else 1f)
+                    .padding(12.dp),
+            ) {
+                NumpadLedGrid(onKeyPress = { legend, isPress ->
+                    if (isPress) haptics.perform(HapticEvent.PRESS)
+                    btManager.sendNumpadKey(legend, isPress)
+                })
             }
         }
     }
@@ -515,12 +376,11 @@ fun TouchpadView(
 
 @Composable
 private fun TouchpadModifierRail(
-    modifier: Modifier,
     rightHandKeys: Boolean,
     modifierStyle: KeyboardModifierStyle,
     theme: KeyboardThemeDefinition,
     btManager: BluetoothKeyboardManager,
-    triggerVibration: (Long) -> Unit,
+    haptics: SurfaceHaptics,
 ) {
     val guiLabel = if (modifierStyle == KeyboardModifierStyle.MAC) modifierStyle.guiLabel else "Meta"
     val keys = if (rightHandKeys) {
@@ -529,7 +389,10 @@ private fun TouchpadModifierRail(
         listOf("Ctrl" to 0xE0, "Shift" to 0xE1, modifierStyle.altLabel to 0xE2, guiLabel to 0xE3)
     }
     Column(
-        modifier = modifier,
+        modifier = Modifier
+            .width(72.dp)
+            .fillMaxHeight()
+            .testTag(if (rightHandKeys) "touchpad_rail_right" else "touchpad_rail_left"),
         verticalArrangement = Arrangement.spacedBy(4.dp, Alignment.CenterVertically),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
@@ -539,7 +402,7 @@ private fun TouchpadModifierRail(
                 keyCode = keyCode,
                 style = if (label == guiLabel) theme.accentStyle else theme.modifierStyle,
                 btManager = btManager,
-                triggerVibration = triggerVibration,
+                haptics = haptics,
             )
         }
     }
@@ -551,7 +414,7 @@ private fun MechanicalModifierKey(
     keyCode: Int,
     style: KeyboardKeyStyle,
     btManager: BluetoothKeyboardManager,
-    triggerVibration: (Long) -> Unit,
+    haptics: SurfaceHaptics,
 ) {
     var isPressed by remember { mutableStateOf(false) }
     DisposableEffect(btManager, keyCode) {
@@ -569,161 +432,117 @@ private fun MechanicalModifierKey(
         legendColor = Color(style.legendArgb),
         legendScale = style.legendScale,
         baseUnitWidth = 68.dp,
-        modifier = Modifier.pointerInput(keyCode) {
-            detectTapGestures(
-                onPress = {
-                    isPressed = true
-                    triggerVibration(12)
-                    btManager.sendKey(keyCode, true)
-                    try {
-                        tryAwaitRelease()
-                    } finally {
-                        btManager.sendKey(keyCode, false)
-                        isPressed = false
-                    }
-                },
-            )
-        },
+        modifier = Modifier
+            .semantics { contentDescription = label }
+            .pointerInput(keyCode) {
+                detectTapGestures(
+                    onPress = {
+                        isPressed = true
+                        haptics.perform(HapticEvent.PRESS)
+                        btManager.sendKey(keyCode, true)
+                        try {
+                            tryAwaitRelease()
+                        } finally {
+                            btManager.sendKey(keyCode, false)
+                            isPressed = false
+                        }
+                    },
+                )
+            },
     )
 }
 
+/** The numpad drawn on the pad: five columns of keys, lit on touch-down in the same frame. */
 @Composable
 fun NumpadLedGrid(onKeyPress: (String, Boolean) -> Unit) {
-    Box(modifier = Modifier.fillMaxSize()) {
-        Row(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 32.dp, vertical = 8.dp)
-        ) {
-            val cols = listOf(
-                listOf("7", "4", "1", "0"),
-                listOf("8", "5", "2", "."),
-                listOf("9", "6", "3", "%"),
-                listOf("/", "*", "-", "+")
-            )
-            
+    val colors = MaterialTheme.colorScheme
+    val cols = listOf(
+        listOf("7" to 1f, "4" to 1f, "1" to 1f, "0" to 1f),
+        listOf("8" to 1f, "5" to 1f, "2" to 1f, "." to 1f),
+        listOf("9" to 1f, "6" to 1f, "3" to 1f, "%" to 1f),
+        listOf("/" to 1f, "*" to 1f, "-" to 1f, "+" to 1f),
+        listOf("⌫" to 2f, "Enter" to 1f, "=" to 1f),
+    )
+    Box(Modifier.fillMaxSize().padding(horizontal = 32.dp, vertical = 8.dp)) {
+        Row(Modifier.fillMaxSize()) {
             cols.forEach { col ->
-                Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                    col.forEach { char ->
-                        var isPressed by remember { mutableStateOf(false) }
-                        val animatedAlpha by animateFloatAsState(
-                            targetValue = if (isPressed) 0.2f else 0.0f,
-                            animationSpec = tween(durationMillis = if (isPressed) 50 else 150),
-                            label = "fill_anim"
-                        )
-                        Box(
-                            modifier = Modifier
-                                .weight(1f)
-                                .fillMaxWidth()
-                                .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = animatedAlpha))
-                                .pointerInput(char) {
-                                    detectTapGestures(
-                                        onPress = {
-                                            isPressed = true
-                                            onKeyPress(char, true)
-                                            tryAwaitRelease()
-                                            isPressed = false
-                                            onKeyPress(char, false)
-                                        }
-                                    )
-                                },
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = char,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                                fontSize = 16.sp,
-                                fontWeight = FontWeight.Light,
-                                fontFamily = FontFamily.SansSerif
-                            )
-                        }
-                    }
-                }
-            }
-            
-            // 5th Column (Backspace, Enter, =)
-            Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
-                val keys5th = listOf(
-                    "⌫" to 2f,
-                    "Enter" to 1f,
-                    "=" to 1f
-                )
-                keys5th.forEach { (char, weight) ->
-                    var isPressed by remember { mutableStateOf(false) }
-                    val animatedAlpha by animateFloatAsState(
-                        targetValue = if (isPressed) 0.2f else 0.0f,
-                        animationSpec = tween(durationMillis = if (isPressed) 50 else 150),
-                        label = "fill_anim"
-                    )
-                    Box(
-                        modifier = Modifier
-                            .weight(weight)
-                            .fillMaxWidth()
-                            .background(MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = animatedAlpha))
-                            .pointerInput(char) {
-                                detectTapGestures(
-                                    onPress = {
-                                        isPressed = true
-                                        onKeyPress(char, true)
-                                        tryAwaitRelease()
-                                        isPressed = false
-                                        onKeyPress(char, false)
-                                    }
-                                )
-                            },
-                        contentAlignment = Alignment.Center
-                    ) { 
-                        Text(
-                            text = char,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-                            fontSize = if (char == "Enter") 12.sp else 16.sp,
-                            fontWeight = FontWeight.Light,
-                            fontFamily = FontFamily.SansSerif
-                        )
+                Column(Modifier.weight(1f).fillMaxHeight()) {
+                    col.forEach { (legend, weight) ->
+                        NumpadKey(legend, onKeyPress, Modifier.weight(weight).fillMaxWidth())
                     }
                 }
             }
         }
-
-        val lineColor = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.15f)
-        // Draw intersecting background lines (grid)
-        androidx.compose.foundation.Canvas(
-            modifier = Modifier
-                .fillMaxSize()
-                .padding(horizontal = 32.dp, vertical = 8.dp)
-        ) {
-            val strokeParams = 1.dp.toPx()
-            
-            // 4 vertical lines (1/5, 2/5, 3/5, 4/5)
+        val lineColor = colors.outlineVariant
+        Canvas(Modifier.fillMaxSize()) {
+            val stroke = 1.dp.toPx()
             for (i in 1..4) {
                 val x = size.width * (i / 5f)
-                drawLine(
-                    color = lineColor,
-                    start = Offset(x, 0f),
-                    end = Offset(x, size.height),
-                    strokeWidth = strokeParams
-                )
+                drawLine(lineColor, Offset(x, 0f), Offset(x, size.height), stroke)
             }
-            // 3 horizontal lines (1/4, 2/4, 3/4)
             for (i in 1..3) {
                 val y = size.height * (i / 4f)
+                // The backspace key spans the first two rows of the last column.
                 val endX = if (i == 1) size.width * (4f / 5f) else size.width
-                drawLine(
-                    color = lineColor,
-                    start = Offset(0f, y),
-                    end = Offset(endX, y),
-                    strokeWidth = strokeParams
-                )
+                drawLine(lineColor, Offset(0f, y), Offset(endX, y), stroke)
             }
         }
     }
 }
 
+@Composable
+private fun NumpadKey(legend: String, onKeyPress: (String, Boolean) -> Unit, modifier: Modifier) {
+    val colors = MaterialTheme.colorScheme
+    var isPressed by remember { mutableStateOf(false) }
+    val press by rememberUpdatedState(onKeyPress)
+    Box(
+        modifier = modifier
+            .background(if (isPressed) colors.secondaryContainer else Color.Transparent)
+            .semantics {
+                contentDescription = if (legend == "⌫") "Backspace" else legend
+                selected = isPressed
+            }
+            .testTag("numpad_key_$legend")
+            .pointerInput(legend) {
+                detectTapGestures(
+                    onPress = {
+                        isPressed = true
+                        press(legend, true)
+                        try {
+                            tryAwaitRelease()
+                        } finally {
+                            isPressed = false
+                            press(legend, false)
+                        }
+                    },
+                )
+            },
+        contentAlignment = Alignment.Center,
+    ) {
+        Text(
+            text = legend,
+            style = if (legend == "Enter") MaterialTheme.typography.labelLarge else MaterialTheme.typography.titleLarge,
+            color = if (isPressed) colors.onSecondaryContainer else colors.primary,
+        )
+    }
+}
+
 private const val SCROLL_FRAME_MILLIS = 8L
+
+/** The share of the pad's height the 2- and 3-button strip takes. */
+private const val BUTTON_STRIP_FRACTION = 0.18f
 
 /** Pointer counts per dp of finger travel at 1x: the feel Bluke had on a 420 dpi phone, now the same on every screen. */
 private const val POINTER_COUNTS_PER_DP = 2.625f
 
+private const val LEFT_BUTTON: Byte = 1
+private const val RIGHT_BUTTON: Byte = 2
+private const val MIDDLE_BUTTON: Byte = 4
+
+/**
+ * The old signature, kept for the multimedia pad until it moves to the overload below: it reads the
+ * scroll settings itself and treats a 20 ms vibration as the click it always marked.
+ */
 @Composable
 fun TouchGestureLayer(
     btManager: BluetoothKeyboardManager,
@@ -733,57 +552,79 @@ fun TouchGestureLayer(
     triggerVibration: (Long) -> Unit,
     showNumpadLed: Boolean,
 ) {
-    // Tracking points and states for reliable swipe gesture translation
+    val context = LocalContext.current
+    val prefs = remember(context) { context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
+    val scrollSettings by rememberPreference(prefs, *SCROLL_KEYS) { TouchpadScrollSettings.from(it) }
+    TouchGestureLayer(
+        btManager = btManager,
+        sensitivity = sensitivity,
+        scrollSettings = scrollSettings.copy(speed = scrollSensitivity),
+        buttonMode = buttonMode,
+        showNumpadLed = showNumpadLed,
+        onClick = { triggerVibration(20) },
+    )
+}
+
+/**
+ * Turns touches on the pad into mouse reports: one finger points, two scroll, a tap clicks, and in
+ * 2- and 3-button modes the bottom strip is the buttons. [onClick] runs when a tap or button click
+ * lands, for the caller's haptic; nothing runs on moves or scrolls. Speed and scroll settings apply
+ * mid-gesture, without restarting the touch handling.
+ */
+@Composable
+fun TouchGestureLayer(
+    btManager: BluetoothKeyboardManager,
+    sensitivity: Float,
+    scrollSettings: TouchpadScrollSettings,
+    buttonMode: TrackpadButtonMode,
+    showNumpadLed: Boolean,
+    onClick: () -> Unit,
+) {
+    val sink = LocalMouseReportSink.current
+    val sendMouse: (Byte, Byte, Byte, Byte, Byte) -> Unit = remember(sink, btManager) {
+        if (sink != null) sink::send else { b, x, y, w, p -> btManager.sendMouseReport(b, x, y, w, p) }
+    }
+    fun sendMouseReport(buttons: Byte, x: Byte, y: Byte, wheel: Byte, pan: Byte = 0) = sendMouse(buttons, x, y, wheel, pan)
+
+    val currentSensitivity by rememberUpdatedState(sensitivity)
+    val currentOnClick by rememberUpdatedState(onClick)
+
     var lastActivePointerId by remember { mutableStateOf<PointerId?>(null) }
     var accumulatedX by remember { mutableFloatStateOf(0f) }
     var accumulatedY by remember { mutableFloatStateOf(0f) }
     var lastPointX by remember { mutableFloatStateOf(0f) }
     var lastPointY by remember { mutableFloatStateOf(0f) }
 
-    // Multi-touch tracking
     var isTwoFingerActive by remember { mutableStateOf(false) }
     // Where the scroll has travelled: it follows whichever finger moves more, as a Mac trackpad does.
     var scrollTrackX by remember { mutableFloatStateOf(0f) }
     var scrollTrackY by remember { mutableFloatStateOf(0f) }
     val scroller = remember { TouchpadScroller() }
     var scrollTicker by remember { mutableStateOf<Job?>(null) }
-    val context = LocalContext.current
-    val prefs = remember(context) { context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE) }
-    var scrollSettings by remember { mutableStateOf(TouchpadScrollSettings.from(prefs)) }
-    val lifecycleOwner = LocalLifecycleOwner.current
-    DisposableEffect(lifecycleOwner, prefs) {
-        // Scroll settings are edited on the Touchpad settings screen; pick them up on return.
-        val observer = LifecycleEventObserver { _, event ->
-            if (event == Lifecycle.Event.ON_RESUME) scrollSettings = TouchpadScrollSettings.from(prefs)
-        }
-        lifecycleOwner.lifecycle.addObserver(observer)
-        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
-    }
-    SideEffect { scroller.settings = scrollSettings.copy(speed = scrollSensitivity) }
+    SideEffect { scroller.settings = scrollSettings }
 
-    // Tap tracking
     val pointerDownInfo = remember { mutableMapOf<PointerId, Pair<Long, Offset>>() }
     var maxPointersInTap by remember { mutableIntStateOf(0) }
     val gestureScope = rememberCoroutineScope()
-    val currentVibration by rememberUpdatedState(triggerVibration)
-    val tapDrag = remember(btManager, sensitivity, scrollSensitivity, buttonMode, showNumpadLed) {
-        TouchpadTapDragGesture(gestureScope,
-            sendButton = { btManager.sendMouseReport(it, 0, 0, 0) },
-            vibrate = { currentVibration(it) })
+    val tapDrag = remember(btManager, sendMouse, buttonMode, showNumpadLed) {
+        TouchpadTapDragGesture(
+            gestureScope,
+            sendButton = { sendMouseReport(it, 0, 0, 0) },
+            // 20 ms marked a double-tap's clicks landing; the 15 ms drag-start and drag-end buzzes go.
+            vibrate = { if (it == 20L) currentOnClick() },
+        )
     }
 
     // Rate limiting to prevent Bluetooth L2CAP packet flooding
     var lastReportTime by remember { mutableLongStateOf(0L) }
 
-    // Visual pointer (touchpad thumb) tracking states
-    var isTouchActive by remember { mutableStateOf(false) }
+    // Where the fingers are, drawn as markers so the pad shows it is tracking them.
     var activeTouchPoints by remember { mutableStateOf<List<Offset>>(emptyList()) }
-    var touchCount by remember { mutableIntStateOf(0) }
     var activeMouseButton by remember { mutableStateOf<Byte>(0) }
 
     fun sendScroll(report: ScrollReport?) {
         report ?: return
-        btManager.sendMouseReport(activeMouseButton, 0, 0, report.wheel.toByte(), report.pan.toByte())
+        sendMouseReport(activeMouseButton, 0, 0, report.wheel.toByte(), report.pan.toByte())
     }
 
     // A momentum glide plays out on a steady frame clock after the fingers lift.
@@ -803,27 +644,18 @@ fun TouchGestureLayer(
             scrollTicker?.cancel()
             tapDrag.cancel()
             // Pointer cancellation (mode change, rotation, backgrounding) must never strand a host button down.
-            btManager.sendMouseReport(0, 0, 0, 0)
+            sendMouseReport(0, 0, 0, 0)
         }
     }
 
-    val density = androidx.compose.ui.platform.LocalDensity.current
+    val density = LocalDensity.current
     val pxPerDp = density.density
-    val thumbActiveAlpha by animateFloatAsState(
-        targetValue = if (isTouchActive && !showNumpadLed) 0.85f else 0f,
-        animationSpec = spring(stiffness = Spring.StiffnessMedium),
-        label = "thumbAlpha"
-    )
-    val thumbScale by animateFloatAsState(
-        targetValue = if (touchCount >= 2) 0.78f else (if (isTouchActive) 0.88f else 1.0f),
-        animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessHigh),
-        label = "thumbScale"
-    )
 
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(sensitivity, scrollSensitivity, buttonMode, showNumpadLed) {
+            .testTag("touchpad_gesture_layer")
+            .pointerInput(buttonMode, showNumpadLed, sendMouse) {
                 val tapSlopPx = TouchpadGesturePolicy.TAP_SLOP_DP.dp.toPx()
                 try {
                 awaitPointerEventScope {
@@ -832,16 +664,12 @@ fun TouchGestureLayer(
                         val changes = event.changes
 
                         if (showNumpadLed) {
-                            isTouchActive = false
-                            touchCount = 0
+                            activeTouchPoints = emptyList()
                             continue
                         }
 
-                        // Determine active pointers
                         val pressedChanges = changes.filter { it.pressed }
                         val downCount = pressedChanges.size
-                        touchCount = downCount
-                        isTouchActive = downCount > 0
                         activeTouchPoints = pressedChanges.map { it.position }
                         if (downCount > maxPointersInTap) {
                             maxPointersInTap = downCount
@@ -855,7 +683,7 @@ fun TouchGestureLayer(
                                     btManager.holdLinkAwake() // the link is ready by the time the finger moves
                                 }
                                 pointerDownInfo[change.id] = change.uptimeMillis to change.position
-                                
+
                                 if (pointerDownInfo.size == 1) {
                                     tapDrag.down(change.uptimeMillis, change.position.x, change.position.y)
                                 } else {
@@ -881,8 +709,8 @@ fun TouchGestureLayer(
                                 lastPointX = pointer.position.x
                                 lastPointY = pointer.position.y
                             } else {
-                                accumulatedX += (pointer.position.x - lastPointX) / pxPerDp * POINTER_COUNTS_PER_DP * sensitivity
-                                accumulatedY += (pointer.position.y - lastPointY) / pxPerDp * POINTER_COUNTS_PER_DP * sensitivity
+                                accumulatedX += (pointer.position.x - lastPointX) / pxPerDp * POINTER_COUNTS_PER_DP * currentSensitivity
+                                accumulatedY += (pointer.position.y - lastPointY) / pxPerDp * POINTER_COUNTS_PER_DP * currentSensitivity
 
                                 val now = System.currentTimeMillis()
                                 if (now - lastReportTime >= 10L) {
@@ -891,9 +719,9 @@ fun TouchGestureLayer(
 
                                     if (sendX != 0 || sendY != 0) {
                                         if (tapDrag.move()) {
-                                            btManager.sendMouseReport(1, sendX.toByte(), sendY.toByte(), 0)
+                                            sendMouseReport(1, sendX.toByte(), sendY.toByte(), 0)
                                         } else {
-                                            btManager.sendMouseReport(activeMouseButton, sendX.toByte(), sendY.toByte(), 0)
+                                            sendMouseReport(activeMouseButton, sendX.toByte(), sendY.toByte(), 0)
                                         }
                                         accumulatedX -= sendX
                                         accumulatedY -= sendY
@@ -911,23 +739,20 @@ fun TouchGestureLayer(
                                 val height = size.height
                                 val width = size.width
 
-                                if (touchYVal > height * 0.82f && !tapDrag.isArmed) {
-                                    triggerVibration(25)
+                                if (touchYVal > height * (1f - BUTTON_STRIP_FRACTION) && !tapDrag.isArmed) {
+                                    currentOnClick()
                                     val btnMask = when (buttonMode) {
-                                        TrackpadButtonMode.TWO_BUTTONS -> {
-                                            if (touchXVal < width / 2f) 1 else 2
+                                        TrackpadButtonMode.TWO_BUTTONS ->
+                                            if (touchXVal < width / 2f) LEFT_BUTTON else RIGHT_BUTTON
+                                        TrackpadButtonMode.THREE_BUTTONS -> when {
+                                            touchXVal < width * 0.35f -> LEFT_BUTTON
+                                            touchXVal < width * 0.65f -> MIDDLE_BUTTON
+                                            else -> RIGHT_BUTTON
                                         }
-                                        TrackpadButtonMode.THREE_BUTTONS -> {
-                                            when {
-                                                touchXVal < width * 0.35f -> 1
-                                                touchXVal < width * 0.65f -> 4
-                                                else -> 2
-                                            }
-                                        }
-                                        TrackpadButtonMode.CLICKPAD -> 1
+                                        TrackpadButtonMode.CLICKPAD -> LEFT_BUTTON
                                     }
-                                    activeMouseButton = btnMask.toByte()
-                                    btManager.sendMouseReport(btnMask.toByte(), 0, 0, 0)
+                                    activeMouseButton = btnMask
+                                    sendMouseReport(btnMask, 0, 0, 0)
                                 }
                             }
 
@@ -960,14 +785,14 @@ fun TouchGestureLayer(
                             if (scroller.isActive) runScroll()
                             isTwoFingerActive = false
                             lastActivePointerId = null
-                            
+
                             val sendX = accumulatedX.roundToInt().coerceIn(-127, 127)
                             val sendY = accumulatedY.roundToInt().coerceIn(-127, 127)
                             if (sendX != 0 || sendY != 0) {
                                 if (tapDrag.move()) {
-                                    btManager.sendMouseReport(1, sendX.toByte(), sendY.toByte(), 0)
+                                    sendMouseReport(1, sendX.toByte(), sendY.toByte(), 0)
                                 } else {
-                                    btManager.sendMouseReport(activeMouseButton, sendX.toByte(), sendY.toByte(), 0)
+                                    sendMouseReport(activeMouseButton, sendX.toByte(), sendY.toByte(), 0)
                                 }
                             }
                             accumulatedX = 0f
@@ -983,35 +808,34 @@ fun TouchGestureLayer(
                                 } else if (downInfo != null) {
                                     val height = size.height
                                     val touchYStart = downInfo.second.y
-                                    if (touchYStart > height * 0.82f) {
-                                        // Started in button partition, release button
+                                    if (touchYStart > height * (1f - BUTTON_STRIP_FRACTION)) {
+                                        // Started in the button strip: release the button.
                                         activeMouseButton = 0
-                                        btManager.sendMouseReport(0, 0, 0, 0)
-                                        triggerVibration(15)
+                                        sendMouseReport(0, 0, 0, 0)
                                     } else {
                                         val duration = change.uptimeMillis - downInfo.first
                                         val dx = change.position.x - downInfo.second.x
                                         val dy = change.position.y - downInfo.second.y
                                         val distanceSq = dx * dx + dy * dy
-                                        
+
                                         if (TouchpadGesturePolicy.isTap(
                                             durationMillis = duration,
                                             distanceSquaredPx = distanceSq,
                                             tapSlopPx = tapSlopPx,
                                         )) {
                                             if (downCount == 0) {
-                                                triggerVibration(20)
-                                                
+                                                currentOnClick()
+
                                                 val clickButton = if (maxPointersInTap >= 3) 4 else if (maxPointersInTap == 2) 2 else 1
-                                                
+
                                                 if (clickButton == 1) {
                                                     // Match main: defer the click so tap-then-drag holds a
                                                     // single press instead of starting with a double-click.
                                                     tapDrag.queueClick(change.uptimeMillis, change.position.x, change.position.y)
                                                 } else {
                                                     // Multi-finger click (Right/Middle click): send immediately
-                                                    btManager.sendMouseReport(clickButton.toByte(), 0, 0, 0)
-                                                    btManager.sendMouseReport(0, 0, 0, 0)
+                                                    sendMouseReport(clickButton.toByte(), 0, 0, 0)
+                                                    sendMouseReport(0, 0, 0, 0)
                                                 }
                                             }
                                         }
@@ -1027,9 +851,9 @@ fun TouchGestureLayer(
                 }
                 } finally {
                     // A cancelled pointer handler may remain composed (for example after
-                    // changing sensitivity). Never leave a delayed click or held button behind.
+                    // changing button mode). Never leave a delayed click or held button behind.
                     tapDrag.cancel()
-                    btManager.sendMouseReport(0, 0, 0, 0)
+                    sendMouseReport(0, 0, 0, 0)
                     activeMouseButton = 0
                     pointerDownInfo.clear()
                     lastActivePointerId = null
@@ -1038,129 +862,76 @@ fun TouchGestureLayer(
                     accumulatedY = 0f
                     scroller.stop()
                     isTwoFingerActive = false
-                    isTouchActive = false
-                    touchCount = 0
                     activeTouchPoints = emptyList()
                 }
-            }
+            },
     ) {
-        // Draw the bottom boundaries as subtle hints for clicking
-        Box(
-            modifier = Modifier.fillMaxSize()
-        ) {
-            if (buttonMode != TrackpadButtonMode.CLICKPAD) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .fillMaxHeight(0.18f)
-                        .align(Alignment.BottomCenter)
-                ) {
-                    when (buttonMode) {
-                        TrackpadButtonMode.TWO_BUTTONS -> {
-                            Row(modifier = Modifier.fillMaxSize()) {
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight(),
-                                    contentAlignment = Alignment.Center
-                                ) {}
-                                Box(
-                                    modifier = Modifier
-                                        .width(1.dp)
-                                        .fillMaxHeight()
-                                        .background(Color.White.copy(alpha = 0.15f))
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .fillMaxHeight(),
-                                    contentAlignment = Alignment.Center
-                                ) {}
-                            }
-                        }
-                        TrackpadButtonMode.THREE_BUTTONS -> {
-                            Row(modifier = Modifier.fillMaxSize()) {
-                                Box(
-                                    modifier = Modifier
-                                        .weight(0.35f)
-                                        .fillMaxHeight(),
-                                    contentAlignment = Alignment.Center
-                                ) {}
-                                Box(
-                                    modifier = Modifier
-                                        .width(1.dp)
-                                        .fillMaxHeight()
-                                        .background(Color.White.copy(alpha = 0.15f))
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .weight(0.3f)
-                                        .fillMaxHeight(),
-                                    contentAlignment = Alignment.Center
-                                ) {}
-                                Box(
-                                    modifier = Modifier
-                                        .width(1.dp)
-                                        .fillMaxHeight()
-                                        .background(Color.White.copy(alpha = 0.15f))
-                                )
-                                Box(
-                                    modifier = Modifier
-                                        .weight(0.35f)
-                                        .fillMaxHeight(),
-                                    contentAlignment = Alignment.Center
-                                ) {}
-                            }
-                        }
-                        else -> {}
-                    }
-                }
-            }
+        if (buttonMode != TrackpadButtonMode.CLICKPAD) {
+            ButtonStrip(
+                buttons = if (buttonMode == TrackpadButtonMode.TWO_BUTTONS) {
+                    listOf("Left" to LEFT_BUTTON, "Right" to RIGHT_BUTTON)
+                } else {
+                    listOf("Left" to LEFT_BUTTON, "Middle" to MIDDLE_BUTTON, "Right" to RIGHT_BUTTON)
+                },
+                weights = if (buttonMode == TrackpadButtonMode.TWO_BUTTONS) listOf(0.5f, 0.5f) else listOf(0.35f, 0.3f, 0.35f),
+                held = activeMouseButton,
+                modifier = Modifier.align(Alignment.BottomCenter),
+            )
         }
 
-        // Draw touchpad thumbs for all active finger coordinates (Themed slate/gradient style)
-        val thumbSize = 28.dp
-        if (thumbActiveAlpha > 0.01f && !showNumpadLed) {
+        // A marker under each finger, shown at once and gone at once: it tracks, it doesn't animate.
+        if (!showNumpadLed) {
+            val colors = MaterialTheme.colorScheme
+            val markerSize = if (activeTouchPoints.size >= 2) 24.dp else 28.dp
+            val half = with(density) { (markerSize / 2).toPx() }
             activeTouchPoints.forEach { point ->
                 Box(
                     modifier = Modifier
-                        .offset {
-                            IntOffset(
-                                x = (point.x - with(density) { (thumbSize / 2).toPx() }).roundToInt(),
-                                y = (point.y - with(density) { (thumbSize / 2).toPx() }).roundToInt()
-                            )
-                        }
-                        .size(thumbSize)
-                        .graphicsLayer {
-                            scaleX = thumbScale
-                            scaleY = thumbScale
-                            alpha = thumbActiveAlpha
-                        }
-                        .shadow(
-                            elevation = 4.dp,
-                            shape = CircleShape,
-                            clip = false,
-                            ambientColor = Color.Black,
-                            spotColor = Color.Black.copy(alpha = 0.5f)
-                        )
-                        .background(
-                            brush = Brush.verticalGradient(
-                                colors = listOf(Color(0xFF38383B), Color(0xFF232325))
-                            ),
-                            shape = CircleShape
-                        )
-                        .border(1.dp, Color.White.copy(alpha = 0.12f), CircleShape),
-                    contentAlignment = Alignment.Center
+                        .offset { IntOffset((point.x - half).roundToInt(), (point.y - half).roundToInt()) }
+                        .size(markerSize)
+                        .shadow(elevation = 2.dp, shape = CircleShape, clip = false)
+                        .background(colors.surfaceContainerHighest, CircleShape)
+                        .border(1.dp, colors.outline, CircleShape),
+                    contentAlignment = Alignment.Center,
                 ) {
-                    // Subtle inner core
-                    Box(
-                        modifier = Modifier
-                            .size(6.dp)
-                            .clip(CircleShape)
-                            .background(Color.White.copy(alpha = 0.25f))
+                    Box(Modifier.size(6.dp).background(colors.onSurfaceVariant, CircleShape))
+                }
+            }
+        }
+    }
+}
+
+/** The 2- or 3-button strip along the pad's bottom edge; the held button shows pressed. */
+@Composable
+private fun ButtonStrip(
+    buttons: List<Pair<String, Byte>>,
+    weights: List<Float>,
+    held: Byte,
+    modifier: Modifier,
+) {
+    val colors = MaterialTheme.colorScheme
+    Column(modifier.fillMaxWidth().fillMaxHeight(BUTTON_STRIP_FRACTION)) {
+        Box(Modifier.fillMaxWidth().height(1.dp).background(colors.outlineVariant))
+        Row(Modifier.fillMaxSize()) {
+            buttons.forEachIndexed { index, (label, mask) ->
+                if (index > 0) Box(Modifier.width(1.dp).fillMaxHeight().background(colors.outlineVariant))
+                val pressed = held == mask
+                Box(
+                    modifier = Modifier
+                        .weight(weights[index])
+                        .fillMaxHeight()
+                        .background(if (pressed) colors.secondaryContainer else colors.surfaceContainerHigh)
+                        .testTag("touchpad_button_${label.lowercase()}"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Text(
+                        label,
+                        style = MaterialTheme.typography.labelLarge,
+                        color = if (pressed) colors.onSecondaryContainer else colors.onSurfaceVariant,
                     )
                 }
             }
         }
     }
 }
+
