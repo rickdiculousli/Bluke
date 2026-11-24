@@ -7,6 +7,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ExperimentalLayoutApi
 import androidx.compose.foundation.layout.FlowRow
@@ -20,7 +21,10 @@ import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.LibraryMusic
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
@@ -42,6 +46,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
 import androidx.lifecycle.Lifecycle
@@ -205,11 +210,16 @@ private fun ThemeChoice(themes: List<KeyboardThemeDefinition>, selectedId: Strin
         Text("Keycaps", style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             themes.forEach { theme ->
+                val selected = theme.id == selectedId
+                // The check leads when selected, as on every other chip; the swatch always trails.
                 FilterChip(
-                    selected = theme.id == selectedId,
+                    selected = selected,
                     onClick = { onSelect(theme.id) },
                     label = { Text(theme.name) },
-                    leadingIcon = { ThemeSwatch(theme) },
+                    leadingIcon = if (selected) {
+                        { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(FilterChipDefaults.IconSize)) }
+                    } else null,
+                    trailingIcon = { ThemeSwatch(theme) },
                 )
             }
         }
@@ -531,13 +541,25 @@ internal fun KeyboardSurface(
                 )
             }
 
-            Box(
+            BoxWithConstraints(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
-                    .padding(horizontal = 6.dp, vertical = 4.dp),
+                    .padding(horizontal = 6.dp, vertical = 4.dp)
+                    // The Tune sheet is modal: while it is open, TalkBack finds only the sheet and the toolbar.
+                    .then(if (tuneOpen) Modifier.clearAndSetSemantics {} else Modifier),
                 contentAlignment = Alignment.Center,
             ) {
+                // A board narrower than it is tall (a split-screen window) would shrink every key under a
+                // fingertip, so it asks for a landscape window instead; the toolbar above still works.
+                if (maxWidth < maxHeight) {
+                    TurnSidewaysState(
+                        title = "Turn your phone sideways",
+                        body = "The keyboard needs a landscape window. In split screen, make Bluke's window wider than it is tall.",
+                        modifier = Modifier.testTag("keyboard_turn_sideways"),
+                    )
+                    return@BoxWithConstraints
+                }
                 KeyboardView(
                     geometry = state.selectedGeometry,
                     theme = state.selectedKeyboardTheme,

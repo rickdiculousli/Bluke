@@ -1,5 +1,7 @@
 package dev.arnv.bluke.ui
 
+import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.assertCountEquals
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.runtime.Composable
@@ -202,6 +204,25 @@ class KeyboardSurfaceTest {
         assertEquals(KeyboardGeometry.HHKB_60, KeyboardTuneState.read(prefs).geometry)
         compose.onNodeWithTag("key_F1").assertDoesNotExist()
     }
+
+    @Test
+    fun tuneSheetHidesTheKeysFromTalkBack() {
+        showSurface()
+        compose.onAllNodes(androidx.compose.ui.test.hasTestTag("key_q")).assertCountEquals(1)
+        compose.onNodeWithTag("surface_tune").performClick()
+        compose.waitForIdle()
+        compose.onAllNodes(androidx.compose.ui.test.hasTestTag("key_q")).assertCountEquals(0)
+        compose.onNodeWithTag("surface_tune_sheet").assertExists()
+    }
+
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-420dpi", sdk = [36])
+    fun aPortraitWindowAsksToTurnThePhone() {
+        showSurface()
+        compose.onNodeWithTag("keyboard_turn_sideways").assertIsDisplayed()
+        compose.onAllNodes(androidx.compose.ui.test.hasTestTag("key_q")).assertCountEquals(0)
+        compose.onNodeWithTag("surface_tune").assertIsDisplayed()
+    }
 }
 
 /** Tune state round trip: what Settings writes is what the surface reads. */
@@ -235,3 +256,4 @@ class KeyboardTuneStateTest {
         assertEquals(KeyboardTuneState(), KeyboardTuneState.read(prefs))
     }
 }
+
