@@ -426,28 +426,15 @@ private fun statusSlotWidth(width: Float, height: Float): Float {
     return (width / metrics.scale - 2 * bumperInnerEdge) * metrics.scale - 2 * TARGET_GAP_DP
 }
 
-/**
- * The user's edits to one console's layout. They persist in [LayoutRepository]; older builds kept them
- * in app preferences under the same names, which seed a part until the repository answers.
- */
+/** The user's edits to one console's layout, persisted in [LayoutRepository]. */
 @Stable
 private class GamepadLayoutEdits(
     private val consoleId: String,
-    private val prefs: SharedPreferences,
     private val repository: LayoutRepository,
     private val scope: CoroutineScope,
 ) {
     private val transforms = mutableStateMapOf<GamepadPart, PartTransform>().apply {
-        GamepadPart.entries.forEach { part ->
-            put(
-                part,
-                PartTransform(
-                    prefs.getFloat(name(part, "x"), 0f),
-                    prefs.getFloat(name(part, "y"), 0f),
-                    prefs.getFloat(name(part, "scale"), 1f),
-                ),
-            )
-        }
+        GamepadPart.entries.forEach { put(it, PartTransform()) }
     }
     private val pending = mutableMapOf<String, Float>()
 
@@ -457,12 +444,12 @@ private class GamepadLayoutEdits(
 
     suspend fun load() {
         val stored = repository.load(consoleId)
+        val default = PartTransform()
         GamepadPart.entries.forEach { part ->
-            val current = transforms.getValue(part)
             transforms[part] = PartTransform(
-                stored[name(part, "x")] ?: current.x,
-                stored[name(part, "y")] ?: current.y,
-                stored[name(part, "scale")] ?: current.scale,
+                stored[name(part, "x")] ?: default.x,
+                stored[name(part, "y")] ?: default.y,
+                stored[name(part, "scale")] ?: default.scale,
             )
         }
     }
@@ -492,9 +479,6 @@ private class GamepadLayoutEdits(
     fun reset() {
         GamepadPart.entries.forEach { transforms[it] = PartTransform() }
         pending.clear()
-        prefs.edit {
-            GamepadPart.entries.forEach { part -> listOf("x", "y", "scale").forEach { remove(name(part, it)) } }
-        }
         scope.launch { repository.clear(consoleId) }
     }
 
@@ -572,9 +556,7 @@ fun GamepadView(
     var tuneOpen by rememberSaveable { mutableStateOf(initialTuneOpen) }
 
     val layoutRepository = remember(context) { LayoutRepository(context) }
-    val edits = remember(config.id, sharedPrefs, layoutRepository) {
-        GamepadLayoutEdits(config.id, sharedPrefs, layoutRepository, scope)
-    }
+    val edits = remember(config.id, layoutRepository) { GamepadLayoutEdits(config.id, layoutRepository, scope) }
     LaunchedEffect(edits) { edits.load() }
     val snackbar = remember { SnackbarHostState() }
     // A reset wipes every saved move and resize, so it offers to put them back.

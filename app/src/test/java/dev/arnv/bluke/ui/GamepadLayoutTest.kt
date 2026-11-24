@@ -5,6 +5,10 @@ import androidx.compose.ui.test.hasTestTag
 import androidx.compose.ui.test.filterToOne
 
 import android.content.Context
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.setValue
 import android.content.SharedPreferences
 import androidx.activity.ComponentActivity
 import androidx.compose.ui.geometry.Offset
@@ -346,6 +350,41 @@ class GamepadLayoutTest {
     fun resetLayoutIsOffUntilSomethingMoves() {
         setSurface(tuneOpen = true)
         compose.onNodeWithTag("gamepad_tune_reset").assertIsNotEnabled()
+    }
+
+    @Test
+    fun offsetsSavedForTheOldLayoutAreNotDrawn() {
+        // Builds before the rebuilt layout saved offsets in app preferences; the rebuild resets them.
+        val appPrefs = context.getSharedPreferences("app_prefs", Context.MODE_PRIVATE)
+        var generation by mutableIntStateOf(0)
+        compose.setContent {
+            SurfaceTheme {
+                key(generation) {
+                    GamepadView(
+                        btManager = manager,
+                        chrome = previewChrome(InputMode.GAMEPAD),
+                        sharedPrefs = prefs,
+                        caseBrush = SolidColor(Color.Unspecified),
+                    )
+                }
+            }
+        }
+        compose.waitForIdle()
+        fun dpad() = boundsByTag { it == "gamepad_part_dpad" }.getValue("gamepad_part_dpad")
+        val defaultSpot = dpad()
+        try {
+            listOf(prefs, appPrefs).forEach {
+                it.edit().putFloat("xbox_series_dpad_x", 32f).putFloat("xbox_series_dpad_scale", 1.5f).commit()
+            }
+            generation++
+            compose.waitForIdle()
+            assertEquals("the D-pad draws at its default spot", defaultSpot, dpad())
+            compose.onNodeWithTag("surface_tune").performClick()
+            compose.waitForIdle()
+            compose.onNodeWithTag("gamepad_tune_reset").performScrollTo().assertIsNotEnabled()
+        } finally {
+            appPrefs.edit().remove("xbox_series_dpad_x").remove("xbox_series_dpad_scale").commit()
+        }
     }
 
     @Test
