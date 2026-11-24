@@ -466,9 +466,15 @@ class MirrorFingerRouter {
 
   /** [frame] with each point's [MirrorTouchPoint.onControl] set; [hitsControl] tests a landing point. */
   fun route(frame: MirrorTouchFrame, hitsControl: (x: Float, y: Float) -> Boolean): MirrorTouchFrame {
+    // An event carries every pointer on the window, so an id missing from it has lifted, even one
+    // whose lift this layer never saw (a thumb that let go after the picture's last finger did).
+    onControl.keys.retainAll(frame.points.map { it.id }.toSet())
     val points =
         frame.points.map { p ->
-          val owned = onControl.getOrPut(p.id) { if (p.wasDown) true else hitsControl(p.x, p.y) }
+          // Android reuses pointer ids, so every landing is decided afresh, never from an old owner.
+          val owned =
+              if (!p.wasDown) hitsControl(p.x, p.y).also { onControl[p.id] = it }
+              else onControl.getOrPut(p.id) { true }
           p.copy(onControl = owned)
         }
     if (frame.cancelled) onControl.clear() else frame.points.filter { !it.down }.forEach { onControl -= it.id }
