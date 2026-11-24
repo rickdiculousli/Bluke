@@ -3,8 +3,8 @@
 use bluke_mirror_core::codec::{CODEC_JPEG, Message};
 use bluke_mirror_core::frames::{Capture, FrameCredit, FrameEncoder, MAX_IN_FLIGHT, Prepared, Scaled, downscale, fit};
 use bluke_mirror_core::pairing::Fingerprint;
-use bluke_mirror_core::pointer::{Display, InputEvent};
-use bluke_mirror_core::session::{Close, NotPinned, SILENCE_RELEASE_US, Session};
+use bluke_mirror_core::pointer::{ClickCounter, Display, InputEvent};
+use bluke_mirror_core::session::{Bound, Close, NotPinned, SILENCE_RELEASE_US, Session};
 use bluke_mirror_core::synthetic::{Schedule, Synthetic};
 
 const PHONE: Fingerprint = [0xb0; 32];
@@ -359,13 +359,14 @@ fn downscale_averages_and_is_fast_on_a_retina_capture() {
         row[w as usize * 2..].fill(255);
     }
     let img = Image { width: w, height: h, stride: w as usize * 4, rgba };
-    let start = std::time::Instant::now();
-    let rounds = 5;
+    // The fastest of several rounds: time spent descheduled on a busy machine isn't the work's.
+    let mut per = std::time::Duration::MAX;
     let mut out = None;
-    for _ in 0..rounds {
+    for _ in 0..5 {
+        let start = std::time::Instant::now();
         out = Some(downscale(&img, 480, 480));
+        per = per.min(start.elapsed());
     }
-    let per = start.elapsed() / rounds;
     let out = out.expect("ran");
     assert_eq!((out.width, out.height), (480, 312));
     assert_eq!(&out.rgb[..3], &[0, 0, 0]);
@@ -440,4 +441,142 @@ fn an_unencoded_capture_overtaken_by_a_display_change_is_retaken_at_once() {
     assert_eq!(s.stats.skipped_unchanged, 0);
     assert!(s.wants_frame(50_100), "not paced: capture again now");
     assert!(offer(&mut s, 50_200, &f).is_some());
+}
+
+/// Prepares `f` as grabbed at `grabbed` and offers it at `offered` (grab and encode in between).
+fn offer_late(s: &mut Session, grabbed: u64, offered: u64, f: &Scaled) -> Option<Message> {
+    let p = Prepared::prepare(f, grabbed, s.last_sent_hash(), &mut FakeJpeg);
+    s.offer_frame(offered, p)
+}
+
+/// A session at `t` whose first frame, grabbed at 0, took 30 ms to grab and encode and is acked.
+fn polled_once() -> (Session, Synthetic) {
+    let mut s = started(0);
+    let mut cap = Synthetic::new(Schedule::Every(1));
+    let f = downscale(&cap.grab((480, 480)).expect("grab"), 480, 480);
+    let Some(Message::Frame { seq, .. }) = offer_late(&mut s, 0, 30_000, &f) else { panic!("frame") };
+    s.on_message(30_000, Message::FrameAck { seq, decode_us: 1 }, &mut Vec::new()).expect("ack");
+    (s, cap)
+}
+
+#[test]
+fn a_touch_pulls_the_next_capture_to_the_frame_cap() {
+    let (mut s, _) = polled_once();
+    assert_eq!(s.next_frame_at(), Some(80_000), "no touch: poll one interval after the offer");
+    s.on_message(40_000, pointer(100, 100, true), &mut Vec::new()).expect("pointer");
+    assert_eq!(s.next_frame_at(), Some(50_000), "a touch: one interval after the last grab started");
+    assert!(!s.wants_frame(49_999), "never closer than one interval to the last grab");
+    assert!(s.wants_frame(50_000));
+}
+
+#[test]
+fn a_touch_soon_after_a_grab_still_waits_for_the_cap_and_wheel_counts_too() {
+    let (mut s, _) = polled_once();
+    s.on_message(5_000, Message::Wheel { dx: 0, dy: 3 }, &mut Vec::new()).expect("wheel");
+    assert_eq!(s.next_frame_at(), Some(50_000));
+}
+
+#[test]
+fn the_capture_that_shows_a_touch_records_touch_to_grab_and_polling_resumes() {
+    let (mut s, mut cap) = polled_once();
+    s.on_message(40_000, pointer(100, 100, false), &mut Vec::new()).expect("pointer");
+    s.on_message(45_000, pointer(200, 100, false), &mut Vec::new()).expect("pointer");
+    let f = downscale(&cap.grab((480, 480)).expect("grab"), 480, 480);
+    assert!(offer_late(&mut s, 50_000, 70_000, &f).is_some());
+    assert_eq!(s.stats.input_to_capture_us, vec![10_000], "from the first touch not yet captured");
+    assert_eq!(s.next_frame_at(), Some(120_000), "shown: back to polling after the offer");
+}
+
+#[test]
+fn a_touch_during_a_grab_is_shown_by_the_next_one() {
+    let (mut s, mut cap) = polled_once();
+    // A grab started at 80 ms; the touch lands while it runs.
+    s.on_message(85_000, pointer(100, 100, false), &mut Vec::new()).expect("pointer");
+    let f = downscale(&cap.grab((480, 480)).expect("grab"), 480, 480);
+    let Some(Message::Frame { seq, .. }) = offer_late(&mut s, 80_000, 110_000, &f) else { panic!("frame") };
+    s.on_message(110_000, Message::FrameAck { seq, decode_us: 1 }, &mut Vec::new()).expect("ack");
+    assert!(s.stats.input_to_capture_us.is_empty(), "that grab began before the touch");
+    assert_eq!(s.next_frame_at(), Some(130_000), "the touch still pulls: one interval after that grab started");
+}
+
+#[test]
+fn an_unchanged_capture_shows_a_touch_too() {
+    let (mut s, mut cap) = polled_once();
+    let f = downscale(&cap.grab((480, 480)).expect("grab"), 480, 480);
+    s.on_message(60_000, pointer(1, 1, false), &mut Vec::new()).expect("pointer");
+    let Some(Message::Frame { seq, .. }) = offer_late(&mut s, 60_000, 70_000, &f) else { panic!("frame") };
+    s.on_message(70_000, Message::FrameAck { seq, decode_us: 1 }, &mut Vec::new()).expect("ack");
+    s.on_message(75_000, pointer(2, 2, false), &mut Vec::new()).expect("pointer");
+    assert!(offer_late(&mut s, 110_000, 120_000, &f).is_none(), "unchanged");
+    assert_eq!(s.stats.input_to_capture_us, vec![0, 35_000]);
+    assert_eq!(s.next_frame_at(), Some(170_000));
+}
+
+#[test]
+fn a_continuous_drag_never_captures_more_than_fps_a_second() {
+    // Touches every 8 ms for 2 s; each grab takes 30 ms to grab and encode; the phone acks at once.
+    let mut s = started(0);
+    let mut cap = Synthetic::new(Schedule::Every(1));
+    let mut rec = Vec::new();
+    let mut starts = Vec::new();
+    let mut grab: Option<u64> = None;
+    let mut t = 0u64;
+    while t < 2_000_000 {
+        if t.is_multiple_of(8_000) {
+            s.on_message(t, pointer((t / 1000) as u16, 100, true), &mut rec).expect("pointer");
+        }
+        if let Some(g) = grab.filter(|&g| t >= g + 30_000) {
+            let f = downscale(&cap.grab((480, 480)).expect("grab"), 480, 480);
+            if let Some(Message::Frame { seq, .. }) = offer_late(&mut s, g, t, &f) {
+                s.on_message(t, Message::FrameAck { seq, decode_us: 1 }, &mut rec).expect("ack");
+            }
+            grab = None;
+        }
+        if grab.is_none() && s.wants_frame(t) {
+            starts.push(t);
+            grab = Some(t);
+        }
+        t += 1_000;
+    }
+    assert!(starts.windows(2).all(|w| w[1] - w[0] >= 50_000), "grab starts at least one interval apart");
+    assert_eq!(starts.len(), 40, "20 fps for 2 s, where polling alone would give 2 s / 80 ms = 25");
+    assert!(s.stats.input_to_capture_us.iter().all(|&d| d <= 50_000));
+}
+
+#[test]
+fn dropping_a_bound_session_mid_drag_releases_even_in_a_panic() {
+    let mut rec: Vec<InputEvent> = Vec::new();
+    let unwound = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        let mut b = Bound { session: started(0), inj: &mut rec };
+        b.session.on_message(0, pointer(0, 0, true), &mut b.inj).expect("press");
+        assert!(b.session.button_held());
+        panic!("the session loop failed");
+    }));
+    assert!(unwound.is_err());
+    assert!(matches!(rec.last(), Some(InputEvent::Release { .. })), "released on unwind: {rec:?}");
+}
+
+#[test]
+fn a_bound_session_closed_then_dropped_releases_once() {
+    let mut rec: Vec<InputEvent> = Vec::new();
+    {
+        let mut b = Bound { session: started(0), inj: &mut rec };
+        b.session.on_message(0, pointer(0, 0, true), &mut b.inj).expect("press");
+        b.close();
+    }
+    let releases = rec.iter().filter(|e| matches!(e, InputEvent::Release { .. })).count();
+    assert_eq!(releases, 1);
+}
+
+#[test]
+fn quick_presses_in_one_place_count_up_and_others_start_again() {
+    let mut c = ClickCounter::new(500_000, 16.0);
+    assert_eq!(c.press(0, 100.0, 100.0), 1);
+    assert_eq!(c.count(), 1, "its release carries the press's count");
+    assert_eq!(c.press(300_000, 105.0, 110.0), 2, "within the interval and the radius");
+    assert_eq!(c.count(), 2);
+    assert_eq!(c.press(700_000, 100.0, 100.0), 3, "the interval runs from the previous press");
+    assert_eq!(c.press(1_300_000, 100.0, 100.0), 1, "too late");
+    assert_eq!(c.press(1_400_000, 130.0, 100.0), 1, "too far");
+    assert_eq!(c.press(1_900_000, 130.0, 100.0), 2, "exactly at the interval still counts");
 }

@@ -37,6 +37,7 @@ fn catch_interrupt() {
     }
     // SAFETY: the handler only stores to an atomic, which is async-signal-safe.
     unsafe {
+        signal(1, on_signal); // SIGHUP: the terminal window closed
         signal(2, on_signal); // SIGINT
         signal(15, on_signal); // SIGTERM
     }

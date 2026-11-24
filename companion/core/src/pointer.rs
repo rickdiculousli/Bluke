@@ -137,3 +137,33 @@ impl Buttons {
         self.held = false;
     }
 }
+
+/// Counts presses into single, double, triple… clicks, as the platform's click-state field wants:
+/// a press within `interval_us` of the previous press and within `radius` (global units) of it
+/// continues the count; any other press starts again at 1. The release carries its press's count.
+#[derive(Clone, Debug)]
+pub struct ClickCounter {
+    interval_us: u64,
+    radius: f64,
+    last: Option<(u64, f64, f64)>,
+    count: i64,
+}
+
+impl ClickCounter {
+    pub fn new(interval_us: u64, radius: f64) -> ClickCounter {
+        ClickCounter { interval_us, radius, last: None, count: 1 }
+    }
+
+    /// A press at `(x, y)` at `t_us`: returns its click count.
+    pub fn press(&mut self, t_us: u64, x: f64, y: f64) -> i64 {
+        let near = |&(t, lx, ly): &(u64, f64, f64)| t_us.saturating_sub(t) <= self.interval_us && (x - lx).hypot(y - ly) <= self.radius;
+        self.count = if self.last.as_ref().is_some_and(near) { self.count + 1 } else { 1 };
+        self.last = Some((t_us, x, y));
+        self.count
+    }
+
+    /// The count of the latest press, for its release.
+    pub fn count(&self) -> i64 {
+        self.count
+    }
+}

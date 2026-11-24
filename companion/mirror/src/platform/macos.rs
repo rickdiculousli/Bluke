@@ -4,11 +4,12 @@
 
 use super::{ACCESSIBILITY, Grant, SCREEN_RECORDING, permission_advice};
 use bluke_mirror_core::frames::{Capture, Image, fit};
-use bluke_mirror_core::pointer::{Display, Injector, InputEvent};
+use bluke_mirror_core::pointer::{ClickCounter, Display, Injector, InputEvent};
 use core_graphics::event::{CGEvent, CGEventTapLocation, CGEventType, CGMouseButton, EventField, ScrollEventUnit};
 use core_graphics::event_source::{CGEventSource, CGEventSourceStateID};
 use core_graphics::geometry::CGPoint;
 use std::sync::Once;
+use std::time::Instant;
 
 #[link(name = "CoreGraphics", kind = "framework")]
 unsafe extern "C" {
@@ -249,19 +250,45 @@ mod sck {
     }
 }
 
+/// How far apart, in points, two presses may land and still count as one double-click: about a
+/// fingertip's wobble between two taps once the phone's picture is scaled up to the display.
+const DOUBLE_CLICK_RADIUS: f64 = 16.0;
+
+#[link(name = "AppKit", kind = "framework")]
+unsafe extern "C" {}
+
+/// The user's double-click interval (System Settings), µs; 500 ms if AppKit can't say.
+fn double_click_interval_us() -> u64 {
+    use objc2::msg_send;
+    use objc2::runtime::AnyClass;
+    let secs = AnyClass::get(c"NSEvent").map(|c| {
+        // SAFETY: `+[NSEvent doubleClickInterval]` is a class method returning an NSTimeInterval (f64).
+        let s: f64 = unsafe { msg_send![c, doubleClickInterval] };
+        s
+    });
+    secs.filter(|s| s.is_finite() && *s > 0.0).map_or(500_000, |s| (s * 1e6) as u64)
+}
+
 pub struct MacInjector {
     source: CGEventSource,
+    clicks: ClickCounter,
+    epoch: Instant,
 }
 
 impl MacInjector {
     pub fn new() -> Result<MacInjector, String> {
-        Ok(MacInjector { source: source()? })
+        Ok(MacInjector {
+            source: source()?,
+            clicks: ClickCounter::new(double_click_interval_us(), DOUBLE_CLICK_RADIUS),
+            epoch: Instant::now(),
+        })
     }
 
-    fn mouse(&self, kind: CGEventType, x: f64, y: f64, click: bool) {
+    /// Posts one left-button event; `clicks` is its click state (presses and releases only).
+    fn mouse(&self, kind: CGEventType, x: f64, y: f64, clicks: Option<i64>) {
         let Ok(e) = CGEvent::new_mouse_event(self.source.clone(), kind, CGPoint::new(x, y), CGMouseButton::Left) else { return };
-        if click {
-            e.set_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE, 1);
+        if let Some(n) = clicks {
+            e.set_integer_value_field(EventField::MOUSE_EVENT_CLICK_STATE, n);
         }
         e.post(CGEventTapLocation::HID);
     }
@@ -270,11 +297,15 @@ impl MacInjector {
 impl Injector for MacInjector {
     fn inject(&mut self, event: InputEvent) {
         match event {
-            InputEvent::Move { x, y } => self.mouse(CGEventType::MouseMoved, x, y, false),
-            InputEvent::Down { x, y } => self.mouse(CGEventType::LeftMouseDown, x, y, true),
+            InputEvent::Move { x, y } => self.mouse(CGEventType::MouseMoved, x, y, None),
+            InputEvent::Down { x, y } => {
+                // Two quick taps in one place are a double-click, as the system counts them.
+                let n = self.clicks.press(self.epoch.elapsed().as_micros() as u64, x, y);
+                self.mouse(CGEventType::LeftMouseDown, x, y, Some(n));
+            }
             // A move while the button is held must be a dragged event, or apps miss the drag.
-            InputEvent::Drag { x, y } => self.mouse(CGEventType::LeftMouseDragged, x, y, false),
-            InputEvent::Up { x, y } | InputEvent::Release { x, y } => self.mouse(CGEventType::LeftMouseUp, x, y, true),
+            InputEvent::Drag { x, y } => self.mouse(CGEventType::LeftMouseDragged, x, y, None),
+            InputEvent::Up { x, y } | InputEvent::Release { x, y } => self.mouse(CGEventType::LeftMouseUp, x, y, Some(self.clicks.count())),
             InputEvent::Wheel { dx, dy, .. } => {
                 if let Ok(e) = CGEvent::new_scroll_event(self.source.clone(), ScrollEventUnit::PIXEL, 2, i32::from(dy), i32::from(dx), 0) {
                     e.post(CGEventTapLocation::HID);

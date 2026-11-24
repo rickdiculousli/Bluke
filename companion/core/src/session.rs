@@ -70,6 +70,9 @@ pub struct Stats {
     pub ack_latency_us: Vec<u64>,
     /// Capture-start-to-sent time of every frame sent (grab, downscale, encode, wait), µs.
     pub capture_to_sent_us: Vec<u64>,
+    /// For each touch that a capture then showed: time from the first Pointer or Wheel not yet
+    /// captured to the start of the capture that showed it, µs.
+    pub input_to_capture_us: Vec<u64>,
 }
 
 pub struct Session {
@@ -81,7 +84,12 @@ pub struct Session {
     next_seq: u32,
     /// When the phone's main thread last spoke: the clock of the held-button silence rule.
     last_live_us: u64,
+    /// When the next poll is due: one frame interval after the last capture was offered.
     next_capture_us: u64,
+    /// When the last capture counted against the frame cap started.
+    last_capture_start_us: Option<u64>,
+    /// When the first Pointer or Wheel that no capture has shown yet was injected.
+    input_since_us: Option<u64>,
     pub stats: Stats,
 }
 
@@ -107,6 +115,8 @@ impl Session {
             next_seq: 0,
             last_live_us: now_us,
             next_capture_us: 0,
+            last_capture_start_us: None,
+            input_since_us: None,
             stats: Stats::default(),
         };
         Ok((s, Message::Hello { version: VERSION, name: clip_str(name) }))
@@ -168,10 +178,12 @@ impl Session {
             }
             Message::Pointer { x, y, buttons } => {
                 self.buttons.pointer(&self.display, x, y, buttons, inj);
+                self.input_since_us.get_or_insert(now_us);
                 Ok(Vec::new())
             }
             Message::Wheel { dx, dy } => {
                 self.buttons.wheel(&self.display, dx, dy, inj);
+                self.input_since_us.get_or_insert(now_us);
                 Ok(Vec::new())
             }
             Message::Release => {
@@ -186,8 +198,18 @@ impl Session {
 
     /// When a capture could next be sent, if one could at all now: welcomed and with credit.
     /// Without credit it waits for a `FrameAck`, not for time.
+    ///
+    /// Polls come one frame interval after the last capture was offered. A Pointer or Wheel that
+    /// no capture has shown yet pulls the next capture to the earliest the frame cap allows: one
+    /// interval after the last capture *started*, so capture starts are never closer than one
+    /// interval (at most `fps` a second) and the grab and encode time isn't waited twice.
     pub fn next_frame_at(&self) -> Option<u64> {
-        (self.welcome.is_some() && self.credit.can_send()).then_some(self.next_capture_us)
+        let welcome = self.welcome?;
+        if !self.credit.can_send() {
+            return None;
+        }
+        let pulled = self.input_since_us.map(|_| self.last_capture_start_us.map_or(0, |s| s + welcome.interval_us()));
+        Some(pulled.map_or(self.next_capture_us, |p| p.min(self.next_capture_us)))
     }
 
     /// True when a capture now could be sent: welcomed, at the frame cap, with credit.
@@ -211,12 +233,13 @@ impl Session {
             if changed {
                 return None;
             }
-            self.next_capture_us = now_us + welcome.interval_us();
+            self.captured(now_us, frame.captured_us, welcome, true);
             self.stats.skipped_unchanged += 1;
             return None;
         };
-        self.next_capture_us = now_us + welcome.interval_us();
-        if !self.credit.can_send() {
+        let sendable = self.credit.can_send();
+        self.captured(now_us, frame.captured_us, welcome, sendable);
+        if !sendable {
             self.stats.skipped_no_credit += 1;
             return None;
         }
@@ -227,6 +250,18 @@ impl Session {
         self.stats.frames_sent += 1;
         self.stats.capture_to_sent_us.push(now_us.saturating_sub(frame.captured_us));
         Some(Message::Frame { seq, codec, width: frame.width, height: frame.height, sent_us: now_us, data })
+    }
+
+    /// Books a capture that counts against the frame cap, offered at `now_us`. `shown` is true
+    /// when the phone will see what it captured (sent, or the same as the frame it already has):
+    /// then the touches injected before the grab started are shown.
+    fn captured(&mut self, now_us: u64, started_us: u64, welcome: Welcome, shown: bool) {
+        self.next_capture_us = now_us + welcome.interval_us();
+        self.last_capture_start_us = Some(started_us);
+        if shown && let Some(since) = self.input_since_us.filter(|&t| t <= started_us) {
+            self.stats.input_to_capture_us.push(started_us - since);
+            self.input_since_us = None;
+        }
     }
 
     /// The mirrored display changed (size, place or identity). Returns the `Display` to send,
@@ -251,5 +286,25 @@ impl Session {
     /// The connection closed, for any reason: release every held button.
     pub fn close(&mut self, inj: &mut dyn Injector) {
         self.buttons.release(&self.display, inj);
+    }
+}
+
+/// A session bound to the injector its touches go to. Dropping it releases a held button, so a
+/// panic unwinding out of the session loop never leaves the computer's button down.
+pub struct Bound<I: Injector> {
+    pub session: Session,
+    pub inj: I,
+}
+
+impl<I: Injector> Bound<I> {
+    /// Releases a held button now (see [`Session::close`]); dropping does it again, harmlessly.
+    pub fn close(&mut self) {
+        self.session.close(&mut self.inj);
+    }
+}
+
+impl<I: Injector> Drop for Bound<I> {
+    fn drop(&mut self) {
+        self.close();
     }
 }

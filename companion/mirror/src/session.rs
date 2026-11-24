@@ -6,7 +6,7 @@ use crate::link::{Link, Received};
 use crate::now_us;
 use bluke_mirror_core::frames::{Capture, FrameEncoder, Prepared, downscale};
 use bluke_mirror_core::pointer::{Display, Injector};
-use bluke_mirror_core::session::{Close, Session, Stats};
+use bluke_mirror_core::session::{Bound, Close, Session, Stats};
 use bluke_mirror_core::{Fingerprint, Message};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc;
@@ -176,7 +176,7 @@ fn spawn_capture(
 }
 
 /// Runs one session on a connected link until it ends. Every held button is released on the
-/// way out, whatever the reason.
+/// way out, whatever the reason, a panic included.
 pub fn run(
     mut link: Link,
     pinned: Option<Fingerprint>,
@@ -186,15 +186,16 @@ pub fn run(
     opts: &Options<'_>,
     status: &mut dyn FnMut(&str),
 ) -> Report {
-    let mut inj = Counting { inner: injector, releases: 0 };
     let mut latencies = Vec::new();
-    let (mut session, hello) = match Session::start(&opts.name, capture.display(), pinned, link.peer(), now_us()) {
+    let (session, hello) = match Session::start(&opts.name, capture.display(), pinned, link.peer(), now_us()) {
         Ok(s) => s,
         Err(_) => {
             link.close();
             return Report { end: End::NotPinned, stats: Stats::default(), inject_latency_us: latencies, releases: 0 };
         }
     };
+    let mut bound = Bound { session, inj: Counting { inner: injector, releases: 0 } };
+    let Bound { session, inj } = &mut bound;
     let (events_tx, events) = mpsc::channel::<Event>();
     let mut last_rx = now_us();
     let mut status_at = (now_us(), 0u64);
@@ -233,7 +234,7 @@ pub fn run(
                     }
                     for m in msgs {
                         let input = matches!(m, Message::Pointer { .. } | Message::Wheel { .. } | Message::Release);
-                        match session.on_message(at_us, m, &mut inj) {
+                        match session.on_message(at_us, m, inj) {
                             Ok(out) => {
                                 for o in out {
                                     if let Err(e) = link.send(&o) {
@@ -272,7 +273,7 @@ pub fn run(
             }
             let now = now_us();
             let before = inj.releases;
-            session.tick(now, &mut inj);
+            session.tick(now, inj);
             if inj.releases > before {
                 status("released the held button: the phone went quiet");
             }
@@ -288,11 +289,11 @@ pub fn run(
             }
         }
     };
-    let before = inj.releases;
-    session.close(&mut inj);
-    if inj.releases > before {
+    let before = bound.inj.releases;
+    bound.close();
+    if bound.inj.releases > before {
         status("released the held button: the session ended");
     }
     link.close();
-    Report { end, stats: std::mem::take(&mut session.stats), inject_latency_us: latencies, releases: inj.releases }
+    Report { end, stats: std::mem::take(&mut bound.session.stats), inject_latency_us: latencies, releases: bound.inj.releases }
 }
