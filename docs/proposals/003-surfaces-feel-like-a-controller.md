@@ -4,7 +4,7 @@ title: The input surfaces look and feel like a controller you hold, on a theme t
 kind: ux
 size: L
 judge: opus
-status: proposed
+status: done
 lens: ux
 proposed_by: coordinator on ricks-macbook, from the operator's request
 proposed_on: 2026-11-23
@@ -97,6 +97,24 @@ Dark mode reads cleanly everywhere. Each surface has one obvious primary area an
   - If three rounds in a row bring no gain, or one finding survives two fixes, write down the belief both fixes assumed, test it, and report it with `bmesh ask`.
 
 ## Shown
+- Dark mode reads cleanly, every accent: `./gradlew testDebugUnitTest --tests 'dev.arnv.bluke.ui.theme.ColorSchemeContrastTest'` -> `tests="5" skipped="0" failures="0" errors="0"` (`onColorsReadOnTheirContainers`, `primaryAndOutlineStandOutOnEverySurface` over every static scheme × accent × light/dark × palette style × pure black). No accent was cut. Palette styles that drew the same scheme (Tonal Spot, Vibrant, Expressive, Rainbow, Fruit Salad, Fidelity, Content, Neutral) read and migrate as Default; Monochrome stays.
+- One primary area under a quiet toolbar with Tune, every `SurfaceHost` status rendered: `SurfaceToolbarScreenshotTest` baselines `app/src/test/screenshots/surface-toolbar-host-status-*.png` (914, 640 and 411dp, font scale 1.0 and 1.3); `./gradlew testDebugUnitTest --tests 'dev.arnv.bluke.ui.SurfaceHostTest' --tests 'dev.arnv.bluke.ui.SurfaceToolbarFitTest'` -> `tests="5" … failures="0"`, `tests="8" … failures="0"`.
+- Touchpad speed changes from the touchpad itself and a Tune change applies without reopening: `TouchpadSurfaceTest.aPointerSpeedWrittenFromTuneAppliesWithoutReopening`, `KeyboardSurfaceTest.tuneGeometryChangeAppliesWithoutReopening`, `GamepadSurfaceTest.profileChangeAppliesWithoutReopening`, `MultimediaSurfaceTest.volumeButtonsSwitchAppliesWithoutReopening`; the four classes -> `tests="22"`, `tests="11"`, `tests="8"`, `tests="9"`, each `failures="0"`.
+- Pressed on touch-down, same frame (frame-1 captures with `mainClock.autoAdvance = false`): `KeyboardSurfaceTest.keyLooksPressedInTheFrameTheFingerLands`, `TouchpadSurfaceTest.aNumpadKeyLooksPressedOnTheFrameItIsTouched`, `GamepadSurfaceTest.faceButtonLooksPressedInTheFirstFrame`, `MultimediaSurfaceTest.playPauseLooksPressedInTheFrameTheFingerLands`; baselines `app/src/test/screenshots/*-pressed-frame1.png`.
+- With `haptics_enabled` false no surface vibrates: `KeyboardSurfaceTest.keyPressHapticFollowsTheHapticsSwitch`, `TouchpadSurfaceTest.withHapticsOffATapOnThePadPlaysNothing`, `GamepadSurfaceTest.hapticsOffPlaysNothingOnAPress`, `MultimediaSurfaceTest.hapticsOffPlaysNothingOnAPress` (each paired with an on-test that proves it reaches the code); one helper, `ui/SurfaceHaptics.kt`.
+- Haptics migration: `./gradlew testDebugUnitTest --tests 'dev.arnv.bluke.ui.SurfacePreferencesTest'` -> `tests="5" skipped="0" failures="0" errors="0"`.
+- Reopening a surface brings back how you left it: `TouchpadSurfaceTest.buttonModeAndNumpadSurviveLeavingTheSurface`, `GamepadSurfaceTest.consoleSurvivesReopeningTheSurface` (keys `touchpad_button_mode`, `touchpad_numpad`, `gamepad_console`, outside every `<Surface>TuneContent`).
+- Screenshot baselines hold: `./gradlew verifyRoborazziDebug` -> `BUILD SUCCESSFUL in 57s` (110 baselines; `GreetingScreenshotTest` and the three old surface baselines replaced).
+- Report bytes unchanged: `tools/hid-rig/run.sh` on the foundation -> `18/18 checks passed`; the landing tree's verify runs the rig again.
+- Hill-climb against `docs/proposals/assets/ui-rubric.md`, fresh Opus reviewers with the rubric, `main`'s and the branch's captures and the diff, no earlier text; three reviewers per round from round 2 (median):
+  - Round 1, one reviewer: 4 (main 3). Capped by a P0: keyboard keys had no TalkBack semantics (main too). Also the portrait toolbar lost the host chip, the host name collapsed at 640dp, the touchpad rail icon never showed "on", and multimedia labels clipped at font scale 1.3.
+  - Round 2: 8, 8, 8 -> 8 (main 3, 4, 4). Host name capped at 180dp with room free; Blocked named no fix; keycap word legends shrunk on low-contrast colourways; gamepad shoulders and handles in the Back-swipe zone; silent stick click.
+  - Round 3: 7, 8, 8 -> 8 (main 4, 4, 4). A P1 from round 2's handle placement (handles grew the wrong way off the bottom-right corner); unlabelled unlit LEDs; keyboard in a portrait window; Tune sheet not modal for TalkBack; 4dp toolbar gaps.
+  - Round 4: 8, 9, 8 -> 8 (main 4, 4, 4). Shoulder row 6dp under the toolbar; faint pressed state on D-pad and shoulders; doubled Tune headings; touchpad rail keys without TalkBack actions; stale gamepad-guide copy; Meta vs Win.
+  - Round 5: 9, 9, 9 -> 9 (main 4, 4, 5). Fixed after it: the touchpad's icon-only toggles (now labelled), the console control's one-tap swap (now opens Tune), uneven toolbar-toggle haptics.
+- Easy to miss: the haptics migration lets an explicit off on any old switch win: `SurfacePreferencesTest.anExplicitOffOnAnySurfaceTurnsHapticsOff`.
+- Not shown: gesture feel and haptic strength: emulator stills and Robolectric can't judge them; they wait on the phone check below.
+- Not shown: the mode button's long-press into Settings' input-modes section: no `settingsIntent(section)` exists on `main` yet, so it does nothing, as the spec allows.
 
 ## Risks and the alternative considered
 - **The theme change moves every screenshot.** The home and settings specs build at the same time. Whichever lands later re-records the baselines the earlier one moved, and explains each change in its commit.
@@ -104,5 +122,5 @@ Dark mode reads cleanly everywhere. Each surface has one obvious primary area an
 - **Alternative: polish each surface without a shared toolbar or Tune sheet.** It lost because surface settings would stay two screens away. The UX audit names that distance as the cause.
 
 ## Needs from the operator
-- Add `verifyRoborazziDebug` to the repo's verify, so committed baselines can't drift silently. Publish the new verify line with `bmesh repos propose` from the admin box. This one step covers all three UI specs.
-- [phone] After this lands, use each surface for a minute and say whether the haptics and press feedback feel right. The emulator can't judge that.
+- Add `verifyRoborazziDebug` to the repo's verify, so committed baselines can't drift silently: publish the new verify line with `bmesh repos propose` from the admin box. This one step covers all three UI specs. check: `bmesh repos show Bluke | grep -c verifyRoborazziDebug`
+- [phone] Use each surface (keyboard, touchpad, gamepad, multimedia) for a minute and say whether the haptics and press feedback feel right; the emulator can't judge that.

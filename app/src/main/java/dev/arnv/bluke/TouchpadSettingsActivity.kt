@@ -118,7 +118,7 @@ class TouchpadSettingsActivity : ComponentActivity() {
                             }
                         }
                         Text(
-                            "Scroll speed is the arrows button on the touchpad's toolbar.",
+                            "Pointer and scroll speed are also in the touchpad's Tune sheet.",
                             style = MaterialTheme.typography.bodyMedium,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             modifier = Modifier.padding(horizontal = 24.dp),
