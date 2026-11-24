@@ -11,7 +11,6 @@ import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.calculatePan
 import androidx.compose.foundation.gestures.calculateZoom
-import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
@@ -44,11 +43,15 @@ import androidx.compose.material.icons.filled.Language
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.OpenInFull
 import androidx.compose.material.icons.filled.RestartAlt
-import androidx.compose.material.icons.filled.ScreenRotation
 import androidx.compose.material.icons.filled.SportsEsports
 import androidx.compose.material.icons.outlined.FilterNone
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.material3.SnackbarResult
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -467,6 +470,15 @@ private class GamepadLayoutEdits(
         scope.launch { repository.save(values) }
     }
 
+    /** Every part's transform as it is now, for [restore]. */
+    fun snapshot(): Map<GamepadPart, PartTransform> = transforms.toMap()
+
+    /** Puts back a [snapshot] and saves it. */
+    fun restore(snapshot: Map<GamepadPart, PartTransform>) {
+        snapshot.forEach { (part, transform) -> update(part, transform) }
+        commit()
+    }
+
     fun reset() {
         GamepadPart.entries.forEach { transforms[it] = PartTransform() }
         pending.clear()
@@ -493,8 +505,13 @@ private fun Modifier.centeredAt(center: (area: Size) -> Offset) = layout { measu
 }
 
 /** Like [centeredAt], and scales this element about its centre by the area's [GamepadMetrics.scale]. */
-private fun Modifier.layoutPlaced(center: (area: Size) -> Offset, onScale: (Float) -> Unit) = layout { measurable, constraints ->
+private fun Modifier.layoutPlaced(
+    center: (area: Size) -> Offset,
+    onScale: (Float) -> Unit,
+    onSize: (longestDp: Float) -> Unit = {},
+) = layout { measurable, constraints ->
     val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
+    onSize(maxOf(placeable.width, placeable.height).toDp().value)
     layout(placeable.width, placeable.height) {
         val area = Size(constraints.maxWidth.toDp().value, constraints.maxHeight.toDp().value)
         val c = center(area)
@@ -549,6 +566,19 @@ fun GamepadView(
         GamepadLayoutEdits(config.id, sharedPrefs, layoutRepository, scope)
     }
     LaunchedEffect(edits) { edits.load() }
+    val snackbar = remember { SnackbarHostState() }
+    // A reset wipes every saved move and resize, so it offers to put them back.
+    val resetLayout = {
+        val previous = edits.snapshot()
+        edits.reset()
+        scope.launch {
+            snackbar.currentSnackbarData?.dismiss()
+            if (snackbar.showSnackbar("Layout reset", actionLabel = "Undo") == SnackbarResult.ActionPerformed) {
+                edits.restore(previous)
+            }
+        }
+        Unit
+    }
 
     // ── Report state: what reaches btManager. Unchanged by the look. ──
     var buttonMask by remember { mutableIntStateOf(0) }
@@ -666,7 +696,7 @@ fun GamepadView(
             SurfaceToolbar(chrome = chrome, haptics = haptics, onTune = { tuneOpen = true }) {
                 if (isEditMode) {
                     TextButton(
-                        onClick = edits::reset,
+                        onClick = resetLayout,
                         enabled = edits.isModified,
                         modifier = Modifier.testTag("gamepad_edit_reset"),
                     ) {
@@ -699,12 +729,18 @@ fun GamepadView(
                     .weight(1f)
                     .fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
+                    // The Tune sheet is modal: while it is open, TalkBack finds only the sheet and the toolbar.
+                    .then(if (tuneOpen) Modifier.clearAndSetSemantics {} else Modifier)
                     .testTag("gamepad_controls_area")
             ) {
                 // A held controller is landscape. A window taller than it is wide (split screen, or a
                 // large screen that ignores the orientation lock) gets the rotate state instead.
                 if (maxWidth < maxHeight) {
-                    TurnSidewaysState(Modifier.align(Alignment.Center))
+                    TurnSidewaysState(
+                        title = "Turn your phone sideways",
+                        body = "The gamepad needs a landscape window. In split screen, make Bluke's window wider than it is tall.",
+                        modifier = Modifier.align(Alignment.Center).testTag("gamepad_turn_sideways"),
+                    )
                     return@BoxWithConstraints
                 }
 
@@ -780,10 +816,9 @@ fun GamepadView(
                 if (isEditMode) {
                     ResizeHandles(
                         frames = frames,
-                        onResize = { part, by ->
-                            val t = edits[part]
-                            edits.update(part, t.copy(scale = (t.scale + by).coerceIn(MIN_PART_SCALE, MAX_PART_SCALE)))
-                        },
+                        areaScale = metrics.scale,
+                        scaleOf = { edits[it].scale },
+                        onResize = { part, scale -> edits.update(part, edits[part].copy(scale = scale)) },
                         onResizeEnd = edits::commit,
                     )
                 }
@@ -806,9 +841,19 @@ fun GamepadView(
                     tuneOpen = false
                     isEditMode = true
                 })
-                TuneAction("Reset layout", Icons.Default.RestartAlt, onClick = edits::reset)
+                // TuneAction's look, but off while there is nothing to reset.
+                OutlinedButton(
+                    onClick = resetLayout,
+                    enabled = edits.isModified,
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).testTag("gamepad_tune_reset"),
+                ) {
+                    Icon(Icons.Default.RestartAlt, contentDescription = null, modifier = Modifier.size(18.dp))
+                    Text("Reset layout", modifier = Modifier.padding(start = 8.dp))
+                }
             }
         }
+
+        SnackbarHost(snackbar, Modifier.align(Alignment.BottomCenter).padding(16.dp))
     }
 }
 
@@ -823,7 +868,8 @@ private fun ConsoleControl(config: ConsoleConfig, onClick: () -> Unit) {
             .minimumInteractiveComponentSize()
             .heightIn(min = 40.dp)
             .clip(CircleShape)
-            .border(1.dp, colors.outlineVariant, CircleShape)
+            // Tonal, not outlined: an action to tap, unlike the outlined host chip, which reports status.
+            .background(colors.secondaryContainer)
             .clickable(onClickLabel = "Switch console", role = Role.Button, onClick = onClick)
             .semantics { stateDescription = config.name }
             .padding(start = 12.dp, end = 16.dp)
@@ -831,66 +877,30 @@ private fun ConsoleControl(config: ConsoleConfig, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        Icon(Icons.Default.SportsEsports, contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
-        Text(config.name, style = MaterialTheme.typography.labelLarge, color = colors.onSurface, maxLines = 1)
+        Icon(Icons.Default.SportsEsports, contentDescription = null, tint = colors.onSecondaryContainer, modifier = Modifier.size(18.dp))
+        Text(config.name, style = MaterialTheme.typography.labelLarge, color = colors.onSecondaryContainer, maxLines = 1)
     }
 }
 
-/** Which output profile the host gets, always in view; a tap opens Tune to change it. */
+/**
+ * Which output profile the host gets, always in view: a quiet status label, not a button to look at,
+ * though a tap opens Tune to change it.
+ */
 @Composable
 private fun ProfileChip(profile: GamepadDpadOutputMode, onClick: () -> Unit) {
     val colors = MaterialTheme.colorScheme
     Row(
         modifier = Modifier
             .minimumInteractiveComponentSize()
-            .heightIn(min = 40.dp)
             .clip(CircleShape)
-            .background(colors.surfaceContainerHigh)
             .clickable(onClickLabel = "Change profile", role = Role.Button, onClick = onClick)
-            .padding(start = 12.dp, end = 16.dp)
+            .padding(horizontal = 8.dp)
             .testTag("gamepad_profile"),
         verticalAlignment = Alignment.CenterVertically,
-        horizontalArrangement = Arrangement.spacedBy(8.dp),
+        horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
-        Icon(profile.icon(), contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
-        Text("${profile.label} profile", style = MaterialTheme.typography.labelLarge, color = colors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
-    }
-}
-
-/** The controls area when the window is taller than it is wide. The toolbar above it still works. */
-@Composable
-private fun TurnSidewaysState(modifier: Modifier) {
-    val colors = MaterialTheme.colorScheme
-    Column(
-        modifier = modifier
-            .padding(horizontal = 32.dp)
-            .widthIn(max = 360.dp)
-            .semantics(mergeDescendants = true) {}
-            .testTag("gamepad_turn_sideways"),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(16.dp),
-    ) {
-        Box(
-            Modifier
-                .size(96.dp)
-                .clip(CircleShape)
-                .background(colors.secondaryContainer),
-            contentAlignment = Alignment.Center,
-        ) {
-            Icon(Icons.Default.ScreenRotation, contentDescription = null, tint = colors.onSecondaryContainer, modifier = Modifier.size(48.dp))
-        }
-        Text(
-            "Turn your phone sideways",
-            style = MaterialTheme.typography.headlineSmall,
-            color = colors.onSurface,
-            textAlign = TextAlign.Center,
-        )
-        Text(
-            "The gamepad needs a landscape window. In split screen, make Bluke's window wider than it is tall.",
-            style = MaterialTheme.typography.bodyMedium,
-            color = colors.onSurfaceVariant,
-            textAlign = TextAlign.Center,
-        )
+        Icon(profile.icon(), contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(16.dp))
+        Text("${profile.label} profile", style = MaterialTheme.typography.labelMedium, color = colors.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -906,12 +916,14 @@ private fun EditHint() {
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
         Text("Drag a control to move it", style = MaterialTheme.typography.labelMedium, color = colors.onPrimaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text("Drag its corner to resize", style = MaterialTheme.typography.labelMedium, color = colors.onPrimaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("Drag a corner handle to resize", style = MaterialTheme.typography.labelMedium, color = colors.onPrimaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
 private const val MIN_PART_SCALE = 0.6f
 private const val MAX_PART_SCALE = 1.8f
+/** A small part may grow until its longer side is this long, as large as a cluster. */
+private const val MAX_PART_SIDE_DP = 128f
 private const val HANDLE_DP = 48f
 
 /**
@@ -945,7 +957,7 @@ private fun EditablePart(
     fun clamped(next: PartTransform) = next.copy(
         x = next.x.coerceIn(-placed.origin.x, placed.area.width - placed.origin.x),
         y = next.y.coerceIn(-placed.origin.y, placed.area.height - placed.origin.y),
-        scale = next.scale.coerceIn(MIN_PART_SCALE, MAX_PART_SCALE),
+        scale = next.scale.coerceIn(MIN_PART_SCALE, maxPartScale(placed.longestDp)),
     )
 
     Box(
@@ -958,6 +970,7 @@ private fun EditablePart(
                     Offset(origin.x + current.x, origin.y + current.y)
                 },
                 onScale = { placed.scale = it },
+                onSize = { placed.longestDp = it },
             )
             .graphicsLayer {
                 scaleX = current.scale
@@ -1008,66 +1021,113 @@ private fun EditablePart(
     }
 }
 
+/** A frame corner a resize handle sits on, by which way is outward from the part's centre on each axis. */
+private enum class HandleCorner(val sx: Float, val sy: Float) {
+    BOTTOM_END(1f, 1f),
+    BOTTOM_START(-1f, 1f),
+    TOP_END(1f, -1f),
+    TOP_START(-1f, -1f);
+
+    fun of(frame: Rect) = Offset(if (sx > 0) frame.right else frame.left, if (sy > 0) frame.bottom else frame.top)
+}
+
 /**
- * Where each part's resize handle goes, a [size]-px square, given every part's [frames] in an [area]
- * (both px): at the frame's bottom-end corner when that is clear, otherwise the first of the corners and
- * then the spots beside, below and above the frame that sits wholly in the area and touches no other
- * part's frame or another handle. A part with nowhere clear gets its handle inside its own bottom-end
- * corner, which leaves the rest of its frame to move it.
+ * Which corner of its own frame each part's resize handle, a [size]-px square centred on it, sits on, given
+ * every part's [frames] in an [area] (both px). The first of bottom-end, bottom-start, top-end and top-start
+ * that lies in the area and covers no other part's frame or placed handle; failing that, the first in the
+ * area; failing that, bottom-end. A part in [frozen] (its handle is being dragged) keeps its corner.
  */
-private fun resizeHandleBounds(frames: Map<GamepadPart, Rect>, area: Rect, size: Float): Map<GamepadPart, Rect> {
+private fun resizeHandleCorners(
+    frames: Map<GamepadPart, Rect>,
+    area: Rect,
+    size: Float,
+    frozen: Map<GamepadPart, HandleCorner>,
+): Map<GamepadPart, HandleCorner> {
     val h = size / 2f
-    val placed = linkedMapOf<GamepadPart, Rect>()
-    for ((part, r) in frames.entries.sortedBy { it.key.ordinal }) {
-        val centres = listOf(
-            Offset(r.right, r.bottom), Offset(r.left, r.bottom), Offset(r.right, r.top), Offset(r.left, r.top),
-            Offset(r.right - h, r.bottom + h), Offset(r.left + h, r.bottom + h), Offset(r.center.x, r.bottom + h),
-            Offset(r.right + h, r.bottom - h), Offset(r.left - h, r.bottom - h),
-            Offset(r.right - h, r.top - h), Offset(r.left + h, r.top - h), Offset(r.center.x, r.top - h),
-            Offset(r.right + h, r.top + h), Offset(r.left - h, r.top + h),
-        )
-        val others = frames.filterKeys { it != part }.values + placed.values
-        val clear = centres.map { Rect(it.x - h, it.y - h, it.x + h, it.y + h) }.firstOrNull { box ->
-            box.left >= area.left && box.top >= area.top && box.right <= area.right && box.bottom <= area.bottom &&
-                others.none { it.overlaps(box) }
+    fun box(part: GamepadPart, corner: HandleCorner) = corner.of(frames.getValue(part)).let { Rect(it.x - h, it.y - h, it.x + h, it.y + h) }
+    fun inArea(r: Rect) = r.left >= area.left && r.top >= area.top && r.right <= area.right && r.bottom <= area.bottom
+    val placed = linkedMapOf<GamepadPart, HandleCorner>()
+    for (part in frames.keys.sortedBy { it.ordinal }) {
+        val corner = frozen[part] ?: run {
+            val others = frames.filterKeys { it != part }.values + placed.map { (p, c) -> box(p, c) }
+            val inside = HandleCorner.entries.filter { inArea(box(part, it)) }
+            inside.firstOrNull { c -> others.none { it.overlaps(box(part, c)) } } ?: inside.firstOrNull() ?: HandleCorner.BOTTOM_END
         }
-        placed[part] = clear ?: Rect(r.right - size, r.bottom - size, r.right, r.bottom)
+        placed[part] = corner
     }
     return placed
 }
 
-/** Every part's resize handle, in one layer over the controls area; dragging a handle down or right grows its part. */
+/** The largest scale a part whose longer side is [longestDp] (unscaled) may take: 1.8×, or a cluster's size for a small part. */
+private fun maxPartScale(longestDp: Float): Float = maxOf(MAX_PART_SCALE, MAX_PART_SIDE_DP / longestDp)
+
+/**
+ * Every part's resize handle, on a corner of its frame, in one layer over the controls area. Dragging a
+ * handle away from its part's centre grows the part about that centre, so the corner follows the finger.
+ * [scaleOf] is a part's current scale, [areaScale] the area's [GamepadMetrics.scale], and [onResize] gets
+ * the part's new scale.
+ */
 @Composable
 private fun ResizeHandles(
     frames: Map<GamepadPart, Rect>,
+    areaScale: Float,
+    scaleOf: (GamepadPart) -> Float,
     onResize: (GamepadPart, Float) -> Unit,
     onResizeEnd: () -> Unit,
 ) {
     val colors = MaterialTheme.colorScheme
+    val currentFrames by rememberUpdatedState(frames)
+    val currentScaleOf by rememberUpdatedState(scaleOf)
     val currentOnResize by rememberUpdatedState(onResize)
     val currentOnResizeEnd by rememberUpdatedState(onResizeEnd)
+    // The handle being dragged keeps its corner until it lets go, even if the part grows into a neighbour.
+    var dragging by remember { mutableStateOf<Pair<GamepadPart, HandleCorner>?>(null) }
     BoxWithConstraints(Modifier.fillMaxSize()) {
-        val sizePx = with(LocalDensity.current) { HANDLE_DP.dp.toPx() }
+        val density = LocalDensity.current.density
+        val sizePx = HANDLE_DP * density
         val area = Rect(0f, 0f, constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat())
-        resizeHandleBounds(frames.toMap(), area, sizePx).forEach { (part, box) ->
+        val corners = resizeHandleCorners(frames.toMap(), area, sizePx, dragging?.let { mapOf(it) } ?: emptyMap())
+        corners.forEach { (part, corner) ->
+            val centre = corner.of(frames.getValue(part))
             key(part) {
+                // Where the handle sits in the root, as last placed: the drag is measured in the root, so the
+                // handle moving with the corner it follows doesn't change what the finger has done.
+                val origin = remember { floatArrayOf(0f, 0f) }
                 Box(
                     Modifier
-                        .offset { IntOffset(box.left.roundToInt(), box.top.roundToInt()) }
+                        .offset { IntOffset((centre.x - sizePx / 2f).roundToInt(), (centre.y - sizePx / 2f).roundToInt()) }
                         .size(HANDLE_DP.dp)
+                        .onGloballyPositioned { it.positionInRoot().let { p -> origin[0] = p.x; origin[1] = p.y } }
                         .systemGestureExclusion()
                         .semantics { contentDescription = "Resize ${part.description}" }
-                        .pointerInput(part) {
-                            // About one step of scale per 56dp dragged.
-                            val perScale = 56.dp.toPx()
-                            detectDragGestures(
-                                onDragEnd = { currentOnResizeEnd() },
-                                onDragCancel = { currentOnResizeEnd() },
-                                onDrag = { change, dragAmount ->
-                                    change.consume()
-                                    currentOnResize(part, (dragAmount.x + dragAmount.y) / perScale)
-                                },
-                            )
+                        .pointerInput(part, corner) {
+                            awaitEachGesture {
+                                val down = awaitFirstDown(requireUnconsumed = false)
+                                down.consume()
+                                val frame = currentFrames[part] ?: return@awaitEachGesture
+                                val startScale = currentScaleOf(part)
+                                // The corner's offset from the centre at scale 1; growing by one scale step moves the
+                                // corner by its length, along it.
+                                val half = Offset(corner.sx * frame.width / 2f, corner.sy * frame.height / 2f) / startScale
+                                val length = half.getDistance()
+                                val maxScale = maxPartScale(maxOf(frame.width, frame.height) / startScale / areaScale / density)
+                                fun root(p: Offset) = Offset(origin[0] + p.x, origin[1] + p.y)
+                                val start = root(down.position)
+                                dragging = part to corner
+                                try {
+                                    while (true) {
+                                        val change = awaitPointerEvent().changes.firstOrNull { it.id == down.id } ?: break
+                                        if (!change.pressed) break
+                                        val moved = root(change.position) - start
+                                        val along = (moved.x * half.x + moved.y * half.y) / length
+                                        currentOnResize(part, (startScale + along / length).coerceIn(MIN_PART_SCALE, maxScale))
+                                        change.consume()
+                                    }
+                                } finally {
+                                    dragging = null
+                                    currentOnResizeEnd()
+                                }
+                            }
                         }
                         .testTag("gamepad_resize_${part.key}"),
                     contentAlignment = Alignment.Center,
@@ -1092,6 +1152,8 @@ private class PlacedArea {
     var origin: Offset = Offset.Zero
     var area: Size = Size.Zero
     var scale: Float = 1f
+    /** The part's longer side before any scale, in dp. */
+    var longestDp: Float = MAX_PART_SIDE_DP
 }
 
 // ── Controls ──
@@ -1216,7 +1278,7 @@ private fun GuideButton(button: ButtonDef, onPress: (Int) -> Unit, onRelease: (I
                 .size(56.dp)
                 .clip(CircleShape)
                 .background(if (pressed) colors.primary else colors.surfaceContainerHighest)
-                .border(2.dp, colors.primary, CircleShape),
+                .border(2.dp, if (pressed) colors.primary else colors.outlineVariant, CircleShape),
             contentAlignment = Alignment.Center,
         ) {
             Icon(Icons.Default.Home, contentDescription = null, tint = if (pressed) colors.onPrimary else colors.onSurface, modifier = Modifier.size(28.dp))
