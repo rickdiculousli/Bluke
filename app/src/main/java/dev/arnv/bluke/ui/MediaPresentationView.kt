@@ -3,6 +3,7 @@ package dev.arnv.bluke.ui
 import android.content.Context
 import android.content.ContextWrapper
 import android.content.SharedPreferences
+import android.content.res.Configuration
 import android.hardware.SensorManager
 import android.os.SystemClock
 import android.view.KeyEvent
@@ -34,6 +35,7 @@ import androidx.compose.material.icons.filled.SkipPrevious
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -44,6 +46,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.heading
@@ -231,6 +234,12 @@ internal fun MediaPresentationView(
     ) {
         // Upright, the phone is held portrait while the activity stays landscape: the whole remote is
         // laid out portrait and turned to match, so the toolbar sits at the top and every label reads level.
+        // Inside the turned frame the screen is portrait, so the toolbar and sheet size themselves for it.
+        val configuration = LocalConfiguration.current
+        val frameConfiguration = remember(configuration, upright) {
+            if (upright) configuration.heldUpright() else configuration
+        }
+        CompositionLocalProvider(LocalConfiguration provides frameConfiguration) {
         Box(Modifier.fillMaxSize().then(if (upright) Modifier.uprightFrame() else Modifier)) {
             Column(Modifier.fillMaxSize()) {
                 SurfaceToolbar(chrome = chrome, haptics = haptics, onTune = { tuneOpen = true })
@@ -245,7 +254,15 @@ internal fun MediaPresentationView(
                 MultimediaTuneContent(tune, { it.write(sharedPrefs) }, haptics)
             }
         }
+        }
     }
+}
+
+/** This configuration as the phone held upright sees it: width and height swapped, portrait. */
+private fun Configuration.heldUpright(): Configuration = Configuration(this).also {
+    it.screenWidthDp = screenHeightDp
+    it.screenHeightDp = screenWidthDp
+    it.orientation = Configuration.ORIENTATION_PORTRAIT
 }
 
 /** Lays its content out with width and height swapped and turns it a quarter left, so it reads level held upright. */
