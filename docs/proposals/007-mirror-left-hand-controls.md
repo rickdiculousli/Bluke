@@ -121,6 +121,7 @@ In Hover, you rest your right finger on a card and the tooltip shows. You press 
 - **Hill-climb** against `docs/proposals/assets/ui-rubric.md`. Each round has three fresh Opus reviewers, with no earlier rounds' text. Fix and re-score until the median reads 9 or higher, fixing every P0 and P1, and every P2 that two or more reviewers raise. Record each round in Shown.
 
 ## Shown
+- Hill-climb round 1: scores 7/7/6, median 7; fixed: hotkeys page in a fixed last cell instead of an unscrollable list, a cell keyed by its button so an edit never sends the old key, a lift ends its press after a Bluetooth drop, ripples clipped to each control, the key's slot reserved in Direct so hotkeys don't move, the left-button key disabled (with a reject haptic) without a live link and drawn with a click glyph, Direct/Hover and Mirror labels kept at font scale 1.3, TalkBack's long-press on next mode, label insets, the editor's key list moved up with scroll cues, safe-drawing insets, a fade and a shorter placeholder, captures over a full-width light picture plus the hint pills, the open menu and the second hotkey page; left: modifier names differ between the editor's chips, its key list and the button faces
 
 ## Risks and the alternative considered
 - **The overlay covers part of the picture.** It sits on the left edge, where a game's menus sometimes live. The scrim is translucent and the column narrow. If that's not enough, a later spec can add dimming or a side swap.

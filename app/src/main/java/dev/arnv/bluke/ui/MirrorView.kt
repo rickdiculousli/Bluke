@@ -9,11 +9,14 @@ import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import android.view.MotionEvent
 import android.view.View
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FiniteAnimationSpec
 import androidx.compose.animation.core.VisibilityThreshold
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -352,8 +355,10 @@ fun MirrorSurface(
                 when {
                     MirrorTouchEvent.PRESSED in update.events -> haptics.press()
                     MirrorTouchEvent.RELEASED in update.events -> haptics.release()
+                    // No live link: the key reads disabled, and a press says so by feel.
+                    down && !live -> haptics.reject()
                     // Pressed before the pointer has gone anywhere this session: nowhere to press.
-                    down && live && !state.keyHeld -> hint = MirrorNotice.KeyNeedsPointer
+                    down && !state.keyHeld -> hint = MirrorNotice.KeyNeedsPointer
                 }
             },
             onHotkey = { hotkey, down ->
@@ -367,7 +372,8 @@ fun MirrorSurface(
             onEditHotkeys = { editing = true },
             onForgetCompanion = onForgetCompanion,
         )
-        if (editing) {
+        // The editor fades in over the picture and out the same way.
+        AnimatedVisibility(visible = editing, enter = fadeIn(EffectsSpring), exit = fadeOut(EffectsSpring)) {
             MirrorHotkeyEditor(
                 hotkeys = hotkeys.list,
                 typingLayout = typingLayout,

@@ -23,11 +23,14 @@ import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.test.junit4.createComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.unit.Density
 import androidx.core.content.edit
 import androidx.test.core.app.ApplicationProvider
+import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.captureRoboImage
+import com.github.takahirom.roborazzi.captureScreenRoboImage
 import dev.arnv.bluke.mirror.MirrorNotice
 import dev.arnv.bluke.mirror.MirrorPhase
 import dev.arnv.bluke.mirror.MirrorTouchMode
@@ -48,7 +51,8 @@ import org.robolectric.annotation.GraphicsMode
  * 360dp-high phone, in the dark scheme the surface host wraps every input surface in, at font scale
  * 1.0, 1.3 and 2.0, with long and emoji computer names; the left-hand overlay over a light and a
  * dark picture, in Direct and Hover, with the key held, with 0, 3 and 8 hotkeys, with them disabled,
- * and the hotkey editor, at 1.0 and 1.3; plus the touch ring on the first frame of a press.
+ * the two hints, the hotkey pager and the hotkey editor, at 1.0 and 1.3; plus the touch ring on the
+ * first frame of a press, the ⋮ menu open, and the hotkeys' second page.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -214,7 +218,11 @@ class MirrorScreenshotTest {
         "overlay-hover-0" to Case(streamingHover, ready(emptyList())),
         "overlay-hover-8" to Case(streamingHover, ready(eight)),
         "overlay-direct-8" to Case(streamingHover.copy(touchMode = MirrorTouchMode.DIRECT), ready(eight)),
-        "overlay-hotkeys-disabled" to Case(streamingHover, MirrorHotkeysUi(three, enabled = false, hostName = "Rick's MacBook Pro")),
+        "overlay-hotkeys-disabled" to Case(
+            streamingHover.copy(notice = MirrorNotice.HotkeysNeedBluetooth("Rick's MacBook Pro")),
+            MirrorHotkeysUi(three, enabled = false, hostName = "Rick's MacBook Pro"),
+        ),
+        "overlay-hover-key-needs-pointer" to Case(streamingHover.copy(notice = MirrorNotice.KeyNeedsPointer), ready(three), lightPicture = true),
         "overlay-waiting-3" to Case(
             address.copy(phase = MirrorPhase.Waiting("Rick's MacBook Pro"), pairedName = "Rick's MacBook Pro", touchMode = MirrorTouchMode.HOVER),
             ready(three),
@@ -361,13 +369,37 @@ class MirrorScreenshotTest {
         }
     }
 
+    /** The ⋮ menu open over the picture: which computer, the link readout, Edit hotkey buttons, Forget. */
+    @OptIn(ExperimentalRoborazziApi::class)
+    @Test
+    fun menuOpen() {
+        composeTestRule.setContent {
+            HostSurfaceTheme(fontScale = 1f) { Surface("overlay-menu", Case(streamingHover, ready(three))) }
+        }
+        composeTestRule.onNodeWithTag("mirror_menu_btn").performClick()
+        composeTestRule.waitForIdle()
+        captureScreenRoboImage(filePath = "src/test/screenshots/mirror/mirror-overlay-menu-dark-fs1-land.png")
+    }
+
+    /** Eight hotkeys on a 360dp-high phone, turned to their second page. */
+    @Test
+    fun hotkeysSecondPage() {
+        composeTestRule.setContent {
+            HostSurfaceTheme(fontScale = 1f) { Surface("overlay-hover-8", Case(streamingHover, ready(eight))) }
+        }
+        composeTestRule.onNodeWithTag("mirror_hotkey_pager").performClick()
+        composeTestRule.waitForIdle()
+        composeTestRule.onRoot().captureRoboImage(filePath = "src/test/screenshots/mirror/mirror-overlay-hover-8-page-2-dark-fs1-land.png")
+    }
+
     private val withPicture by lazy { FakeFrames(hasPicture = true) }
     private val withLightPicture by lazy { FakeFrames(hasPicture = true, light = true) }
     private val withoutPicture by lazy { FakeFrames(hasPicture = false) }
 
     /**
      * A 480x300 stand-in for a card-game frame (a backdrop, two creatures and a hand of cards), or
-     * with [light] a white document window, the hardest picture for translucent controls.
+     * with [light] a white document window as wide as the phone (640x288), so the controls sit over
+     * it: the hardest picture for translucent controls.
      */
     private class FakeFrames(hasPicture: Boolean, light: Boolean = false) : MirrorFrameSource {
         override val frameSeq: State<Long> = mutableLongStateOf(1L)
@@ -375,15 +407,15 @@ class MirrorScreenshotTest {
         override fun currentFrame(): ImageBitmap? = image
 
         private fun lightFrame(): Bitmap {
-            val bitmap = Bitmap.createBitmap(480, 300, Bitmap.Config.RGB_565)
+            val bitmap = Bitmap.createBitmap(640, 288, Bitmap.Config.RGB_565)
             val canvas = Canvas(bitmap)
             val paint = Paint(Paint.ANTI_ALIAS_FLAG)
-            paint.color = 0xFFFFFFFF.toInt(); canvas.drawRect(0f, 0f, 480f, 300f, paint)
-            paint.color = 0xFFECECEC.toInt(); canvas.drawRect(0f, 0f, 480f, 22f, paint)
+            paint.color = 0xFFFFFFFF.toInt(); canvas.drawRect(0f, 0f, 640f, 288f, paint)
+            paint.color = 0xFFECECEC.toInt(); canvas.drawRect(0f, 0f, 640f, 22f, paint)
             paint.color = 0xFFD0D0D0.toInt()
-            for (row in 0 until 12) canvas.drawRect(24f, 40f + row * 20f, 456f, 41f + row * 20f, paint)
+            for (row in 0 until 12) canvas.drawRect(16f, 36f + row * 20f, 624f, 37f + row * 20f, paint)
             paint.color = 0xFF9AA0A6.toInt()
-            for (row in 0 until 12) canvas.drawRect(28f, 46f + row * 20f, 28f + (row * 37 % 260) + 80f, 52f + row * 20f, paint)
+            for (row in 0 until 12) canvas.drawRect(20f, 42f + row * 20f, 20f + (row * 37 % 300) + 80f, 48f + row * 20f, paint)
             return bitmap
         }
 

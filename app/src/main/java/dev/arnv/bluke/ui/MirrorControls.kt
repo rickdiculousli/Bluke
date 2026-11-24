@@ -12,10 +12,12 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.WindowInsetsSides
 import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.only
 import androidx.compose.foundation.layout.padding
@@ -25,14 +27,14 @@ import androidx.compose.foundation.layout.union
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
-import androidx.compose.foundation.rememberScrollState
-import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowRight
 import androidx.compose.material.icons.automirrored.filled.ScreenShare
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.AdsClick
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandMore
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material.icons.filled.TouchApp
@@ -49,6 +51,8 @@ import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.Immutable
 import androidx.compose.runtime.Stable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberUpdatedState
@@ -70,6 +74,7 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.disabled
 import androidx.compose.ui.semantics.onClick
+import androidx.compose.ui.semantics.onLongClick
 import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
@@ -80,9 +85,11 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import dev.arnv.bluke.mirror.MirrorPhase
 import dev.arnv.bluke.mirror.MirrorTouchMode
 import dev.arnv.bluke.mirror.MirrorUiState
+import dev.arnv.bluke.mirror.isLive
 import dev.arnv.bluke.mirror.readout
 
 /**
@@ -154,9 +161,10 @@ internal val MirrorControlsInsets: WindowInsets
 
 /**
  * The left-hand controls, floating over the picture's left edge in two columns: Close and the next
- * input mode, then the touch mode and the menu, then (Hover only) the left-button key, then the
- * hotkey buttons, which scroll when a short screen can't fit them all. Space between controls is
- * the picture's: only a control's own bounds ([bounds]) take a finger from it.
+ * input mode, then the touch mode and the menu, then the left-button key's slot (the key in Hover,
+ * the picture in Direct, so the hotkeys sit in the same place in both), then the hotkey buttons,
+ * in pages when the height left can't hold them all. Space between controls is the picture's: only
+ * a control's own bounds ([bounds]) take a finger from it.
  */
 @Composable
 internal fun MirrorControls(
@@ -179,8 +187,11 @@ internal fun MirrorControls(
         modifier
             .fillMaxHeight()
             .windowInsetsPadding(MirrorControlsInsets)
-            .padding(start = EDGE, top = EDGE, bottom = EDGE),
+            .padding(start = EDGE, top = EDGE_VERTICAL, bottom = EDGE_VERTICAL),
     ) {
+        // Rows of hotkeys that fit under the fixed controls: three on a 360dp-high phone.
+        val hotkeyRows = ((maxHeight - FIXED_HEIGHT + GAP) / (CELL + GAP)).toInt().coerceAtLeast(0)
+        val live = state.phase.isLive
         Column(
             modifier = Modifier.width(MIRROR_CONTROLS_WIDTH).heightIn(max = maxHeight),
             verticalArrangement = Arrangement.spacedBy(GAP),
@@ -196,16 +207,25 @@ internal fun MirrorControls(
                 }
                 MenuCell(state, bounds, onEditHotkeys, onForgetCompanion)
             }
-            if (state.touchMode == MirrorTouchMode.HOVER) LeftButtonKey(state.keyHeld, bounds, onKey)
-            HotkeyGrid(hotkeys, bounds, onHotkey, onHotkeysUnavailable, onEditHotkeys, Modifier.weight(1f, fill = false))
+            if (state.touchMode == MirrorTouchMode.HOVER) {
+                LeftButtonKey(state.keyHeld, enabled = live, bounds, onKey)
+            } else {
+                Spacer(Modifier.height(KEY_HEIGHT))
+            }
+            HotkeyGrid(hotkeys, hotkeyRows, bounds, haptics, onHotkey, onHotkeysUnavailable, onEditHotkeys)
         }
     }
 }
 
-/** One control's look: translucent, outlined, solid primary while [active]. */
+/**
+ * One control's look: translucent, outlined, solid primary while [active]. [modifier] sizes and
+ * places it; [input] (its clicks, semantics and tag) goes inside the clip, so the press ripple
+ * takes the control's shape.
+ */
 @Composable
 private fun ControlFace(
     modifier: Modifier,
+    input: Modifier,
     active: Boolean = false,
     enabled: Boolean = true,
     shape: Shape = MaterialTheme.shapes.medium,
@@ -223,7 +243,7 @@ private fun ControlFace(
         else -> MirrorControlColors.disabledContent
     }
     Box(
-        modifier = modifier.clip(shape).background(container).border(1.dp, outline, shape),
+        modifier = modifier.clip(shape).then(input).background(container).border(1.dp, outline, shape),
         contentAlignment = Alignment.Center,
     ) {
         CompositionLocalProvider(LocalContentColor provides contentColor, content = content)
@@ -233,9 +253,8 @@ private fun ControlFace(
 @Composable
 private fun CloseCell(bounds: MirrorControlBounds, onClose: () -> Unit) {
     ControlFace(
-        Modifier
-            .size(CELL)
-            .controlBounds(bounds, "close")
+        Modifier.size(CELL).controlBounds(bounds, "close"),
+        input = Modifier
             .clickable(role = Role.Button, onClick = onClose)
             .semantics(mergeDescendants = true) { contentDescription = "Close Mirror" }
             .testTag("exit_mirror_btn"),
@@ -246,15 +265,15 @@ private fun CloseCell(bounds: MirrorControlBounds, onClose: () -> Unit) {
 
 /**
  * The current mode, Mirror, as a button that moves to the next input mode: Mirror's screen-share
- * glyph with an arrow, so it reads as a step forward. A long press chooses the modes.
+ * glyph with an arrow, so it reads as a step forward, and its name when it fits. A long press
+ * chooses the modes.
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun NextModeCell(bounds: MirrorControlBounds, haptics: MirrorHaptics, onNextMode: () -> Unit, onConfigureModes: () -> Unit) {
     ControlFace(
-        Modifier
-            .size(CELL)
-            .controlBounds(bounds, "next_mode")
+        Modifier.size(CELL).controlBounds(bounds, "next_mode"),
+        input = Modifier
             .combinedClickable(
                 role = Role.Button,
                 onClickLabel = "Next input mode",
@@ -273,18 +292,24 @@ private fun NextModeCell(bounds: MirrorControlBounds, haptics: MirrorHaptics, on
                     onNextMode()
                     true
                 }
+                onLongClick("Choose input modes") {
+                    onConfigureModes()
+                    true
+                }
             },
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Icon(Icons.AutoMirrored.Filled.ScreenShare, contentDescription = null, modifier = Modifier.size(18.dp))
-            Icon(Icons.AutoMirrored.Filled.ArrowRight, contentDescription = null, modifier = Modifier.size(16.dp))
+        GlyphAndLabel("Mirror") {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.AutoMirrored.Filled.ScreenShare, contentDescription = null, modifier = Modifier.size(ICON_SMALL))
+                Icon(Icons.AutoMirrored.Filled.ArrowRight, contentDescription = null, modifier = Modifier.size(ICON_SMALL - 4.dp))
+            }
         }
     }
 }
 
 /**
- * Direct or Hover, one button that switches between them. It shows the current mode by icon and,
- * when the label fits the cell at this font scale, by name; TalkBack reads the mode and what it does.
+ * Direct or Hover, one button that switches between them. It shows the current mode by icon and
+ * name; TalkBack reads the mode and what it does.
  */
 @Composable
 private fun TouchModeCell(mode: MirrorTouchMode, bounds: MirrorControlBounds, onToggle: () -> Unit) {
@@ -293,12 +318,9 @@ private fun TouchModeCell(mode: MirrorTouchMode, bounds: MirrorControlBounds, on
         MirrorTouchMode.HOVER -> Triple(Icons.Filled.Mouse, "Hover", "touch moves the pointer, tap clicks")
     }
     val other = if (mode == MirrorTouchMode.DIRECT) "Hover" else "Direct"
-    val style = MaterialTheme.typography.labelSmall
-    val labelFits = fitsInCell(label, style, maxLines = 1, height = CELL - ICON_SMALL - 8.dp)
     ControlFace(
-        Modifier
-            .size(CELL)
-            .controlBounds(bounds, "touch_mode")
+        Modifier.size(CELL).controlBounds(bounds, "touch_mode"),
+        input = Modifier
             .clickable(role = Role.Button, onClick = onToggle)
             .testTag("mirror_touch_mode_btn")
             .clearAndSetSemantics {
@@ -310,12 +332,31 @@ private fun TouchModeCell(mode: MirrorTouchMode, bounds: MirrorControlBounds, on
                 }
             },
     ) {
-        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(icon, contentDescription = null, modifier = Modifier.size(if (labelFits) ICON_SMALL else ICON))
-            if (labelFits) Text(label, style = style, maxLines = 1)
+        GlyphAndLabel(label) { Icon(icon, contentDescription = null, modifier = Modifier.size(ICON_SMALL)) }
+    }
+}
+
+/**
+ * A cell's glyph with its one-word name under it, set tight so the name still fits at font scale
+ * 1.3; where it can't, the glyph alone, at full size.
+ */
+@Composable
+private fun GlyphAndLabel(label: String, glyph: @Composable () -> Unit) {
+    val style = CellLabelStyle
+    val fits = fitsInCell(label, style, maxLines = 1, width = CELL - 4.dp, height = CELL - ICON_SMALL - 6.dp)
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        if (fits) {
+            glyph()
+            Text(label, style = style, maxLines = 1)
+        } else {
+            Box(Modifier.size(ICON), contentAlignment = Alignment.Center) { glyph() }
         }
     }
 }
+
+/** labelSmall without its letter spacing and with its line as tall as its type, for a 48dp cell. */
+private val CellLabelStyle: TextStyle
+    @Composable get() = MaterialTheme.typography.labelSmall.let { it.copy(letterSpacing = 0.sp, lineHeight = it.fontSize) }
 
 /** ⋮: which computer this is and how its link is doing, Edit hotkey buttons, then Forget. */
 @Composable
@@ -328,9 +369,8 @@ private fun MenuCell(
     var menuOpen by remember { mutableStateOf(false) }
     Box {
         ControlFace(
-            Modifier
-                .size(CELL)
-                .controlBounds(bounds, "menu")
+            Modifier.size(CELL).controlBounds(bounds, "menu"),
+            input = Modifier
                 .clickable(role = Role.Button, onClick = { menuOpen = true })
                 .semantics(mergeDescendants = true) { contentDescription = "More Mirror options" }
                 .testTag("mirror_menu_btn"),
@@ -409,31 +449,33 @@ private fun MenuCell(
 /**
  * Press and hold: the computer's left button goes down at the pointer and stays down until the
  * thumb lifts. [held] is the controller's word, not the thumb's: a press before any point was sent
- * (or after the link dropped) does nothing and never reads as held. TalkBack's double tap toggles it.
+ * (or after the link dropped) does nothing and never reads as held. While Mirror has no live link
+ * it reads disabled. TalkBack's double tap toggles it.
  */
 @Composable
-private fun LeftButtonKey(held: Boolean, bounds: MirrorControlBounds, onKey: (down: Boolean) -> Unit) {
+private fun LeftButtonKey(held: Boolean, enabled: Boolean, bounds: MirrorControlBounds, onKey: (down: Boolean) -> Unit) {
     val currentOnKey by rememberUpdatedState(onKey)
     ControlFace(
-        Modifier
-            .size(width = MIRROR_CONTROLS_WIDTH, height = KEY_HEIGHT)
-            .controlBounds(bounds, "left_button")
+        Modifier.size(width = MIRROR_CONTROLS_WIDTH, height = KEY_HEIGHT).controlBounds(bounds, "left_button"),
+        input = Modifier
             .holdGesture { down -> currentOnKey(down) }
             .testTag("mirror_left_button")
             .clearAndSetSemantics {
                 contentDescription = "Left mouse button"
                 stateDescription = if (held) "Held" else "Released"
                 role = Role.Button
+                if (!enabled) disabled()
                 onClick(if (held) "Release" else "Press and hold") {
                     currentOnKey(!held)
                     true
                 }
             },
         active = held,
+        enabled = enabled,
         shape = MaterialTheme.shapes.large,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {
-            Icon(Icons.Filled.Mouse, contentDescription = null, modifier = Modifier.size(ICON))
+            Icon(Icons.Filled.AdsClick, contentDescription = null, modifier = Modifier.size(ICON))
             val label = if (held) "Held" else "Hold to click"
             val style = MaterialTheme.typography.labelMedium
             if (fitsInCell(label, style, maxLines = 1, width = MIRROR_CONTROLS_WIDTH - 8.dp, height = KEY_HEIGHT - ICON - 12.dp)) {
@@ -444,46 +486,93 @@ private fun LeftButtonKey(held: Boolean, bounds: MirrorControlBounds, onKey: (do
 }
 
 /**
- * The hotkey buttons, two to a row, scrolling when there are more than the height left holds. With
- * none yet, one + button opens the editor. While Bluetooth can't send them they read disabled, and a
- * touch says which host they need.
+ * The hotkey buttons, two to a row, in the [rows] the height left holds. When there are more than
+ * that, the last cell pages through them, and it stays in that cell on every page, so no button
+ * moves under the thumb. With none yet, one + button opens the editor. While Bluetooth can't send
+ * them they read disabled, and a touch says which host they need.
  */
 @Composable
 private fun HotkeyGrid(
     hotkeys: MirrorHotkeysUi,
+    rows: Int,
     bounds: MirrorControlBounds,
+    haptics: MirrorHaptics,
     onHotkey: (MirrorHotkey, Boolean) -> Unit,
     onUnavailable: () -> Unit,
     onEdit: () -> Unit,
-    modifier: Modifier,
 ) {
-    if (hotkeys.list.isEmpty()) {
-        ControlFace(
-            Modifier
-                .size(CELL)
-                .controlBounds(bounds, "add_hotkey")
-                .clickable(role = Role.Button, onClick = onEdit)
-                .semantics(mergeDescendants = true) { contentDescription = "Add a hotkey button" }
-                .testTag("mirror_add_hotkey"),
-        ) {
-            Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(ICON))
-        }
+    val list = hotkeys.list
+    if (list.isEmpty()) {
+        if (rows > 0) AddHotkeyCell(bounds, onEdit)
         return
     }
-    val scroll = rememberScrollState()
-    Column(
-        modifier = modifier
-            .scrollCue(scroll, MaterialTheme.colorScheme.onSurfaceVariant)
-            .verticalScroll(scroll)
-            .testTag("mirror_hotkeys"),
-        verticalArrangement = Arrangement.spacedBy(GAP),
-    ) {
-        hotkeys.list.chunked(2).forEachIndexed { row, pair ->
+    val slots = rows * 2
+    val paged = list.size > slots && slots >= 2
+    val perPage = if (paged) slots - 1 else slots
+    val pages = if (paged) (list.size + perPage - 1) / perPage else 1
+    var page by remember { mutableIntStateOf(0) }
+    val shown = page.coerceIn(0, pages - 1)
+    val first = shown * perPage
+    // Each slot holds a hotkey's index in the list, or null for an empty slot or the pager.
+    val indices = (first until minOf(first + perPage, list.size)).toList()
+    val cells: List<Int?> = if (paged) indices + List(perPage - indices.size) { null } + PAGER else indices
+    Column(Modifier.testTag("mirror_hotkeys"), verticalArrangement = Arrangement.spacedBy(GAP)) {
+        cells.chunked(2).forEach { pair ->
             Row(horizontalArrangement = Arrangement.spacedBy(GAP)) {
-                pair.forEachIndexed { column, hotkey ->
-                    HotkeyCell(hotkey, row * 2 + column, hotkeys.enabled, bounds, onHotkey, onUnavailable)
+                pair.forEach { index ->
+                    when (index) {
+                        PAGER -> PageCell(shown, pages, bounds) {
+                            haptics.tick()
+                            page = (shown + 1) % pages
+                        }
+                        null -> Spacer(Modifier.size(CELL))
+                        // Keyed by the button too, so a cell never sends the key it held before an edit.
+                        else -> key(index, list[index]) {
+                            HotkeyCell(list[index], index, hotkeys.enabled, bounds, onHotkey, onUnavailable)
+                        }
+                    }
                 }
             }
+        }
+    }
+}
+
+/** The pager's place in a page's cells: not an index any list has. */
+private const val PAGER = -1
+
+@Composable
+private fun AddHotkeyCell(bounds: MirrorControlBounds, onEdit: () -> Unit) {
+    ControlFace(
+        Modifier.size(CELL).controlBounds(bounds, "add_hotkey"),
+        input = Modifier
+            .clickable(role = Role.Button, onClick = onEdit)
+            .semantics(mergeDescendants = true) { contentDescription = "Add a hotkey button" }
+            .testTag("mirror_add_hotkey"),
+    ) {
+        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(ICON))
+    }
+}
+
+/** The next page of hotkeys: which page this is, and a chevron down to the next. */
+@Composable
+private fun PageCell(page: Int, pages: Int, bounds: MirrorControlBounds, onNext: () -> Unit) {
+    ControlFace(
+        Modifier.size(CELL).controlBounds(bounds, "hotkey_pager"),
+        input = Modifier
+            .clickable(role = Role.Button, onClickLabel = "Show the next hotkeys", onClick = onNext)
+            .testTag("mirror_hotkey_pager")
+            .clearAndSetSemantics {
+                contentDescription = "More hotkeys"
+                stateDescription = "Page ${page + 1} of $pages"
+                role = Role.Button
+                onClick("Show the next hotkeys") {
+                    onNext()
+                    true
+                }
+            },
+    ) {
+        GlyphAndLabel("${page + 1}/$pages") {
+            Icon(Icons.Filled.ExpandMore, contentDescription = null, modifier = Modifier.size(ICON_SMALL))
         }
     }
 }
@@ -498,26 +587,27 @@ private fun HotkeyCell(
     onUnavailable: () -> Unit,
 ) {
     var down by remember { mutableStateOf(false) }
+    val currentHotkey by rememberUpdatedState(hotkey)
     val currentEnabled by rememberUpdatedState(enabled)
     val currentOnHotkey by rememberUpdatedState(onHotkey)
     val currentOnUnavailable by rememberUpdatedState(onUnavailable)
     val label = hotkey.displayLabel
     val style = hotkeyLabelStyle(label)
     ControlFace(
-        Modifier
-            .size(CELL)
-            // The index too: two buttons may send the same key.
-            .controlBounds(bounds, "hotkey_$index")
+        // The index too: two buttons may send the same key.
+        Modifier.size(CELL).controlBounds(bounds, "hotkey_$index"),
+        input = Modifier
             .holdGesture { pressed ->
                 when {
-                    !currentEnabled -> if (pressed) currentOnUnavailable()
-                    pressed -> {
-                        down = true
-                        currentOnHotkey(hotkey, true)
-                    }
-                    down -> {
+                    // A lift ends what its press started, even if Bluetooth dropped in between.
+                    !pressed -> if (down) {
                         down = false
-                        currentOnHotkey(hotkey, false)
+                        if (currentEnabled) currentOnHotkey(currentHotkey, false)
+                    }
+                    !currentEnabled -> currentOnUnavailable()
+                    else -> {
+                        down = true
+                        currentOnHotkey(currentHotkey, true)
                     }
                 }
             }
@@ -528,8 +618,8 @@ private fun HotkeyCell(
                 if (!enabled) disabled()
                 onClick {
                     if (currentEnabled) {
-                        currentOnHotkey(hotkey, true)
-                        currentOnHotkey(hotkey, false)
+                        currentOnHotkey(currentHotkey, true)
+                        currentOnHotkey(currentHotkey, false)
                     } else {
                         currentOnUnavailable()
                     }
@@ -545,7 +635,7 @@ private fun HotkeyCell(
             maxLines = style.second,
             overflow = TextOverflow.Ellipsis,
             textAlign = TextAlign.Center,
-            modifier = Modifier.padding(horizontal = 2.dp),
+            modifier = Modifier.padding(horizontal = LABEL_INSET),
         )
     }
 }
@@ -561,7 +651,7 @@ private fun hotkeyLabelStyle(label: String): Pair<TextStyle, Int> {
 
 /** Whether [text] fits a cell's inner area in [style] and [maxLines] at the current font scale. */
 @Composable
-private fun fitsInCell(text: String, style: TextStyle, maxLines: Int, width: Dp = CELL - 6.dp, height: Dp = CELL - 6.dp): Boolean {
+private fun fitsInCell(text: String, style: TextStyle, maxLines: Int, width: Dp = CELL - LABEL_INSET * 2 - 2.dp, height: Dp = CELL - 6.dp): Boolean {
     val measurer = rememberTextMeasurer()
     val density = LocalDensity.current
     return remember(text, style, maxLines, width, height, density) {
@@ -594,6 +684,12 @@ private fun Modifier.holdGesture(onPress: (Boolean) -> Unit): Modifier = pointer
 private val CELL = 48.dp
 private val GAP = 8.dp
 private val EDGE = 8.dp
+/** Above and below the column: half a step, so a 360dp-high phone holds three rows of hotkeys. */
+private val EDGE_VERTICAL = 4.dp
 private val KEY_HEIGHT = 72.dp
+/** The two rows of fixed controls and the key's slot, each with the gap under it. */
+private val FIXED_HEIGHT = CELL * 2 + KEY_HEIGHT + GAP * 3
 private val ICON = 24.dp
-private val ICON_SMALL = 20.dp
+private val ICON_SMALL = 18.dp
+/** A hotkey label's space from the cell's outline on each side. */
+private val LABEL_INSET = 4.dp

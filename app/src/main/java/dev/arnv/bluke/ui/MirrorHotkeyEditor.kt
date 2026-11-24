@@ -11,13 +11,17 @@ import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.safeDrawing
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.selection.selectable
 import androidx.compose.foundation.text.KeyboardOptions
@@ -88,7 +92,8 @@ internal fun MirrorHotkeyEditor(
             .background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.6f))
             // The picture and controls under it take no touches while the editor is open.
             .pointerInput(Unit) { awaitEachGesture { awaitFirstDown(requireUnconsumed = false).consume() } }
-            .padding(16.dp)
+            .windowInsetsPadding(WindowInsets.safeDrawing)
+            .padding(horizontal = 16.dp, vertical = 8.dp)
             .testTag("mirror_hotkey_editor"),
         contentAlignment = Alignment.Center,
     ) {
@@ -98,7 +103,7 @@ internal fun MirrorHotkeyEditor(
             shape = MaterialTheme.shapes.extraLarge,
             modifier = Modifier.widthIn(max = 760.dp).fillMaxHeight(),
         ) {
-            Column(Modifier.padding(start = 24.dp, end = 12.dp, top = 12.dp, bottom = 16.dp)) {
+            Column(Modifier.padding(start = 24.dp, end = 16.dp, top = 8.dp, bottom = 16.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
                         "Hotkey buttons",
@@ -114,7 +119,7 @@ internal fun MirrorHotkeyEditor(
                         Text("Done")
                     }
                 }
-                Row(Modifier.padding(top = 8.dp), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
+                Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
                     ButtonList(hotkeys, onChange, Modifier.weight(1f))
                     AddButton(
                         full = hotkeys.size >= MAX_MIRROR_HOTKEYS,
@@ -131,7 +136,15 @@ internal fun MirrorHotkeyEditor(
 /** The buttons as they sit on the surface, top to bottom: each one's look, its key, its name, and where it goes. */
 @Composable
 private fun ButtonList(hotkeys: List<MirrorHotkey>, onChange: (List<MirrorHotkey>) -> Unit, modifier: Modifier) {
-    Column(modifier.fillMaxHeight().verticalScroll(rememberScrollState()).padding(end = 4.dp)) {
+    val scroll = rememberScrollState()
+    Column(
+        modifier
+            .fillMaxHeight()
+            .scrollCue(scroll, MaterialTheme.colorScheme.onSurfaceVariant)
+            .verticalScroll(scroll)
+            // A gutter for the scroll cue's thumb, clear of the remove buttons.
+            .padding(end = SCROLL_GUTTER),
+    ) {
         SectionLabel("On the surface")
         if (hotkeys.isEmpty()) {
             Text(
@@ -155,7 +168,7 @@ private fun ButtonList(hotkeys: List<MirrorHotkey>, onChange: (List<MirrorHotkey
                         val label = name.take(MAX_HOTKEY_LABEL).takeIf { it.isNotBlank() }
                         onChange(hotkeys.toMutableList().apply { set(index, hotkey.copy(label = label)) })
                     },
-                    placeholder = { Text("Name (optional)", maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    placeholder = { Text("Name", maxLines = 1, overflow = TextOverflow.Ellipsis) },
                     singleLine = true,
                     keyboardOptions = KeyboardOptions(imeAction = ImeAction.Done),
                     modifier = Modifier
@@ -182,8 +195,9 @@ private fun ButtonList(hotkeys: List<MirrorHotkey>, onChange: (List<MirrorHotkey
 }
 
 /**
- * A new button: its modifiers, then a key chosen from the list or the character it should type,
- * then Add, which names what it will add. With eight buttons, it says to remove one first.
+ * A new button: by key or by character, its modifiers on one line, then the key list (or the
+ * character field) in all the height left, then Add, which names what it will add. With eight
+ * buttons, it says to remove one first instead.
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
@@ -197,31 +211,50 @@ private fun AddButton(full: Boolean, typingLayout: KeyboardCharacterLayout, onAd
         AddBy.KEY -> chosenKey?.let { MirrorHotkey(it, modifiers) }
         AddBy.CHARACTER -> fromCharacter?.let { it.copy(modifiers = it.modifiers or modifiers) }
     }
+    if (full) {
+        Text(
+            "$MAX_MIRROR_HOTKEYS of $MAX_MIRROR_HOTKEYS buttons. Remove one to add another.",
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = modifier.padding(top = 8.dp),
+        )
+        return
+    }
+    val keysScroll = rememberScrollState()
     Column(modifier.fillMaxHeight()) {
-        Column(Modifier.weight(1f).verticalScroll(rememberScrollState())) {
-            SectionLabel("Add a button")
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().padding(top = 8.dp)) {
-                AddBy.entries.forEachIndexed { i, option ->
-                    SegmentedButton(
-                        selected = addBy == option,
-                        onClick = { addBy = option },
-                        shape = SegmentedButtonDefaults.itemShape(i, AddBy.entries.size),
-                        label = { Text(option.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
-                        modifier = Modifier.testTag("mirror_add_by_${option.name.lowercase()}"),
-                    )
-                }
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
+            AddBy.entries.forEachIndexed { i, option ->
+                SegmentedButton(
+                    selected = addBy == option,
+                    onClick = { addBy = option },
+                    shape = SegmentedButtonDefaults.itemShape(i, AddBy.entries.size),
+                    label = { Text(option.label, maxLines = 1, overflow = TextOverflow.Ellipsis) },
+                    modifier = Modifier.testTag("mirror_add_by_${option.name.lowercase()}"),
+                )
             }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), modifier = Modifier.padding(top = 8.dp)) {
-                MODIFIER_CHOICES.forEach { (bit, name) ->
-                    val on = modifiers and bit != 0
-                    FilterChip(
-                        selected = on,
-                        onClick = { modifiers = modifiers xor bit },
-                        label = { Text(name) },
-                        modifier = Modifier.testTag("mirror_modifier_$name"),
-                    )
-                }
+        }
+        // One line of modifiers, sliding sideways when large text can't fit them.
+        Row(
+            Modifier.padding(top = 4.dp).horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            MODIFIER_CHOICES.forEach { (bit, name) ->
+                val on = modifiers and bit != 0
+                FilterChip(
+                    selected = on,
+                    onClick = { modifiers = modifiers xor bit },
+                    label = { Text(name, maxLines = 1) },
+                    modifier = Modifier.testTag("mirror_modifier_$name"),
+                )
             }
+        }
+        Column(
+            Modifier
+                .weight(1f)
+                .scrollCue(keysScroll, MaterialTheme.colorScheme.onSurfaceVariant)
+                .verticalScroll(keysScroll)
+                .padding(end = SCROLL_GUTTER),
+        ) {
             when (addBy) {
                 AddBy.KEY -> MirrorKeyGroup.entries.forEach { group ->
                     val keys = MIRROR_HOTKEY_KEYS.filter { it.group == group }
@@ -230,7 +263,7 @@ private fun AddButton(full: Boolean, typingLayout: KeyboardCharacterLayout, onAd
                         group.title,
                         style = MaterialTheme.typography.labelMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        modifier = Modifier.padding(top = 12.dp, bottom = 4.dp),
+                        modifier = Modifier.padding(top = 8.dp, bottom = 4.dp),
                     )
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                         keys.forEach { choice ->
@@ -256,31 +289,22 @@ private fun AddButton(full: Boolean, typingLayout: KeyboardCharacterLayout, onAd
                                 },
                             )
                         },
-                        modifier = Modifier.fillMaxWidth().padding(top = 12.dp).testTag("mirror_hotkey_character"),
+                        modifier = Modifier.fillMaxWidth().padding(top = 8.dp).testTag("mirror_hotkey_character"),
                     )
                 }
             }
         }
-        if (full) {
-            Text(
-                "$MAX_MIRROR_HOTKEYS of $MAX_MIRROR_HOTKEYS buttons. Remove one to add another.",
-                style = MaterialTheme.typography.bodyMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                modifier = Modifier.padding(top = 12.dp),
-            )
-        } else {
-            Button(
-                onClick = {
-                    adding?.let(onAdd)
-                    chosenKey = null
-                    typed = ""
-                    modifiers = 0
-                },
-                enabled = adding != null,
-                modifier = Modifier.padding(top = 12.dp).align(Alignment.End).testTag("mirror_hotkey_add"),
-            ) {
-                Text(adding?.let { "Add ${it.displayLabel}" } ?: "Add")
-            }
+        Button(
+            onClick = {
+                adding?.let(onAdd)
+                chosenKey = null
+                typed = ""
+                modifiers = 0
+            },
+            enabled = adding != null,
+            modifier = Modifier.padding(top = 8.dp).align(Alignment.End).testTag("mirror_hotkey_add"),
+        ) {
+            Text(adding?.let { "Add ${it.displayLabel}" } ?: "Add")
         }
     }
 }
@@ -300,7 +324,7 @@ private fun SectionLabel(text: String) {
         text,
         style = MaterialTheme.typography.titleSmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
-        modifier = Modifier.padding(top = 8.dp).semantics { heading() },
+        modifier = Modifier.padding(top = 4.dp).semantics { heading() },
     )
 }
 
@@ -341,3 +365,6 @@ private fun KeyChoice(choice: MirrorKeyChoice, selected: Boolean, onClick: () ->
         Text(choice.name, style = MaterialTheme.typography.labelLarge, color = content, maxLines = 1)
     }
 }
+
+/** Room at a scrolling column's end for its scroll cue's thumb, clear of the controls. */
+private val SCROLL_GUTTER = 16.dp
