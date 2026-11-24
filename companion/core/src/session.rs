@@ -265,11 +265,14 @@ impl Session {
     }
 
     /// The mirrored display changed (size, place or identity). Returns the `Display` to send,
-    /// once welcomed; the next capture is sent even if its pixels hash the same.
-    pub fn set_display(&mut self, display: Display) -> Option<Message> {
+    /// once welcomed; the next capture is sent even if its pixels hash the same. A held button
+    /// is released first, at its last point in the old display's coordinates: its next point
+    /// would be on a different display.
+    pub fn set_display(&mut self, display: Display, inj: &mut dyn Injector) -> Option<Message> {
         if display == self.display {
             return None;
         }
+        self.buttons.release(&self.display, inj);
         self.display = display;
         self.last_sent_hash = None;
         self.welcome.map(|_| self.display_message())

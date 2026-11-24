@@ -255,7 +255,7 @@ pub fn run(
                     grab_us.push(c.grab_us);
                     match c.result {
                         Ok((frame, display)) => {
-                            let mut out: Vec<Message> = session.set_display(display).into_iter().collect();
+                            let mut out: Vec<Message> = session.set_display(display, inj).into_iter().collect();
                             out.extend(session.offer_frame(now_us(), frame));
                             for o in out {
                                 if let Err(e) = link.send(&o) {

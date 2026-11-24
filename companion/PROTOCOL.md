@@ -105,6 +105,7 @@ The PAKE is SPAKE2 from RFC 9382 with the suite **P256-SHA256-HKDF-HMAC** and it
 - **Release.** The companion releases every held button and forgets the button state when:
   - the connection closes, for any reason;
   - it reads `Release` (the phone sends it from the surface's `ON_STOP`);
+  - the mirrored display changes (size, place or identity): the release lands at the button's last point in the old display, before the `Display` message is sent;
   - while a button is held, no `Pointer`, `Wheel`, `Heartbeat`, `Release` or `Ping` has arrived for **1 s**. These come from the phone's main thread; a `FrameAck` comes from its decoder and doesn't count, so a phone whose main thread hangs with a finger down is released even while frames still flow. While a button is held, the phone sends `Heartbeat` whenever it has sent none of those five for **250 ms** (a `FrameAck` sent meanwhile doesn't reset that wait).
 - **Ping.** The phone sends `Ping` once a second and shows the median round trip of the last five `Pong`s as link latency.
 - Moves, button changes, wheel turns and releases all travel in this one ordered stream, so a press can never overtake the move before it.

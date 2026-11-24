@@ -319,10 +319,34 @@ fn display_change_is_announced_and_resends_the_frame() {
     let f = downscale(&cap.grab((480, 480)).expect("grab"), 480, 480);
     let Some(Message::Frame { seq, .. }) = offer(&mut s, 0, &f) else { panic!("frame") };
     s.on_message(0, Message::FrameAck { seq, decode_us: 1 }, &mut Vec::new()).expect("ack");
-    assert_eq!(s.set_display(display()), None, "same display, nothing to say");
+    assert_eq!(s.set_display(display(), &mut Vec::new()), None, "same display, nothing to say");
     let bigger = Display { width: 2560.0, height: 1440.0, ..display() };
-    assert_eq!(s.set_display(bigger), Some(Message::Display { id: 1, width: 2560, height: 1440, name: "Synthetic".into() }));
+    assert_eq!(
+        s.set_display(bigger, &mut Vec::new()),
+        Some(Message::Display { id: 1, width: 2560, height: 1440, name: "Synthetic".into() })
+    );
     assert!(offer(&mut s, 100_000, &f).is_some());
+}
+
+#[test]
+fn display_change_mid_drag_releases_at_the_old_point_before_the_new_display() {
+    let mut s = started(0);
+    let mut rec = Vec::new();
+    mid_drag(&mut s, &mut rec, 1);
+    let (x, y) = display().map(2000, 2000);
+    let n = rec.len();
+    let bigger = Display { width: 2560.0, height: 1440.0, ..display() };
+    assert!(s.set_display(bigger.clone(), &mut rec).is_some());
+    assert_eq!(rec[n..], [InputEvent::Release { x, y }], "released where the finger last was, in the old display");
+    assert!(!s.button_held());
+    // The next touch is a fresh press in the new display, not a drag from the old point.
+    s.on_message(2, pointer(1000, 1000, true), &mut rec).expect("ok");
+    let (nx, ny) = bigger.map(1000, 1000);
+    assert_eq!(rec[n + 1..], [InputEvent::Move { x: nx, y: ny }, InputEvent::Down { x: nx, y: ny }]);
+    // An identical display releases nothing.
+    let mut rec = Vec::new();
+    assert_eq!(s.set_display(bigger, &mut rec), None);
+    assert!(rec.is_empty() && s.button_held());
 }
 
 #[test]
@@ -436,7 +460,7 @@ fn an_unencoded_capture_overtaken_by_a_display_change_is_retaken_at_once() {
     let p = Prepared::prepare(&f, 50_000, s.last_sent_hash(), &mut FakeJpeg);
     // ...but the display changed before it was offered, so it must be sent after all.
     let bigger = Display { width: 2560.0, height: 1440.0, ..display() };
-    assert!(s.set_display(bigger).is_some());
+    assert!(s.set_display(bigger, &mut Vec::new()).is_some());
     assert_eq!(s.offer_frame(50_100, p), None);
     assert_eq!(s.stats.skipped_unchanged, 0);
     assert!(s.wants_frame(50_100), "not paced: capture again now");
