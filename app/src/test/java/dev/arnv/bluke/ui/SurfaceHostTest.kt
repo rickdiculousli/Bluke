@@ -36,6 +36,34 @@ class SurfaceHostTest {
     }
 
     @Test
+    fun aBlockedChipOffersTheFixATapCanMake() {
+        assertEquals(BlockedFix.TurnOnBluetooth, blockedFix(BluetoothState.BluetoothOff))
+        assertEquals(BlockedFix.OpenAppSettings, blockedFix(BluetoothState.PermissionRequired))
+        assertNull(blockedFix(BluetoothState.ProfileNotSupported))
+        assertNull(blockedFix(BluetoothState.Unsupported))
+        assertNull(blockedFix(BluetoothState.ReadyDisconnected))
+
+        val fix = BlockedFix.TurnOnBluetooth
+        val off = hostChipContent(
+            SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off", onFix = {}, fixLabel = fix.label, fixClickLabel = fix.clickLabel),
+        )
+        assertEquals("Turn on", off.action)
+        assertEquals("Turn on Bluetooth", off.clickLabel)
+        // A label with nothing to run is no action.
+        assertNull(hostChipContent(SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off", fixLabel = "Turn on")).action)
+    }
+
+    @Test
+    fun aPhoneWithoutTheHidRoleSaysSoOnEverySurface() {
+        val reason = blockedReason(BluetoothState.ProfileNotSupported)
+        assertEquals("Phone not supported", reason)
+        val content = hostChipContent(SurfaceHost(SurfaceHostStatus.Blocked, null, reason = reason))
+        assertEquals(reason, content.label)
+        assertNull(content.action)
+        assertNull(content.clickLabel)
+    }
+
+    @Test
     fun theModeButtonWalksTheUsersCycle() {
         val cycle = listOf(InputMode.KEYBOARD, InputMode.GAMEPAD, InputMode.MEDIA_PRESENTATION)
         assertEquals(InputMode.GAMEPAD, nextInputMode(cycle, InputMode.KEYBOARD))

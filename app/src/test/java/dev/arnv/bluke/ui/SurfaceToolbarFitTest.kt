@@ -14,7 +14,14 @@ import androidx.compose.ui.text.TextLayoutResult
 import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.test.core.app.ApplicationProvider
+import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.SemanticsProperties
+import androidx.compose.ui.semantics.getOrNull
+import dev.arnv.bluke.bluetooth.BluetoothState
+import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Rule
 import org.junit.Test
@@ -44,6 +51,8 @@ class SurfaceToolbarFitTest {
         SurfaceHost(SurfaceHostStatus.Offline, "Desk PC", onReconnect = {}),
         SurfaceHost(SurfaceHostStatus.Offline, null),
         SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off"),
+        SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off", onFix = {}, fixLabel = "Turn on", fixClickLabel = "Turn on Bluetooth"),
+        SurfaceHost(SurfaceHostStatus.Blocked, null, reason = blockedReason(BluetoothState.ProfileNotSupported)),
     )
 
     /** A portrait phone: the keyboard's toolbar used to give the host chip no width at all. */
@@ -72,6 +81,34 @@ class SurfaceToolbarFitTest {
             val short = layouts[index]["name"]!!
             assertFalse("\"Desk PC\" shows whole in row $index", short.isLineEllipsized(0))
         }
+    }
+
+    /** A large landscape phone: a long name used to stop at 180dp with room to spare beside it. */
+    @Test
+    @Config(qualifiers = "w914dp-h411dp-land-420dpi")
+    fun aWideToolbarGivesTheNameItsRoom() {
+        val layouts = showToolbars()
+        hosts.indices.forEach { assertStatusWhole(it, layouts[it]) }
+        assertChipsAndTuneOnScreen()
+
+        val long = layouts[0]["name"] ?: error("Connected shows no name")
+        // Characters an ellipsis hides lay out with no width. A 180dp cap showed about 18; the
+        // room that's free here holds 30 and more.
+        val shown = (0 until long.layoutInput.text.length).count { long.getBoundingBox(it).width > 0f }
+        assertTrue("a 40-character name shows at least 30 characters, not $shown", shown >= 30)
+    }
+
+    /** A Blocked chip with a fix is a button that says what it does; one without stays a status. */
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-420dpi")
+    fun aBlockedChipWithAFixIsAButton() {
+        showToolbars()
+        val chips = compose.onAllNodesWithTag("surface_host").fetchSemanticsNodes()
+        val fix = chips[hosts.indexOfFirst { it.onFix != null }].config
+        assertEquals(Role.Button, fix.getOrNull(SemanticsProperties.Role))
+        assertEquals("Turn on Bluetooth", fix.getOrNull(SemanticsActions.OnClick)?.label)
+        val noFix = chips[hosts.indexOfFirst { it.status == SurfaceHostStatus.Blocked && it.onFix == null }].config
+        assertNull(noFix.getOrNull(SemanticsActions.OnClick))
     }
 
     private fun showToolbars(): List<Map<String, TextLayoutResult>> {
