@@ -35,6 +35,7 @@ import dev.arnv.bluke.bluetooth.HidLifecycleState
 import dev.arnv.bluke.data.KEYBOARD_GEOMETRY_PREFERENCE
 import dev.arnv.bluke.data.KeyboardThemeRepository
 import dev.arnv.bluke.sound.KeyboardSoundSynthesizer
+import dev.arnv.bluke.ui.GAMEPAD_CONSOLE_PREFERENCE
 import dev.arnv.bluke.ui.HomeScreen
 import dev.arnv.bluke.ui.InputMode
 import dev.arnv.bluke.ui.KeyboardCharacterLayout
@@ -43,6 +44,10 @@ import dev.arnv.bluke.ui.KeyboardLayoutSwitcherOverlay
 import dev.arnv.bluke.ui.KeyboardView
 import dev.arnv.bluke.ui.MediaPresentationView
 import dev.arnv.bluke.ui.MultimediaPosture
+import dev.arnv.bluke.ui.SurfaceChrome
+import dev.arnv.bluke.ui.SurfaceHost
+import dev.arnv.bluke.ui.SurfaceHostStatus
+import dev.arnv.bluke.ui.SurfaceTheme
 import dev.arnv.bluke.ui.theme.MyApplicationTheme
 import kotlinx.coroutines.flow.MutableStateFlow
 import org.junit.After
@@ -340,19 +345,40 @@ class AllScreensScreenshotTest {
             surface("keyboard-default-portrait", dark, t, PORTRAIT, { putInt("launch_mode", 0) })
             surface("touchpad-landscape", dark, t, LANDSCAPE, { putInt("launch_mode", 1) })
             surface("touchpad-portrait", dark, t, PORTRAIT, { putInt("launch_mode", 1) })
-            for (profile in listOf("native_hat", "android", "web_buttons")) {
-                surface("gamepad-xbox-$profile-landscape", dark, t, LANDSCAPE, {
-                    putInt("launch_mode", 2); putString(GAMEPAD_DPAD_MODE_PREFERENCE, profile)
-                })
+            for ((console, consoleId) in listOf("xbox" to "xbox_series", "ps5" to "playstation_5")) {
+                for (profile in listOf("native_hat", "android", "web_buttons")) {
+                    surface("gamepad-$console-$profile-landscape", dark, t, LANDSCAPE, {
+                        putInt("launch_mode", 2)
+                        putString(GAMEPAD_CONSOLE_PREFERENCE, consoleId)
+                        putString(GAMEPAD_DPAD_MODE_PREFERENCE, profile)
+                    })
+                }
             }
-            surface("gamepad-ps5-native_hat-landscape", dark, t, LANDSCAPE, {
-                putInt("launch_mode", 2); putString(GAMEPAD_DPAD_MODE_PREFERENCE, "native_hat")
+            // The toolbar's console control, as a user switches: Xbox to PlayStation.
+            surface("gamepad-console-switched-landscape", dark, t, LANDSCAPE, {
+                putInt("launch_mode", 2); putString(GAMEPAD_CONSOLE_PREFERENCE, "xbox_series")
             }) { composeRule.onNodeWithTag("console_selector_pill").performClick() }
             surface("gamepad-xbox-editmode-landscape", dark, t, LANDSCAPE, {
                 putInt("launch_mode", 2)
-            }) { composeRule.onNodeWithText("Edit Layout").performClick() }
+            }) { composeRule.onNodeWithTag("edit_layout_toggle_btn").performClick() }
             surface("gamepad-portrait", dark, t, PORTRAIT, { putInt("launch_mode", 2) })
             surface("media-landscape", dark, t, LANDSCAPE, { putInt("launch_mode", 4) })
+        }
+    }
+
+    /** Each surface with its Tune sheet open, from the toolbar's Tune button. */
+    @Test
+    fun tuneSheets() {
+        grantBluetooth()
+        themes { dark, t ->
+            val names = mapOf(InputMode.MEDIA_PRESENTATION to "media")
+            for (mode in InputMode.entries) {
+                surface("${names[mode] ?: mode.preferenceKey}-tune-landscape", dark, t, LANDSCAPE, { putInt("launch_mode", mode.id) }) {
+                    composeRule.onNodeWithTag("surface_tune").performClick()
+                    composeRule.mainClock.advanceTimeBy(1_000)
+                    composeRule.onNodeWithTag("surface_tune_sheet").assertExists()
+                }
+            }
         }
     }
 
@@ -365,11 +391,19 @@ class AllScreensScreenshotTest {
                 baselinePrefs(); theme(dark, PORTRAIT)
                 manager.apply(connectedState)
                 compose {
+                    // HomeScreen wraps every surface in SurfaceTheme; this one is rendered on its own.
+                    SurfaceTheme {
                     MediaPresentationView(
-                        btManager = manager, onClose = {}, launchMode = InputMode.MEDIA_PRESENTATION.id,
-                        onModeChange = {}, sharedPrefs = prefs, isConnected = true,
+                        btManager = manager,
+                        chrome = SurfaceChrome(
+                            mode = InputMode.MEDIA_PRESENTATION,
+                            host = SurfaceHost(SurfaceHostStatus.Connected, "Rick's MacBook Pro"),
+                            onClose = {}, onNextMode = {},
+                        ),
+                        sharedPrefs = prefs,
                         postureOverride = MultimediaPosture.PORTRAIT_HELD,
                     )
+                    }
                 }
                 shot("media-upright-portrait-$t")
             }
