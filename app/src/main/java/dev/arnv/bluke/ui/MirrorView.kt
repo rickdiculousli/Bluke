@@ -62,6 +62,7 @@ import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.unit.IntOffset
@@ -293,13 +294,15 @@ fun MirrorSurface(
     var editing by remember { mutableStateOf(editingHotkeys) }
     val bounds = remember { MirrorControlBounds() }
     val live = state.phase.isLive
+    // While the editor is open, TalkBack reaches only the editor, as a finger does.
+    val underEditor = if (editing) Modifier.clearAndSetSemantics {} else Modifier
     Box(
         modifier = modifier
             .fillMaxSize()
             .background(MaterialTheme.colorScheme.surfaceContainerLowest)
             .testTag("mirror_view_root"),
     ) {
-        Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.End))) {
+        Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.End)).then(underEditor)) {
             MirrorImage(
                 frames = frames,
                 live = live,
@@ -315,6 +318,7 @@ fun MirrorSurface(
         Column(
             modifier = Modifier
                 .fillMaxSize()
+                .then(underEditor)
                 .windowInsetsPadding(MirrorControlsInsets.union(WindowInsets.displayCutout.only(WindowInsetsSides.End)))
                 .padding(start = MIRROR_CONTROLS_WIDTH + 24.dp, end = 16.dp, top = 12.dp, bottom = 12.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
@@ -327,6 +331,7 @@ fun MirrorSurface(
                     onUndoForget = onUndoForget,
                 )
                 QuietLinkChip(state)
+                SlowLinkChip(state)
                 PairingChip(
                     request = state.phase.pairingRequest.takeIf { prompt == PairingPrompt.CHIP },
                     onShowCode = onShowPairingCode,
@@ -371,6 +376,7 @@ fun MirrorSurface(
             },
             onEditHotkeys = { editing = true },
             onForgetCompanion = onForgetCompanion,
+            modifier = underEditor,
         )
         // The editor fades in over the picture and out the same way.
         AnimatedVisibility(visible = editing, enter = fadeIn(EffectsSpring), exit = fadeOut(EffectsSpring)) {

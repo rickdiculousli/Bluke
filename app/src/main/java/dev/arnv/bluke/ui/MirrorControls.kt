@@ -34,7 +34,9 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AdsClick
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Edit
+import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Mouse
 import androidx.compose.material.icons.filled.TouchApp
@@ -123,11 +125,15 @@ internal class MirrorControlBounds {
     fun hits(window: Offset): Boolean = rects.values.any { it.contains(window) }
 }
 
-/** Records this control's bounds in [bounds] while it's on screen. */
+/**
+ * Records this control's bounds in [bounds] while it's on screen, widened by half the gap on each
+ * side, so a thumb that misses a control by a little lands on the overlay, never clicks the picture.
+ */
 @Composable
 private fun Modifier.controlBounds(bounds: MirrorControlBounds, key: Any): Modifier {
     DisposableEffect(bounds, key) { onDispose { bounds.remove(key) } }
-    return onGloballyPositioned { bounds.place(key, it.boundsInWindow()) }
+    val slack = with(LocalDensity.current) { (GAP / 2).toPx() }
+    return onGloballyPositioned { bounds.place(key, it.boundsInWindow().inflate(slack)) }
 }
 
 /**
@@ -205,7 +211,7 @@ internal fun MirrorControls(
                     haptics.tick()
                     onTouchModeChange(if (state.touchMode == MirrorTouchMode.DIRECT) MirrorTouchMode.HOVER else MirrorTouchMode.DIRECT)
                 }
-                MenuCell(state, bounds, onEditHotkeys, onForgetCompanion)
+                MenuCell(state, hotkeys, bounds, onEditHotkeys, onForgetCompanion)
             }
             if (state.touchMode == MirrorTouchMode.HOVER) {
                 LeftButtonKey(state.keyHeld, enabled = live, bounds, onKey)
@@ -349,7 +355,7 @@ private fun GlyphAndLabel(label: String, glyph: @Composable () -> Unit) {
             glyph()
             Text(label, style = style, maxLines = 1)
         } else {
-            Box(Modifier.size(ICON), contentAlignment = Alignment.Center) { glyph() }
+            Box(Modifier.heightIn(min = ICON), contentAlignment = Alignment.Center) { glyph() }
         }
     }
 }
@@ -358,10 +364,14 @@ private fun GlyphAndLabel(label: String, glyph: @Composable () -> Unit) {
 private val CellLabelStyle: TextStyle
     @Composable get() = MaterialTheme.typography.labelSmall.let { it.copy(letterSpacing = 0.sp, lineHeight = it.fontSize) }
 
-/** ⋮: which computer this is and how its link is doing, Edit hotkey buttons, then Forget. */
+/**
+ * ⋮: which computer this is and how its link is doing, which Bluetooth host the hotkeys go to,
+ * Edit hotkey buttons, then Forget.
+ */
 @Composable
 private fun MenuCell(
     state: MirrorUiState,
+    hotkeys: MirrorHotkeysUi,
     bounds: MirrorControlBounds,
     onEditHotkeys: () -> Unit,
     onForgetCompanion: () -> Unit,
@@ -411,7 +421,18 @@ private fun MenuCell(
                         .testTag("mirror_link_readout"),
                 )
             }
-            if (status != null || connected != null) HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+            Text(
+                text = hotkeys.hostName?.takeIf { hotkeys.enabled }?.let { "Hotkeys go to $it over Bluetooth" }
+                    ?: "Hotkeys need Bluetooth connected to a host",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier
+                    .widthIn(max = 280.dp)
+                    .padding(horizontal = 12.dp)
+                    .padding(bottom = 8.dp)
+                    .testTag("mirror_menu_hotkeys_host"),
+            )
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
             DropdownMenuItem(
                 text = { Text("Edit hotkey buttons") },
                 leadingIcon = { Icon(Icons.Default.Edit, contentDescription = null) },
@@ -422,6 +443,7 @@ private fun MenuCell(
                 modifier = Modifier.testTag("mirror_edit_hotkeys"),
             )
             DropdownMenuItem(
+                leadingIcon = { Icon(Icons.Default.LinkOff, contentDescription = null) },
                 text = {
                     if (paired != null) {
                         Column(Modifier.widthIn(max = 256.dp)) {
@@ -528,7 +550,7 @@ private fun HotkeyGrid(
                         null -> Spacer(Modifier.size(CELL))
                         // Keyed by the button too, so a cell never sends the key it held before an edit.
                         else -> key(index, list[index]) {
-                            HotkeyCell(list[index], index, hotkeys.enabled, bounds, onHotkey, onUnavailable)
+                            HotkeyCell(list[index], index, hotkeys.enabled, hotkeys.hostName, bounds, onHotkey, onUnavailable)
                         }
                     }
                 }
@@ -572,7 +594,8 @@ private fun PageCell(page: Int, pages: Int, bounds: MirrorControlBounds, onNext:
             },
     ) {
         GlyphAndLabel("${page + 1}/$pages") {
-            Icon(Icons.Filled.ExpandMore, contentDescription = null, modifier = Modifier.size(ICON_SMALL))
+            // Down to the next page; up from the last, which goes back to the first.
+            Icon(if (page == pages - 1) Icons.Filled.ExpandLess else Icons.Filled.ExpandMore, contentDescription = null, modifier = Modifier.size(ICON_SMALL))
         }
     }
 }
@@ -582,6 +605,7 @@ private fun HotkeyCell(
     hotkey: MirrorHotkey,
     index: Int,
     enabled: Boolean,
+    hostName: String?,
     bounds: MirrorControlBounds,
     onHotkey: (MirrorHotkey, Boolean) -> Unit,
     onUnavailable: () -> Unit,
@@ -615,7 +639,11 @@ private fun HotkeyCell(
             .clearAndSetSemantics {
                 contentDescription = hotkey.spokenLabel
                 role = Role.Button
-                if (!enabled) disabled()
+                if (!enabled) {
+                    disabled()
+                    // TalkBack can't activate a disabled button, so the reason rides on its state.
+                    stateDescription = "Needs Bluetooth connected to ${hostName ?: "a host"}"
+                }
                 onClick {
                     if (currentEnabled) {
                         currentOnHotkey(currentHotkey, true)
@@ -629,6 +657,22 @@ private fun HotkeyCell(
         active = down && enabled,
         enabled = enabled,
     ) {
+        Text(
+            label,
+            style = style.first,
+            maxLines = style.second,
+            overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center,
+            modifier = Modifier.padding(horizontal = LABEL_INSET),
+        )
+    }
+}
+
+/** A hotkey's face as the surface draws it, for showing a button off the surface (the editor's list). */
+@Composable
+internal fun MirrorHotkeyFace(label: String) {
+    val style = hotkeyLabelStyle(label)
+    ControlFace(Modifier.size(CELL), input = Modifier) {
         Text(
             label,
             style = style.first,

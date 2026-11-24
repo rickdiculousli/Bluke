@@ -34,6 +34,7 @@ import androidx.compose.material.icons.filled.ErrorOutline
 import androidx.compose.material.icons.filled.HourglassTop
 import androidx.compose.material.icons.filled.Key
 import androidx.compose.material.icons.filled.Lock
+import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.WifiOff
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
@@ -119,6 +120,56 @@ internal fun QuietLinkChip(state: MirrorUiState) {
         }
     }
 }
+
+/**
+ * A live picture over a slow link: which computer, and its link latency, while the latency stays
+ * at [SLOW_LINK_MS] or more, so lag a person feels has a cause they can see. A link that stops
+ * answering is [QuietLinkChip]'s instead.
+ */
+@Composable
+internal fun SlowLinkChip(state: MirrorUiState) {
+    val connected = state.phase as? MirrorPhase.Connected
+    val latency = state.latencyMs
+    val slow = connected?.hasFrame == true && !state.pictureStale && latency != null && latency >= SLOW_LINK_MS
+    // What fades out is what was last shown.
+    val last = remember { arrayOf<String?>(null) }
+    if (slow) last[0] = "Slow link · $latency ms · ${connected?.companionName}"
+    AnimatedVisibility(
+        visible = slow,
+        enter = fadeIn(EffectsSpring) + expandVertically(SpatialSizeSpring),
+        exit = fadeOut(EffectsSpring) + shrinkVertically(SpatialSizeSpring),
+    ) {
+        Row(
+            modifier = Modifier
+                .padding(bottom = 8.dp)
+                .clip(MaterialTheme.shapes.extraLarge)
+                .background(MaterialTheme.colorScheme.surfaceContainerHigh)
+                .heightIn(min = 40.dp)
+                .padding(horizontal = 16.dp, vertical = 8.dp)
+                .semantics { liveRegion = LiveRegionMode.Polite }
+                .testTag("mirror_slow_link"),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
+        ) {
+            Icon(
+                Icons.Filled.Speed,
+                contentDescription = null,
+                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.size(18.dp),
+            )
+            Text(
+                last[0].orEmpty(),
+                style = MaterialTheme.typography.labelLarge,
+                color = MaterialTheme.colorScheme.onSurface,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+            )
+        }
+    }
+}
+
+/** Link latency from which the surface says the link is slow: past it, a drag visibly trails the finger. */
+internal const val SLOW_LINK_MS = 100
 
 /**
  * A pairing request that arrives while a picture is live: a chip above the picture says who asks,
