@@ -54,6 +54,7 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
@@ -278,6 +279,8 @@ fun TouchpadView(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
+                    // While Tune is open the pad sits under its scrim: TalkBack reaches only the sheet.
+                    .then(if (tuneOpen) Modifier.clearAndSetSemantics {} else Modifier)
                     .padding(horizontal = 24.dp, vertical = 16.dp),
                 horizontalArrangement = Arrangement.spacedBy(16.dp),
                 verticalAlignment = Alignment.CenterVertically,
@@ -344,7 +347,9 @@ private fun RowScope.TouchpadPad(
             Box(
                 Modifier
                     .fillMaxWidth()
-                    .fillMaxHeight(if (buttonMode == TrackpadButtonMode.CLICKPAD) 1f else 1f - BUTTON_STRIP_FRACTION),
+                    .fillMaxHeight(if (buttonMode == TrackpadButtonMode.CLICKPAD) 1f else 1f - BUTTON_STRIP_FRACTION)
+                    // Named like the multimedia remote's pad, its hint read with the name.
+                    .semantics(mergeDescendants = true) { contentDescription = "Pointer pad" },
                 contentAlignment = Alignment.Center,
             ) {
                 Text(

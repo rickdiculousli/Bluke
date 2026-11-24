@@ -1,6 +1,6 @@
 package dev.arnv.bluke.ui
 
-import androidx.activity.compose.BackHandler
+import androidx.activity.compose.PredictiveBackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
@@ -53,13 +53,20 @@ import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.unit.LayoutDirection
+import kotlin.coroutines.cancellation.CancellationException
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
-import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.isTraversalGroup
@@ -73,7 +80,8 @@ import kotlin.math.roundToInt
 /**
  * A surface's own settings, in a panel that slides in from the end edge over the surface. It holds
  * the surface's `<Surface>TuneContent` and, above it, the surface state (console, button mode) that
- * isn't a setting. Back or a tap on the dimmed surface closes it.
+ * isn't a setting. Back or a tap on the dimmed surface closes it; a predictive Back gesture slides the
+ * panel toward its edge as it goes, and lets it settle back if the gesture is cancelled.
  */
 @Composable
 fun SurfaceTuneSheet(
@@ -82,7 +90,20 @@ fun SurfaceTuneSheet(
     onDismiss: () -> Unit,
     content: @Composable ColumnScope.() -> Unit,
 ) {
-    BackHandler(enabled = visible, onBack = onDismiss)
+    // How far a Back gesture in progress has gone, 0 to 1. It holds through the exit, so the panel
+    // slides out from where the gesture left it, and clears when the sheet opens again.
+    var backProgress by remember { mutableFloatStateOf(0f) }
+    LaunchedEffect(visible) { if (visible) backProgress = 0f }
+    PredictiveBackHandler(enabled = visible) { progress ->
+        try {
+            progress.collect { backProgress = it.progress }
+            onDismiss()
+        } catch (cancelled: CancellationException) {
+            backProgress = 0f
+            throw cancelled
+        }
+    }
+    val towardEdge = if (LocalLayoutDirection.current == LayoutDirection.Rtl) -1f else 1f
     val colors = MaterialTheme.colorScheme
     Box(Modifier.fillMaxSize()) {
         AnimatedVisibility(
@@ -93,8 +114,9 @@ fun SurfaceTuneSheet(
             Box(
                 Modifier
                     .fillMaxSize()
-                    // The Close button carries this action for TalkBack.
-                    .clearAndSetSemantics { }
+                    // One node TalkBack can name and act on, like the Close button in the panel.
+                    .semantics { contentDescription = "Close $title" }
+                    .testTag("surface_tune_scrim")
                     .background(colors.scrim.copy(alpha = 0.32f))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -117,6 +139,7 @@ fun SurfaceTuneSheet(
                     Modifier
                         .width(panelWidth)
                         .fillMaxHeight()
+                        .graphicsLayer { translationX = towardEdge * backProgress * size.width * BACK_TRAVEL }
                         .background(colors.surfaceContainerLow, MaterialTheme.shapes.extraLarge.copy(topEnd = ZeroCornerSize, bottomEnd = ZeroCornerSize))
                         .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.End))
                         .semantics { paneTitle = title; isTraversalGroup = true }
@@ -149,6 +172,9 @@ fun SurfaceTuneSheet(
         }
     }
 }
+
+/** How much of its width the panel travels toward its edge over a whole Back gesture. */
+private const val BACK_TRAVEL = 0.5f
 
 /** A titled group of tune controls. */
 @Composable

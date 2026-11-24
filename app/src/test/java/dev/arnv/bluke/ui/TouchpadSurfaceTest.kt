@@ -19,6 +19,11 @@ import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.activity.ComponentActivity
 import android.graphics.Bitmap
 import androidx.core.view.drawToBitmap
+import androidx.compose.ui.semantics.SemanticsActions
+import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.hasText
+import androidx.compose.ui.test.onAllNodesWithTag
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -94,6 +99,67 @@ class TouchpadSurfaceTest {
             up()
         }
         compose.waitForIdle()
+    }
+
+    @Test
+    fun thePadIsNamedWithItsHint() {
+        showTouchpad()
+        compose.onNodeWithContentDescription("Pointer pad").assertExists()
+            .assert(hasText("Tap to click · Two fingers to scroll"))
+    }
+
+    @Test
+    fun anOpenTuneSheetHidesThePadFromTalkBack() {
+        showTouchpad()
+        prefs.edit().putBoolean(TOUCHPAD_NUMPAD_PREFERENCE, true).commit()
+        compose.waitForIdle()
+        fun padNodes() = compose.onAllNodesWithTag("touchpad_gesture_layer").fetchSemanticsNodes().size +
+            compose.onAllNodesWithTag("numpad_key_5").fetchSemanticsNodes().size
+        assertEquals(2, padNodes())
+
+        compose.onNodeWithTag("surface_tune").performClick()
+        compose.waitForIdle()
+        assertEquals("no pad or numpad nodes under the open sheet", 0, padNodes())
+        // The toolbar stays reachable, and the scrim is one node that names and does its action.
+        compose.onNodeWithTag("touchpad_numpad_toggle").assertExists()
+        val scrim = compose.onNodeWithTag("surface_tune_scrim").fetchSemanticsNode().config
+        assertEquals(listOf("Close Touchpad"), scrim.getOrNull(SemanticsProperties.ContentDescription))
+        assertEquals("Close Touchpad", scrim.getOrNull(SemanticsActions.OnClick)?.label)
+
+        compose.onNodeWithTag("surface_tune_scrim").performClick()
+        compose.waitForIdle()
+        assertEquals(0, compose.onAllNodesWithTag("surface_tune_scrim").fetchSemanticsNodes().size)
+        assertEquals(2, padNodes())
+    }
+
+    @Test
+    fun aPredictiveBackSlidesTheSheetAndCancellingPutsItBack() {
+        showTouchpad()
+        compose.onNodeWithTag("surface_tune").performClick()
+        compose.waitForIdle()
+        fun sheetLeft() = compose.onNodeWithTag("surface_tune_sheet").fetchSemanticsNode().boundsInRoot.left
+        val open = sheetLeft()
+        val dispatcher = compose.activity.onBackPressedDispatcher
+        fun back(progress: Float) = androidx.activity.BackEventCompat(0f, 0f, progress, androidx.activity.BackEventCompat.EDGE_RIGHT)
+
+        compose.runOnUiThread {
+            dispatcher.dispatchOnBackStarted(back(0f))
+            dispatcher.dispatchOnBackProgressed(back(0.5f))
+        }
+        compose.waitForIdle()
+        assertTrue("the sheet moves toward its edge with the gesture", sheetLeft() > open + 1f)
+
+        compose.runOnUiThread { dispatcher.dispatchOnBackCancelled() }
+        compose.waitForIdle()
+        assertEquals(open, sheetLeft(), 0.5f)
+
+        compose.runOnUiThread {
+            dispatcher.dispatchOnBackStarted(back(0f))
+            dispatcher.dispatchOnBackProgressed(back(0.8f))
+            dispatcher.onBackPressed()
+        }
+        compose.waitForIdle()
+        assertEquals(0, compose.onAllNodesWithTag("surface_tune_sheet").fetchSemanticsNodes().size)
     }
 
     @Test

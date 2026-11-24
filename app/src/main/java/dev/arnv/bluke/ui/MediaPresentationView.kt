@@ -52,6 +52,7 @@ import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
@@ -248,7 +249,12 @@ internal fun MediaPresentationView(
         Box(Modifier.fillMaxSize().then(if (upright) Modifier.uprightFrame() else Modifier)) {
             Column(Modifier.fillMaxSize()) {
                 SurfaceToolbar(chrome = chrome, haptics = haptics, onTune = { tuneOpen = true })
-                val deck = Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp).testTag("multimedia_deck")
+                val deck = Modifier
+                    .fillMaxSize()
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+                    .testTag("multimedia_deck")
+                    // While Tune is open the remote sits under its scrim: TalkBack reaches only the sheet.
+                    .then(if (tuneOpen) Modifier.clearAndSetSemantics {} else Modifier)
                 if (upright) {
                     UprightRemote(remote, tune, deck)
                 } else {
@@ -580,8 +586,9 @@ private val presentationActions = listOf(
 )
 
 private val pageActions = listOf(
-    key("Page up, previous slide", KeyboardLayouts.KEY_PAGEUP, text = "Page up"),
-    key("Page down, next slide", KeyboardLayouts.KEY_PAGEDOWN, text = "Page down"),
+    // What they do on a slide, with the key they send, like the presentation keys' F5 and B.
+    key("Page up, previous slide", KeyboardLayouts.KEY_PAGEUP, text = "Prev", caption = "PgUp"),
+    key("Page down, next slide", KeyboardLayouts.KEY_PAGEDOWN, text = "Next", caption = "PgDn"),
 )
 
 private val mouseActions = listOf(

@@ -13,7 +13,9 @@ import androidx.compose.ui.test.assert
 import androidx.compose.ui.test.hasText
 import androidx.compose.ui.test.isHeading
 import androidx.compose.ui.test.onNodeWithContentDescription
+import androidx.compose.ui.test.onAllNodesWithTag
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performTouchInput
 import androidx.test.core.app.ApplicationProvider
@@ -94,6 +96,23 @@ class MultimediaSurfaceTest {
             .assert(hasText("Tap to click · Two fingers to scroll"))
         compose.onNode(hasText("Pointer") and isHeading()).assertExists()
         compose.onNode(hasText("Slides") and isHeading()).assertExists()
+    }
+
+    @Test
+    fun anOpenTuneSheetHidesTheRemoteFromTalkBack() {
+        setRemote()
+        fun remoteNodes() = compose.onAllNodesWithTag("multimedia_play_pause").fetchSemanticsNodes().size +
+            compose.onAllNodesWithTag("multimedia_touchpad").fetchSemanticsNodes().size
+        assertEquals(2, remoteNodes())
+
+        compose.onNodeWithTag("surface_tune").performClick()
+        compose.waitForIdle()
+        assertEquals("no remote buttons or pad under the open sheet", 0, remoteNodes())
+        compose.onNodeWithTag("surface_close").assertExists()
+
+        compose.onNodeWithTag("surface_tune_scrim").performClick()
+        compose.waitForIdle()
+        assertEquals(2, remoteNodes())
     }
 
     @Test
