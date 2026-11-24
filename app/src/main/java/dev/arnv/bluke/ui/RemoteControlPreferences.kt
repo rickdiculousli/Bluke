@@ -9,7 +9,6 @@ enum class TouchpadModifierPosition(val preferenceValue: String, val displayName
     RIGHT("right", "Modifiers right"),
     ;
 
-    fun next(): TouchpadModifierPosition = entries[(ordinal + 1) % entries.size]
 
     companion object {
         fun fromPreference(value: String?): TouchpadModifierPosition =
