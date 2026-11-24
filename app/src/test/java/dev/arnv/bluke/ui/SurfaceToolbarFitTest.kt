@@ -21,6 +21,7 @@ import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 
 /**
  * The shared toolbar on narrow windows at font scale 1.3, with the keyboard's controls (three LEDs
@@ -28,6 +29,8 @@ import org.robolectric.annotation.Config
  * at least eight characters where there's room, and Tune stays on screen.
  */
 @RunWith(RobolectricTestRunner::class)
+// Native graphics, so text measures with real fonts.
+@GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [36])
 class SurfaceToolbarFitTest {
     @get:Rule val compose = createAndroidComposeRule<ComponentActivity>()
