@@ -5,7 +5,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.State
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import dev.arnv.bluke.ui.theme.migratePaletteStyle
 
 // Surface state: how the user left a surface, restored when it reopens. These are not settings, and
@@ -36,15 +38,16 @@ fun <T> rememberPreference(
     read: (SharedPreferences) -> T,
 ): State<T> {
     val keySet = remember(*keys) { keys.toSet() }
+    val currentRead by rememberUpdatedState(read)
     val state = remember(prefs, keySet) { mutableStateOf(read(prefs)) }
     DisposableEffect(prefs, keySet) {
         val listener = SharedPreferences.OnSharedPreferenceChangeListener { changed, key ->
             // A null key means the file was cleared.
-            if (key == null || key in keySet) state.value = read(changed)
+            if (key == null || key in keySet) state.value = currentRead(changed)
         }
         prefs.registerOnSharedPreferenceChangeListener(listener)
         // Catch a write made between the first read and registering.
-        state.value = read(prefs)
+        state.value = currentRead(prefs)
         onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
     return state

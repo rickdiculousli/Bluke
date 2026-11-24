@@ -1,7 +1,7 @@
 package dev.arnv.bluke.ui.theme
 
 // Generated once from each seed in [AccentColors] with Material Color Utilities (HCT tonal palettes),
-// then committed: primary keeps the seed in light mode when it reaches 4.5:1 on white, otherwise tone 40;
+// then committed: primary keeps the seed in light mode when it reaches 4.5:1 on the darkest light container (#E4E2E6), otherwise tone 40;
 // dark mode uses tone 80; containers are tones 90/30 with on-container 10/90. Secondary is the seed's hue at
 // low chroma. AccentTonesContrastTest holds every pair to its contrast floor, so a hand edit can't regress.
 
@@ -30,7 +30,7 @@ internal val ACCENT_TONES: List<AccentTones> = listOf(
     ),
     // Red (#D32F2F)
     AccentTones(
-        light = ToneSet(0xFFD32F2F, 0xFFFFFFFF, 0xFFFFDAD6, 0xFF410003, 0xFF775653, 0xFFFFFFFF, 0xFFFFDAD6, 0xFF2C1513, 0xFFFFB3AC),
+        light = ToneSet(0xFFBA1A20, 0xFFFFFFFF, 0xFFFFDAD6, 0xFF410003, 0xFF775653, 0xFFFFFFFF, 0xFFFFDAD6, 0xFF2C1513, 0xFFFFB3AC),
         dark = ToneSet(0xFFFFB3AC, 0xFF680008, 0xFF930010, 0xFFFFDAD6, 0xFFE7BDB8, 0xFF442927, 0xFF5D3F3C, 0xFFFFDAD6, 0xFFBA1A20),
     ),
     // Pink (#C2185B)
@@ -55,7 +55,7 @@ internal val ACCENT_TONES: List<AccentTones> = listOf(
     ),
     // Blue (#1976D2)
     AccentTones(
-        light = ToneSet(0xFF1976D2, 0xFFFFFFFF, 0xFFD4E3FF, 0xFF001C3A, 0xFF545F71, 0xFFFFFFFF, 0xFFD8E3F8, 0xFF111C2B, 0xFFA5C8FF),
+        light = ToneSet(0xFF005FAF, 0xFFFFFFFF, 0xFFD4E3FF, 0xFF001C3A, 0xFF545F71, 0xFFFFFFFF, 0xFFD8E3F8, 0xFF111C2B, 0xFFA5C8FF),
         dark = ToneSet(0xFFA5C8FF, 0xFF00315F, 0xFF004786, 0xFFD4E3FF, 0xFFBCC7DC, 0xFF273141, 0xFF3D4758, 0xFFD8E3F8, 0xFF005FAF),
     ),
     // Light Blue (#0288D1)
@@ -70,7 +70,7 @@ internal val ACCENT_TONES: List<AccentTones> = listOf(
     ),
     // Teal (#00796B)
     AccentTones(
-        light = ToneSet(0xFF00796B, 0xFFFFFFFF, 0xFF97F3E2, 0xFF00201B, 0xFF4F625E, 0xFFFFFFFF, 0xFFD2E7E1, 0xFF0C1F1B, 0xFF7AD7C6),
+        light = ToneSet(0xFF006B5E, 0xFFFFFFFF, 0xFF97F3E2, 0xFF00201B, 0xFF4F625E, 0xFFFFFFFF, 0xFFD2E7E1, 0xFF0C1F1B, 0xFF7AD7C6),
         dark = ToneSet(0xFF7AD7C6, 0xFF003730, 0xFF005047, 0xFF97F3E2, 0xFFB6CBC5, 0xFF223430, 0xFF384A46, 0xFFD2E7E1, 0xFF006B5E),
     ),
     // Green (#388E3C)

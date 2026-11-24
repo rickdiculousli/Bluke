@@ -4,6 +4,9 @@ import android.annotation.SuppressLint
 import android.bluetooth.BluetoothDevice
 import android.content.SharedPreferences
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -32,12 +35,19 @@ internal fun InputSurface(
     onModeChange: (Int) -> Unit,
 ) {
     val mode = InputMode.fromId(launchMode)
-    val chrome = SurfaceChrome(
-        mode = mode,
-        host = host,
-        onClose = onClose,
-        onNextMode = { onModeChange(nextInputMode(sharedPrefs.enabledInputModes(), mode).id) },
-    )
+    val currentOnClose by rememberUpdatedState(onClose)
+    val currentOnModeChange by rememberUpdatedState(onModeChange)
+    // The host is rebuilt on every home-state emission; keep it (and the chrome) the same object while
+    // nothing it shows changed, so a lock-light or scan update doesn't recompose the whole surface.
+    val stableHost = remember(host.status, host.name, host.reason, host.onReconnect != null) { host }
+    val chrome = remember(mode, stableHost) {
+        SurfaceChrome(
+            mode = mode,
+            host = stableHost,
+            onClose = { currentOnClose() },
+            onNextMode = { currentOnModeChange(nextInputMode(sharedPrefs.enabledInputModes(), mode).id) },
+        )
+    }
     val caseBrush = caseBrush(keyboardState.selectedKeyboardTheme)
 
     SurfaceTheme {
@@ -102,14 +112,28 @@ internal fun caseBrush(theme: KeyboardThemeDefinition): Brush {
  * How the host chip reads the connection. Checking and starting read as Connecting (the surface stays
  * usable and says so); only a state no tap here can fix reads as Blocked.
  */
-internal fun surfaceHostStatus(state: BluetoothState, lifecycle: HidLifecycleState): SurfaceHostStatus = when {
+internal fun surfaceHostStatus(
+    state: BluetoothState,
+    lifecycle: HidLifecycleState,
+    hasTarget: Boolean = false,
+): SurfaceHostStatus = when {
     state is BluetoothState.Connected -> SurfaceHostStatus.Connected
-    state is BluetoothState.BluetoothOff || state is BluetoothState.Unsupported ||
-        state is BluetoothState.ProfileNotSupported || state is BluetoothState.PermissionRequired -> SurfaceHostStatus.Blocked
+    blockedReason(state) != null -> SurfaceHostStatus.Blocked
     state is BluetoothState.InitializingCapabilities || state is BluetoothState.CheckingCapabilities ||
-        lifecycle is HidLifecycleState.Connecting || lifecycle is HidLifecycleState.Registering ||
-        lifecycle is HidLifecycleState.BindingProxy -> SurfaceHostStatus.Connecting
+        lifecycle is HidLifecycleState.Connecting -> SurfaceHostStatus.Connecting
+    // Re-registering the HID app with no host in view isn't connecting to anything.
+    (lifecycle is HidLifecycleState.Registering || lifecycle is HidLifecycleState.BindingProxy) && hasTarget ->
+        SurfaceHostStatus.Connecting
     else -> SurfaceHostStatus.Offline
+}
+
+/** The cause, in a few words, when no tap on a surface can reach a host; null otherwise. */
+internal fun blockedReason(state: BluetoothState): String? = when (state) {
+    is BluetoothState.BluetoothOff -> "Bluetooth off"
+    is BluetoothState.PermissionRequired -> "Nearby devices permission needed"
+    is BluetoothState.Unsupported -> "No Bluetooth on this phone"
+    is BluetoothState.ProfileNotSupported -> "Keyboard mode not supported"
+    else -> null
 }
 
 /**
@@ -119,7 +143,7 @@ internal fun surfaceHostStatus(state: BluetoothState, lifecycle: HidLifecycleSta
 @SuppressLint("MissingPermission")
 internal fun surfaceHost(btManager: BluetoothKeyboardManager, state: HomeUiState): SurfaceHost {
     fun BluetoothDevice.label(): String? = try { name ?: address } catch (_: SecurityException) { null }
-    val status = surfaceHostStatus(state.bluetoothState, state.hidLifecycleState)
+    val status = surfaceHostStatus(state.bluetoothState, state.hidLifecycleState, hasTarget = state.connectionTargetAddress != null)
     val target = btManager.getReconnectTarget()?.takeIf { it in state.bondedDevices }
     return when (status) {
         SurfaceHostStatus.Connected -> SurfaceHost(
@@ -137,6 +161,6 @@ internal fun surfaceHost(btManager: BluetoothKeyboardManager, state: HomeUiState
             target?.label(),
             onReconnect = target?.let { device -> { btManager.connectDevice(device) } },
         )
-        SurfaceHostStatus.Blocked -> SurfaceHost(status, null)
+        SurfaceHostStatus.Blocked -> SurfaceHost(status, null, reason = blockedReason(state.bluetoothState))
     }
 }

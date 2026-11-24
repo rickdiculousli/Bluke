@@ -23,15 +23,22 @@ class SurfaceToolbarScreenshotTest {
         .getSharedPreferences("toolbar-screenshot", Context.MODE_PRIVATE)
 
     @Test
-    fun everyHostStatus() {
+    fun everyHostStatus() = captureHosts("surface-toolbar-host-status")
+
+    /** A small landscape phone: the host name gives way first, and Tune stays on screen. */
+    @Test
+    @Config(qualifiers = "w640dp-h360dp-land-xhdpi")
+    fun everyHostStatusOnANarrowPhone() = captureHosts("surface-toolbar-host-status-narrow")
+
+    private fun captureHosts(name: String) {
         val hosts = listOf(
             SurfaceHost(SurfaceHostStatus.Connected, "Rick's MacBook Pro (Work, 14-inch, 2024)"),
             SurfaceHost(SurfaceHostStatus.Connecting, "Desk PC"),
             SurfaceHost(SurfaceHostStatus.Offline, "Desk PC", onReconnect = {}),
             SurfaceHost(SurfaceHostStatus.Offline, null),
-            SurfaceHost(SurfaceHostStatus.Blocked, null),
+            SurfaceHost(SurfaceHostStatus.Blocked, null, reason = "Bluetooth off"),
         )
-        captureMatrix(name = "surface-toolbar-host-status", landscape = true) {
+        captureMatrix(name = name, landscape = true) {
             SurfaceTheme {
                 val haptics = rememberSurfaceHaptics(prefs)
                 Surface(color = MaterialTheme.colorScheme.surface) {

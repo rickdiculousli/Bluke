@@ -12,7 +12,8 @@ class SurfaceHostTest {
         assertEquals(SurfaceHostStatus.Connected, surfaceHostStatus(BluetoothState.Connected("Mac"), HidLifecycleState.Connected("AA")))
         assertEquals(SurfaceHostStatus.Connecting, surfaceHostStatus(BluetoothState.ReadyDisconnected, HidLifecycleState.Connecting("AA")))
         assertEquals(SurfaceHostStatus.Connecting, surfaceHostStatus(BluetoothState.CheckingCapabilities, HidLifecycleState.Idle))
-        assertEquals(SurfaceHostStatus.Connecting, surfaceHostStatus(BluetoothState.ReadyDisconnected, HidLifecycleState.Registering(1)))
+        assertEquals(SurfaceHostStatus.Connecting, surfaceHostStatus(BluetoothState.ReadyDisconnected, HidLifecycleState.Registering(1), hasTarget = true))
+        assertEquals(SurfaceHostStatus.Offline, surfaceHostStatus(BluetoothState.ReadyDisconnected, HidLifecycleState.Registering(1), hasTarget = false))
         assertEquals(SurfaceHostStatus.Offline, surfaceHostStatus(BluetoothState.ReadyDisconnected, HidLifecycleState.Registered))
         for (blocked in listOf(BluetoothState.BluetoothOff, BluetoothState.Unsupported, BluetoothState.ProfileNotSupported, BluetoothState.PermissionRequired)) {
             assertEquals(SurfaceHostStatus.Blocked, surfaceHostStatus(blocked, HidLifecycleState.Idle))
@@ -30,6 +31,7 @@ class SurfaceHostTest {
         assertNull(hostChipContent(SurfaceHost(SurfaceHostStatus.Offline, "Desk PC")).action)
         assertEquals("No host", hostChipContent(SurfaceHost(SurfaceHostStatus.Offline, null)).label)
         assertEquals("Bluetooth unavailable", hostChipContent(SurfaceHost(SurfaceHostStatus.Blocked, null)).label)
+        assertEquals("Bluetooth off", hostChipContent(SurfaceHost(SurfaceHostStatus.Blocked, null, reason = blockedReason(BluetoothState.BluetoothOff))).label)
     }
 
     @Test

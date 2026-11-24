@@ -46,8 +46,15 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.liveRegion
+import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.geometry.CornerRadius
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
@@ -68,6 +75,8 @@ data class SurfaceHost(
     val status: SurfaceHostStatus,
     val name: String?,
     val onReconnect: (() -> Unit)? = null,
+    /** For [SurfaceHostStatus.Blocked]: the cause in a few words ("Bluetooth off"), shown instead of a generic line. */
+    val reason: String? = null,
 )
 
 /** What every surface's toolbar needs from the host screen: its mode, its host, and how to leave or switch. */
@@ -99,6 +108,8 @@ fun SurfaceToolbar(
     controls: @Composable RowScope.() -> Unit = {},
 ) {
     val colors = MaterialTheme.colorScheme
+    // On a narrow phone the mode button keeps only its icon, so the host chip keeps its words.
+    val compact = LocalConfiguration.current.screenWidthDp < 720
     Row(
         modifier = modifier
             .fillMaxWidth()
@@ -113,9 +124,11 @@ fun SurfaceToolbar(
         IconButton(onClick = chrome.onClose, modifier = Modifier.testTag("surface_close")) {
             Icon(Icons.Default.Close, contentDescription = "Close ${chrome.mode.displayName.lowercase()}", tint = colors.onSurfaceVariant)
         }
-        ModeButton(chrome, haptics)
-        HostChip(chrome.host, haptics)
-        Spacer(Modifier.weight(1f))
+        ModeButton(chrome, haptics, compact)
+        // The host chip is the one element that gives way on a narrow phone: its name ellipsizes.
+        Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+            HostChip(chrome.host, haptics, Modifier.weight(1f, fill = false))
+        }
         Row(
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(4.dp),
@@ -138,7 +151,7 @@ fun InputMode.icon(): ImageVector = when (this) {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun ModeButton(chrome: SurfaceChrome, haptics: SurfaceHaptics) {
+private fun ModeButton(chrome: SurfaceChrome, haptics: SurfaceHaptics, compact: Boolean) {
     val colors = MaterialTheme.colorScheme
     Row(
         modifier = Modifier
@@ -147,6 +160,7 @@ private fun ModeButton(chrome: SurfaceChrome, haptics: SurfaceHaptics) {
             .clip(CircleShape)
             .background(colors.secondaryContainer)
             .combinedClickable(
+                role = Role.Button,
                 onClickLabel = "Next input mode",
                 onLongClickLabel = chrome.onModeLongPress?.let { "Choose input modes" },
                 onClick = {
@@ -161,7 +175,12 @@ private fun ModeButton(chrome: SurfaceChrome, haptics: SurfaceHaptics) {
         horizontalArrangement = Arrangement.spacedBy(6.dp),
     ) {
         Icon(chrome.mode.icon(), contentDescription = null, tint = colors.onSecondaryContainer, modifier = Modifier.size(18.dp))
-        Text(chrome.mode.displayName, style = MaterialTheme.typography.labelLarge, color = colors.onSecondaryContainer, maxLines = 1)
+        if (compact) {
+            // The label still reaches TalkBack.
+            Box(Modifier.semantics { contentDescription = chrome.mode.displayName })
+        } else {
+            Text(chrome.mode.displayName, style = MaterialTheme.typography.labelLarge, color = colors.onSecondaryContainer, maxLines = 1)
+        }
         Icon(Icons.AutoMirrored.Filled.ArrowRight, contentDescription = null, tint = colors.onSecondaryContainer, modifier = Modifier.size(18.dp))
     }
 }
@@ -196,21 +215,22 @@ internal fun hostChipContent(host: SurfaceHost): HostChipContent {
             description = if (name != null) "Offline. Last host $name" else "Offline. No host paired",
         )
         SurfaceHostStatus.Blocked -> HostChipContent(
-            status = "Bluetooth unavailable",
+            status = host.reason ?: "Bluetooth unavailable",
             name = null,
             action = null,
-            description = "Bluetooth unavailable",
+            description = host.reason ?: "Bluetooth unavailable",
         )
     }
 }
 
 @Composable
-private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics) {
+private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics, modifier: Modifier = Modifier) {
     val colors = MaterialTheme.colorScheme
     val content = hostChipContent(host)
     val reconnect = host.onReconnect.takeIf { host.status == SurfaceHostStatus.Offline }
     val shape = CircleShape
-    var chip = Modifier
+    var chip = modifier
+        .semantics { liveRegion = LiveRegionMode.Polite }
         .minimumInteractiveComponentSize()
         .heightIn(min = 40.dp)
         .clip(shape)
@@ -234,9 +254,22 @@ private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics) {
     ) {
         HostDot(host.status)
         val textColor = if (host.status == SurfaceHostStatus.Connected) colors.onSurface else colors.onSurfaceVariant
-        Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
+        // What gives way, in order: the host's name, then status words; the Reconnect action never does.
+        Row(
+            modifier = Modifier.weight(1f, fill = false),
+            horizontalArrangement = Arrangement.spacedBy(4.dp),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
             if (content.status != null) {
-                Text(content.status, style = MaterialTheme.typography.labelLarge, color = textColor, maxLines = 1, softWrap = false)
+                Text(
+                    content.status,
+                    style = MaterialTheme.typography.labelLarge,
+                    color = textColor,
+                    maxLines = 1,
+                    softWrap = false,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = if (content.name == null) Modifier.weight(1f, fill = false) else Modifier,
+                )
             }
             if (content.name != null) {
                 Text(
@@ -245,7 +278,7 @@ private fun HostChip(host: SurfaceHost, haptics: SurfaceHaptics) {
                     color = textColor,
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis,
-                    modifier = Modifier.widthIn(max = 180.dp),
+                    modifier = Modifier.weight(1f, fill = false).widthIn(max = 180.dp),
                 )
             }
         }
@@ -309,11 +342,19 @@ fun SurfaceToolbarLeds(
     modifier: Modifier = Modifier,
 ) {
     val colors = MaterialTheme.colorScheme
+    // The pill draws at 40dp like the other toolbar pills; each LED's 48dp target reaches past it.
     Row(
         modifier = modifier
-            .heightIn(min = 40.dp)
-            .clip(RoundedCornerShape(20.dp))
-            .background(colors.surfaceContainerHigh),
+            .height(SurfaceToolbarHeight)
+            .drawBehind {
+                val inset = 4.dp.toPx()
+                drawRoundRect(
+                    color = colors.surfaceContainerHigh,
+                    topLeft = Offset(0f, inset),
+                    size = Size(size.width, size.height - 2 * inset),
+                    cornerRadius = CornerRadius(size.height / 2 - inset),
+                )
+            },
         verticalAlignment = Alignment.CenterVertically,
     ) {
         leds.forEachIndexed { index, (label, lit) ->
@@ -331,7 +372,7 @@ fun SurfaceToolbarLeds(
                     Modifier
                         .size(8.dp)
                         .clip(CircleShape)
-                        .background(if (lit) SurfaceTokens.LedLit else colors.outlineVariant),
+                        .background(if (lit) SurfaceTokens.LedLit else colors.outline),
                 )
                 Text(
                     label,

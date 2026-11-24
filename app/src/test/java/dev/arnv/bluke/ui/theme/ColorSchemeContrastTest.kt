@@ -72,10 +72,25 @@ class ColorSchemeContrastTest {
     }
 
     @Test
-    fun aLitLedReadsOnTheSurfaceChrome() {
+    fun primaryReadsAsTextOnTheContainersItLabels() {
+        val failures = everyStaticScheme().flatMap { (name, s) ->
+            listOf(s.surface, s.surfaceContainerLow, s.surfaceContainer).mapNotNull { surface ->
+                val ratio = contrast(s.primary, surface)
+                if (ratio < 4.5) "$name primary text on $surface = ${"%.2f".format(ratio)}" else null
+            }
+        }
+        assertTrue(failures.joinToString("\n"), failures.isEmpty())
+    }
+
+    @Test
+    fun ledsReadOnTheSurfaceChrome() {
         for (index in AccentColors.indices) {
             val s = staticColorScheme(index, PaletteStyle.DEFAULT, dark = true)
-            assertTrue(contrast(SurfaceTokens.LedLit, s.surfaceContainerHigh) >= 3.0)
+            for (chrome in listOf(s.surfaceContainerLow, s.surfaceContainerHigh)) {
+                assertTrue(contrast(SurfaceTokens.LedLit, chrome) >= 3.0)
+                // An unlit LED is drawn in outline: still a visible dot, so the lit one reads by colour.
+                assertTrue(contrast(s.outline, chrome) >= 3.0)
+            }
         }
     }
 }
