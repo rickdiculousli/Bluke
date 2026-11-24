@@ -2,6 +2,7 @@ package dev.arnv.bluke.ui
 
 import android.annotation.SuppressLint
 import android.content.SharedPreferences
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -29,6 +30,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.layout.windowInsetsPadding
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -55,6 +57,9 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.Stable
+import androidx.compose.runtime.key
+import androidx.compose.runtime.compositionLocalOf
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
@@ -87,7 +92,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.input.pointer.PointerEvent
 import androidx.compose.ui.input.pointer.PointerId
 import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.layout
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onPlaced
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
@@ -101,6 +110,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.core.content.edit
@@ -273,33 +283,70 @@ private data class PartTransform(val x: Float = 0f, val y: Float = 0f, val scale
 
 private const val SHOULDER_WIDTH_DP = 112f
 private const val EDGE_MARGIN_DP = 16f
-private const val SHOULDER_ROW_CENTER_DP = 32f
-private const val CLUSTER_TOP_DP = 64f
+/** The space above the shoulder row, under the toolbar. */
+private const val SHOULDER_TOP_DP = 6f
+/** The space kept below the lower clusters, above the screen's bottom edge. */
+private const val BOTTOM_MARGIN_DP = 4f
 /** Where the outer cluster (left stick or D-pad; face buttons) sits, from its side edge: under a resting thumb. */
 private const val OUTER_CLUSTER_DP = 128f
 /** Where the inner, lower cluster sits, from its side edge. */
 private const val INNER_CLUSTER_DP = 248f
-/** A stick part is wider than its well: its L3/R3 badge sits beside it on the outer side. */
-private const val STICK_BADGE_SHIFT_DP = 24f
 private const val CENTER_BUTTON_SPACING_DP = 60f
-/** The face-button cluster's square touch box. */
-private const val FACE_CLUSTER_DP = 148f
-/** A stick part's height: the well plus room for its badge. */
-private const val STICK_PART_HEIGHT_DP = 112f
+/** The face-button cluster's square touch box: two spacings plus one button. */
+private const val FACE_SPACING_DP = 42f
+private const val FACE_BUTTON_DP = 50f
+private const val FACE_CLUSTER_DP = 2 * FACE_SPACING_DP + FACE_BUTTON_DP
+private const val STICK_WELL_DP = 104f
+/** A stick part's height: its well. The L3/R3 badge sits beside the well, in the part's outer column. */
+private const val STICK_PART_HEIGHT_DP = STICK_WELL_DP
+private const val DPAD_DP = 120f
 /** The clear space kept between two parts' touch boxes. */
 private const val PART_GAP_DP = 4f
+/** The clear space between two stacked clusters, and between neighbouring targets, as the user sees it. */
+private const val TARGET_GAP_DP = 8f
+/** The smallest touch target any control has, as the user sees it. */
+private const val MIN_TARGET_DP = 48f
 
 /**
  * The smallest controls area the full-size layout fits with no two parts touching: the center row needs
- * the width between the inner clusters, and each side's upper and lower clusters stack in the height.
- * A smaller area gets the same layout scaled down whole (see [layoutScale]).
+ * the width between the inner clusters, and the right side stacks shoulders, face buttons and right stick
+ * in the height. 312dp is a 360dp-tall landscape phone under the toolbar. A smaller area gets the same
+ * layout scaled down whole (see [gamepadMetrics]).
  */
-private const val LAYOUT_MIN_WIDTH_DP = 792f
-private const val LAYOUT_MIN_HEIGHT_DP = 340f
+private const val INNER_CLUSTERS_WIDTH_DP = 2 * (INNER_CLUSTER_DP + DPAD_DP / 2f + PART_GAP_DP)
+private const val LAYOUT_MIN_HEIGHT_DP =
+    SHOULDER_TOP_DP + MIN_TARGET_DP + TARGET_GAP_DP + FACE_CLUSTER_DP + TARGET_GAP_DP + STICK_PART_HEIGHT_DP + BOTTOM_MARGIN_DP
 
-/** How much the parts shrink to fit an area [width]×[height] dp: 1 at or above the minimum layout. */
-private fun layoutScale(width: Float, height: Float): Float =
-    minOf(1f, width / LAYOUT_MIN_WIDTH_DP, height / LAYOUT_MIN_HEIGHT_DP)
+/**
+ * How the layout fits an area: [scale] is how much the parts shrink (1 at or above the minimum layout),
+ * and [target] is the size, before that scale, that a touch target needs to stay [MIN_TARGET_DP] on screen.
+ */
+private data class GamepadMetrics(val scale: Float, val target: Float) {
+    /** Center to center of the View/Share/Menu row, keeping [TARGET_GAP_DP] between them on screen. */
+    val centerSpacing: Float get() = maxOf(CENTER_BUTTON_SPACING_DP, target + TARGET_GAP_DP / scale)
+    val minWidth: Float get() = INNER_CLUSTERS_WIDTH_DP + 2 * centerSpacing + target
+    val minHeight: Float get() = LAYOUT_MIN_HEIGHT_DP + (target - MIN_TARGET_DP)
+    /** A stick part's L3/R3 badge column, and so how far the part's centre sits from its well's. */
+    val stickBadgeShift: Float get() = target / 2f
+    val shoulderCenterY: Float get() = SHOULDER_TOP_DP + target / 2f
+}
+
+/**
+ * The metrics for an area [width]×[height] dp. Shrinking the parts grows the targets they keep, which
+ * widens the layout, so the scale is found by iterating to its fixed point.
+ */
+private fun gamepadMetrics(width: Float, height: Float): GamepadMetrics {
+    var metrics = GamepadMetrics(1f, MIN_TARGET_DP)
+    repeat(24) {
+        val scale = minOf(1f, width / metrics.minWidth, height / metrics.minHeight)
+        // A dp of slack so rounding to pixels never leaves a target under the minimum.
+        metrics = GamepadMetrics(scale, if (scale >= 1f) MIN_TARGET_DP else MIN_TARGET_DP / scale + 1f)
+    }
+    return metrics
+}
+
+/** The pre-scale size a touch target is drawn at, from the area's [GamepadMetrics]. */
+private val LocalGamepadTarget = compositionLocalOf { MIN_TARGET_DP }
 
 /**
  * Where each part's centre sits in a controls area [width]×[height] dp, before the user's edits.
@@ -308,41 +355,62 @@ private fun layoutScale(width: Float, height: Float): Float =
  */
 private fun baseLayout(config: ConsoleConfig, width: Float, height: Float): Map<GamepadPart, Offset> {
     // Lay out at full size in the area as the scaled-down parts see it, then scale the positions back.
-    val scale = layoutScale(width, height)
-    return fullSizeLayout(config, width / scale, height / scale).mapValues { it.value * scale }
+    val metrics = gamepadMetrics(width, height)
+    return fullSizeLayout(config, width / metrics.scale, height / metrics.scale, metrics)
+        .mapValues { it.value * metrics.scale }
 }
 
-private fun fullSizeLayout(config: ConsoleConfig, width: Float, height: Float): Map<GamepadPart, Offset> {
-    val area = height - CLUSTER_TOP_DP - 8f
-    val upperY = CLUSTER_TOP_DP + area * 0.34f
-    // The face cluster shares its columns with the right stick below it, so it rises toward the
-    // shoulders to keep a gap; only when there is no room left there does the lower row drop.
-    val stackGap = (FACE_CLUSTER_DP + STICK_PART_HEIGHT_DP) / 2f + PART_GAP_DP
-    val faceY = maxOf(CLUSTER_TOP_DP + FACE_CLUSTER_DP / 2f + PART_GAP_DP, minOf(upperY, CLUSTER_TOP_DP + area * 0.76f - stackGap))
-    val lowerY = maxOf(CLUSTER_TOP_DP + area * 0.76f, faceY + stackGap)
-    val outerLeft = Offset(OUTER_CLUSTER_DP, upperY)
-    val innerLeft = Offset(INNER_CLUSTER_DP, lowerY)
+private fun fullSizeLayout(config: ConsoleConfig, width: Float, height: Float, metrics: GamepadMetrics): Map<GamepadPart, Offset> {
+    val top = SHOULDER_TOP_DP + metrics.target + TARGET_GAP_DP
+    val bottom = height - BOTTOM_MARGIN_DP
+    val area = bottom - top
+
+    /**
+     * The centres of one side's upper and lower clusters, of heights [upper] and [lower]: at their resting
+     * thumb heights when the area is tall, stacked with a gap between them when it is not.
+     */
+    fun side(upper: Float, lower: Float): Pair<Float, Float> {
+        val lowerY = minOf(bottom - lower / 2f, maxOf(top + area * 0.76f, top + upper + TARGET_GAP_DP + lower / 2f))
+        val upperY = maxOf(top + upper / 2f, minOf(top + area * 0.34f, lowerY - (upper + lower) / 2f - TARGET_GAP_DP))
+        return upperY to lowerY
+    }
+
+    val shift = metrics.stickBadgeShift
+    val (leftUpperY, leftLowerY) =
+        if (config.leftStickAboveDpad) side(STICK_PART_HEIGHT_DP, DPAD_DP) else side(DPAD_DP, STICK_PART_HEIGHT_DP)
+    val (faceY, rightStickY) = side(FACE_CLUSTER_DP, STICK_PART_HEIGHT_DP)
+    val outerLeft = Offset(OUTER_CLUSTER_DP, leftUpperY)
+    val innerLeft = Offset(INNER_CLUSTER_DP, leftLowerY)
     val leftStick = if (config.leftStickAboveDpad) outerLeft else innerLeft
     val dpad = if (config.leftStickAboveDpad) innerLeft else outerLeft
     val centerX = width / 2f
-    val guideY = CLUSTER_TOP_DP + area * 0.36f
-    val centerRowY = CLUSTER_TOP_DP + area * 0.68f
+    val guideY = top + area * 0.36f
+    val centerRowY = top + area * 0.68f
     val triggerX = EDGE_MARGIN_DP + SHOULDER_WIDTH_DP / 2f
     val bumperX = triggerX + SHOULDER_WIDTH_DP + 8f
+    val shoulderY = metrics.shoulderCenterY
+    val spacing = metrics.centerSpacing
     return mapOf(
-        GamepadPart.LEFT_TRIGGER to Offset(triggerX, SHOULDER_ROW_CENTER_DP),
-        GamepadPart.LEFT_BUMPER to Offset(bumperX, SHOULDER_ROW_CENTER_DP),
-        GamepadPart.RIGHT_BUMPER to Offset(width - bumperX, SHOULDER_ROW_CENTER_DP),
-        GamepadPart.RIGHT_TRIGGER to Offset(width - triggerX, SHOULDER_ROW_CENTER_DP),
-        GamepadPart.LEFT_STICK to leftStick - Offset(STICK_BADGE_SHIFT_DP, 0f),
+        GamepadPart.LEFT_TRIGGER to Offset(triggerX, shoulderY),
+        GamepadPart.LEFT_BUMPER to Offset(bumperX, shoulderY),
+        GamepadPart.RIGHT_BUMPER to Offset(width - bumperX, shoulderY),
+        GamepadPart.RIGHT_TRIGGER to Offset(width - triggerX, shoulderY),
+        GamepadPart.LEFT_STICK to leftStick - Offset(shift, 0f),
         GamepadPart.DPAD to dpad,
         GamepadPart.FACE_BUTTONS to Offset(width - OUTER_CLUSTER_DP, faceY),
-        GamepadPart.RIGHT_STICK to Offset(width - INNER_CLUSTER_DP + STICK_BADGE_SHIFT_DP, lowerY),
+        GamepadPart.RIGHT_STICK to Offset(width - INNER_CLUSTER_DP + shift, rightStickY),
         GamepadPart.GUIDE to Offset(centerX, guideY),
-        GamepadPart.SELECT to Offset(centerX - CENTER_BUTTON_SPACING_DP, centerRowY),
+        GamepadPart.SELECT to Offset(centerX - spacing, centerRowY),
         GamepadPart.SHARE to Offset(centerX, centerRowY),
-        GamepadPart.START to Offset(centerX + CENTER_BUTTON_SPACING_DP, centerRowY),
+        GamepadPart.START to Offset(centerX + spacing, centerRowY),
     )
+}
+
+/** The widest the status slot between the bumpers can be in an area [width]×[height] dp, keeping a gap to each. */
+private fun statusSlotWidth(width: Float, height: Float): Float {
+    val metrics = gamepadMetrics(width, height)
+    val bumperInnerEdge = EDGE_MARGIN_DP + 2 * SHOULDER_WIDTH_DP + 8f
+    return (width / metrics.scale - 2 * bumperInnerEdge) * metrics.scale - 2 * TARGET_GAP_DP
 }
 
 /**
@@ -424,13 +492,13 @@ private fun Modifier.centeredAt(center: (area: Size) -> Offset) = layout { measu
     }
 }
 
-/** Like [centeredAt], and scales this element about its centre by [layoutScale] for the area. */
+/** Like [centeredAt], and scales this element about its centre by the area's [GamepadMetrics.scale]. */
 private fun Modifier.layoutPlaced(center: (area: Size) -> Offset, onScale: (Float) -> Unit) = layout { measurable, constraints ->
     val placeable = measurable.measure(constraints.copy(minWidth = 0, minHeight = 0))
     layout(placeable.width, placeable.height) {
         val area = Size(constraints.maxWidth.toDp().value, constraints.maxHeight.toDp().value)
         val c = center(area)
-        val scale = layoutScale(area.width, area.height)
+        val scale = gamepadMetrics(area.width, area.height).scale
         onScale(scale)
         placeable.placeWithLayer(c.x.dp.roundToPx() - placeable.width / 2, c.y.dp.roundToPx() - placeable.height / 2) {
             scaleX = scale
@@ -491,6 +559,8 @@ fun GamepadView(
     var leftStickY by remember { mutableFloatStateOf(0f) }
     var rightStickX by remember { mutableFloatStateOf(0f) }
     var rightStickY by remember { mutableFloatStateOf(0f) }
+    // The stick clicks the user has latched down with their L3/R3 badge, as button-mask bits.
+    var heldSticks by remember { mutableIntStateOf(0) }
 
     val transmitGamepadState = { force: Boolean ->
         if (force) {
@@ -535,6 +605,7 @@ fun GamepadView(
                 leftStickY = 0f
                 rightStickX = 0f
                 rightStickY = 0f
+                heldSticks = 0
                 isGamepadDirty = false
                 btManager.sendGamepadReport(0, 0, 0f, 0f, 0f, 0f)
             }
@@ -563,7 +634,9 @@ fun GamepadView(
         dpadMask = mask
         transmitGamepadState(true)
     }
+    // A stick click is known only when the tap lifts: it plays its haptic then and is down for 100ms.
     val stickClick = { bitIndex: Int ->
+        haptics.perform(HapticEvent.PRESS)
         scope.launch {
             setButton(bitIndex, true)
             delay(100L.milliseconds)
@@ -573,8 +646,14 @@ fun GamepadView(
     }
     val stickHold = { bitIndex: Int, hold: Boolean ->
         haptics.perform(HapticEvent.PRESS)
+        heldSticks = if (hold) heldSticks or (1 shl bitIndex) else heldSticks and (1 shl bitIndex).inv()
         setButton(bitIndex, hold)
     }
+    fun isDown(bitIndex: Int) = buttonMask and (1 shl bitIndex) != 0
+    fun isHeld(bitIndex: Int) = heldSticks and (1 shl bitIndex) != 0
+
+    // Editing takes Back to finish, so Back never closes the surface mid-edit.
+    BackHandler(enabled = isEditMode) { isEditMode = false }
 
     Box(
         modifier = Modifier
@@ -614,12 +693,13 @@ fun GamepadView(
             }
 
             // Parts find their place from the area's size when they are placed (see centeredAt); the
-            // constraints only choose between the controller and the rotate state.
+            // constraints choose between the controller and the rotate state, and size the touch targets.
             BoxWithConstraints(
                 Modifier
                     .weight(1f)
                     .fillMaxWidth()
                     .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.Horizontal))
+                    .testTag("gamepad_controls_area")
             ) {
                 // A held controller is landscape. A window taller than it is wide (split screen, or a
                 // large screen that ignores the orientation lock) gets the rotate state instead.
@@ -627,6 +707,11 @@ fun GamepadView(
                     TurnSidewaysState(Modifier.align(Alignment.Center))
                     return@BoxWithConstraints
                 }
+
+                val metrics = gamepadMetrics(maxWidth.value, maxHeight.value)
+                // Each part's frame as last placed, in this area's pixels: the resize handles avoid them.
+                val frames = remember { mutableStateMapOf<GamepadPart, Rect>() }
+                var areaOrigin by remember { mutableStateOf(Offset.Zero) }
 
                 @Composable
                 fun Part(part: GamepadPart, content: @Composable () -> Unit) {
@@ -637,46 +722,70 @@ fun GamepadView(
                         originIn = { area -> baseLayout(config, area.width, area.height).getValue(part) },
                         onTransform = { edits.update(part, it) },
                         onTransformEnd = edits::commit,
+                        onFrame = { frames[part] = it.translate(-areaOrigin) },
                         content = content,
                     )
                 }
 
-                Part(GamepadPart.LEFT_TRIGGER) { ShoulderButton(config.leftTrigger, triggerShape(isLeft = true), pressButton, releaseButton) }
-                Part(GamepadPart.LEFT_BUMPER) { ShoulderButton(config.leftBumper, BumperShape, pressButton, releaseButton) }
-                Part(GamepadPart.RIGHT_BUMPER) { ShoulderButton(config.rightBumper, BumperShape, pressButton, releaseButton) }
-                Part(GamepadPart.RIGHT_TRIGGER) { ShoulderButton(config.rightTrigger, triggerShape(isLeft = false), pressButton, releaseButton) }
-                Part(GamepadPart.LEFT_STICK) {
-                    AnalogStick(
-                        description = "Left stick",
-                        holdLabel = "L3",
-                        badgeOnStart = true,
-                        held = buttonMask and (1 shl LEFT_STICK_BUTTON_INDEX) != 0,
-                        onMove = { x, y -> leftStickX = x; leftStickY = y; transmitGamepadState(false) },
-                        onStickClick = { stickClick(LEFT_STICK_BUTTON_INDEX) },
-                        onToggleHold = { stickHold(LEFT_STICK_BUTTON_INDEX, it) },
-                    )
+                Box(Modifier.fillMaxSize().onPlaced { areaOrigin = it.positionInRoot() })
+                CompositionLocalProvider(LocalGamepadTarget provides metrics.target) {
+                    Part(GamepadPart.LEFT_TRIGGER) { ShoulderButton(config.leftTrigger, triggerShape(isLeft = true), pressButton, releaseButton) }
+                    Part(GamepadPart.LEFT_BUMPER) { ShoulderButton(config.leftBumper, BumperShape, pressButton, releaseButton) }
+                    Part(GamepadPart.RIGHT_BUMPER) { ShoulderButton(config.rightBumper, BumperShape, pressButton, releaseButton) }
+                    Part(GamepadPart.RIGHT_TRIGGER) { ShoulderButton(config.rightTrigger, triggerShape(isLeft = false), pressButton, releaseButton) }
+                    Part(GamepadPart.LEFT_STICK) {
+                        AnalogStick(
+                            description = "Left stick",
+                            holdLabel = "L3",
+                            badgeOnStart = true,
+                            held = isHeld(LEFT_STICK_BUTTON_INDEX),
+                            pressed = isDown(LEFT_STICK_BUTTON_INDEX),
+                            onMove = { x, y -> leftStickX = x; leftStickY = y; transmitGamepadState(false) },
+                            onStickClick = { stickClick(LEFT_STICK_BUTTON_INDEX) },
+                            onToggleHold = { stickHold(LEFT_STICK_BUTTON_INDEX, it) },
+                        )
+                    }
+                    Part(GamepadPart.DPAD) { Dpad(onDpadChange) }
+                    Part(GamepadPart.FACE_BUTTONS) { FaceButtons(config, pressButton, releaseButton) }
+                    Part(GamepadPart.RIGHT_STICK) {
+                        AnalogStick(
+                            description = "Right stick",
+                            holdLabel = "R3",
+                            badgeOnStart = false,
+                            held = isHeld(RIGHT_STICK_BUTTON_INDEX),
+                            pressed = isDown(RIGHT_STICK_BUTTON_INDEX),
+                            onMove = { x, y -> rightStickX = x; rightStickY = y; transmitGamepadState(false) },
+                            onStickClick = { stickClick(RIGHT_STICK_BUTTON_INDEX) },
+                            onToggleHold = { stickHold(RIGHT_STICK_BUTTON_INDEX, it) },
+                        )
+                    }
+                    Part(GamepadPart.GUIDE) { GuideButton(config.guideButton, pressButton, releaseButton) }
+                    Part(GamepadPart.SELECT) { CenterButton(config.selectButton, Icons.Outlined.FilterNone, pressButton, releaseButton) }
+                    Part(GamepadPart.SHARE) { CenterButton(config.shareButton, Icons.Default.IosShare, pressButton, releaseButton) }
+                    Part(GamepadPart.START) { CenterButton(config.startButton, Icons.Default.Menu, pressButton, releaseButton) }
                 }
-                Part(GamepadPart.DPAD) { Dpad(onDpadChange) }
-                Part(GamepadPart.FACE_BUTTONS) { FaceButtons(config, pressButton, releaseButton) }
-                Part(GamepadPart.RIGHT_STICK) {
-                    AnalogStick(
-                        description = "Right stick",
-                        holdLabel = "R3",
-                        badgeOnStart = false,
-                        held = buttonMask and (1 shl RIGHT_STICK_BUTTON_INDEX) != 0,
-                        onMove = { x, y -> rightStickX = x; rightStickY = y; transmitGamepadState(false) },
-                        onStickClick = { stickClick(RIGHT_STICK_BUTTON_INDEX) },
-                        onToggleHold = { stickHold(RIGHT_STICK_BUTTON_INDEX, it) },
-                    )
-                }
-                Part(GamepadPart.GUIDE) { GuideButton(config.guideButton, pressButton, releaseButton) }
-                Part(GamepadPart.SELECT) { CenterButton(config.selectButton, Icons.Outlined.FilterNone, pressButton, releaseButton) }
-                Part(GamepadPart.SHARE) { CenterButton(config.shareButton, Icons.Default.IosShare, pressButton, releaseButton) }
-                Part(GamepadPart.START) { CenterButton(config.startButton, Icons.Default.Menu, pressButton, releaseButton) }
 
                 // The status slot between the shoulder pairs: the output profile, or how editing works.
-                Box(Modifier.centeredAt { area -> Offset(area.width / 2f, SHOULDER_ROW_CENTER_DP) }) {
+                // It keeps to the width between the bumpers, so its touch box never reaches them.
+                val slotWidth = statusSlotWidth(maxWidth.value, maxHeight.value).dp
+                Box(
+                    Modifier
+                        .centeredAt { area -> Offset(area.width / 2f, metrics.shoulderCenterY * metrics.scale) }
+                        .widthIn(max = slotWidth),
+                ) {
                     if (isEditMode) EditHint() else ProfileChip(tune.profile, onClick = { tuneOpen = true })
+                }
+
+                // Above every part, so a handle always wins its touch over the frames under it.
+                if (isEditMode) {
+                    ResizeHandles(
+                        frames = frames,
+                        onResize = { part, by ->
+                            val t = edits[part]
+                            edits.update(part, t.copy(scale = (t.scale + by).coerceIn(MIN_PART_SCALE, MAX_PART_SCALE)))
+                        },
+                        onResizeEnd = edits::commit,
+                    )
                 }
             }
         }
@@ -744,7 +853,7 @@ private fun ProfileChip(profile: GamepadDpadOutputMode, onClick: () -> Unit) {
         horizontalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         Icon(profile.icon(), contentDescription = null, tint = colors.onSurfaceVariant, modifier = Modifier.size(18.dp))
-        Text("${profile.label} profile", style = MaterialTheme.typography.labelLarge, color = colors.onSurface, maxLines = 1)
+        Text("${profile.label} profile", style = MaterialTheme.typography.labelLarge, color = colors.onSurface, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
@@ -796,14 +905,20 @@ private fun EditHint() {
             .testTag("gamepad_edit_hint"),
         horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        Text("Drag a control to move it", style = MaterialTheme.typography.labelMedium, color = colors.onPrimaryContainer, maxLines = 1)
-        Text("Drag its corner to resize", style = MaterialTheme.typography.labelMedium, color = colors.onPrimaryContainer, maxLines = 1)
+        Text("Drag a control to move it", style = MaterialTheme.typography.labelMedium, color = colors.onPrimaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text("Drag its corner to resize", style = MaterialTheme.typography.labelMedium, color = colors.onPrimaryContainer, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
 }
 
+private const val MIN_PART_SCALE = 0.6f
+private const val MAX_PART_SCALE = 1.8f
+private const val HANDLE_DP = 48f
+
 /**
- * One movable part at its place in the controls area. In edit mode an outline covers it: dragging it
- * moves the part, pinching or dragging the corner handle resizes it, and the part itself takes no input.
+ * One movable part at its place in the controls area. It reports its frame, as placed, to [onFrame], and
+ * keeps the system's Back swipe off itself, so a held control near a side edge never closes the surface.
+ * In edit mode an outline covers it: dragging it moves the part, pinching resizes it, and the part itself
+ * takes no input. Its resize handle is drawn above every part, by [ResizeHandles].
  */
 @Composable
 private fun EditablePart(
@@ -813,6 +928,7 @@ private fun EditablePart(
     originIn: (area: Size) -> Offset,
     onTransform: (PartTransform) -> Unit,
     onTransformEnd: () -> Unit,
+    onFrame: (Rect) -> Unit,
     content: @Composable () -> Unit,
 ) {
     val density = LocalDensity.current.density
@@ -821,13 +937,15 @@ private fun EditablePart(
     val placed = remember { PlacedArea() }
     val currentOnTransform by rememberUpdatedState(onTransform)
     val currentOnTransformEnd by rememberUpdatedState(onTransformEnd)
+    val currentOnFrame by rememberUpdatedState(onFrame)
     val colors = MaterialTheme.colorScheme
+    val shape = MaterialTheme.shapes.medium
 
     // Keep the part's centre inside the controls area.
     fun clamped(next: PartTransform) = next.copy(
         x = next.x.coerceIn(-placed.origin.x, placed.area.width - placed.origin.x),
         y = next.y.coerceIn(-placed.origin.y, placed.area.height - placed.origin.y),
-        scale = next.scale.coerceIn(0.6f, 1.8f),
+        scale = next.scale.coerceIn(MIN_PART_SCALE, MAX_PART_SCALE),
     )
 
     Box(
@@ -845,18 +963,18 @@ private fun EditablePart(
                 scaleX = current.scale
                 scaleY = current.scale
             }
+            .onGloballyPositioned { currentOnFrame(it.boundsInRoot()) }
+            .systemGestureExclusion()
+            // Editing, the part sits on a selected tile, under its outline, so the control stays in view.
+            .then(if (isEditMode) Modifier.background(colors.secondaryContainer, shape) else Modifier)
             .testTag("gamepad_part_${part.key}"),
         contentAlignment = Alignment.Center,
     ) {
         content()
         if (isEditMode) {
-            val shape = MaterialTheme.shapes.medium
             Box(
                 Modifier
                     .matchParentSize()
-                    // A selection overlay, not a container: a translucent primary state layer (M3's
-                    // dragged-state opacity) so the control under it stays visible.
-                    .background(colors.primary.copy(alpha = 0.16f), shape)
                     .border(2.dp, colors.primary, shape)
                     .semantics { contentDescription = "Move ${part.description}" }
                     .pointerInput(Unit) {
@@ -884,35 +1002,85 @@ private fun EditablePart(
                             currentOnTransformEnd()
                         }
                     }
+                    .testTag("gamepad_frame_${part.key}")
             )
-            // The resize handle: a 48dp target centred on the bottom-end corner.
-            Box(
-                Modifier
-                    .align(Alignment.BottomEnd)
-                    .offset(x = 24.dp, y = 24.dp)
-                    .size(48.dp)
-                    .semantics { contentDescription = "Resize ${part.description}" }
-                    .pointerInput(Unit) {
-                        detectDragGestures(
-                            onDragEnd = { currentOnTransformEnd() },
-                            onDragCancel = { currentOnTransformEnd() },
-                            onDrag = { change, dragAmount ->
-                                change.consume()
-                                val t = current
-                                currentOnTransform(clamped(t.copy(scale = t.scale + (dragAmount.x + dragAmount.y) / 150f)))
-                            },
-                        )
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
+        }
+    }
+}
+
+/**
+ * Where each part's resize handle goes, a [size]-px square, given every part's [frames] in an [area]
+ * (both px): at the frame's bottom-end corner when that is clear, otherwise the first of the corners and
+ * then the spots beside, below and above the frame that sits wholly in the area and touches no other
+ * part's frame or another handle. A part with nowhere clear gets its handle inside its own bottom-end
+ * corner, which leaves the rest of its frame to move it.
+ */
+private fun resizeHandleBounds(frames: Map<GamepadPart, Rect>, area: Rect, size: Float): Map<GamepadPart, Rect> {
+    val h = size / 2f
+    val placed = linkedMapOf<GamepadPart, Rect>()
+    for ((part, r) in frames.entries.sortedBy { it.key.ordinal }) {
+        val centres = listOf(
+            Offset(r.right, r.bottom), Offset(r.left, r.bottom), Offset(r.right, r.top), Offset(r.left, r.top),
+            Offset(r.right - h, r.bottom + h), Offset(r.left + h, r.bottom + h), Offset(r.center.x, r.bottom + h),
+            Offset(r.right + h, r.bottom - h), Offset(r.left - h, r.bottom - h),
+            Offset(r.right - h, r.top - h), Offset(r.left + h, r.top - h), Offset(r.center.x, r.top - h),
+            Offset(r.right + h, r.top + h), Offset(r.left - h, r.top + h),
+        )
+        val others = frames.filterKeys { it != part }.values + placed.values
+        val clear = centres.map { Rect(it.x - h, it.y - h, it.x + h, it.y + h) }.firstOrNull { box ->
+            box.left >= area.left && box.top >= area.top && box.right <= area.right && box.bottom <= area.bottom &&
+                others.none { it.overlaps(box) }
+        }
+        placed[part] = clear ?: Rect(r.right - size, r.bottom - size, r.right, r.bottom)
+    }
+    return placed
+}
+
+/** Every part's resize handle, in one layer over the controls area; dragging a handle down or right grows its part. */
+@Composable
+private fun ResizeHandles(
+    frames: Map<GamepadPart, Rect>,
+    onResize: (GamepadPart, Float) -> Unit,
+    onResizeEnd: () -> Unit,
+) {
+    val colors = MaterialTheme.colorScheme
+    val currentOnResize by rememberUpdatedState(onResize)
+    val currentOnResizeEnd by rememberUpdatedState(onResizeEnd)
+    BoxWithConstraints(Modifier.fillMaxSize()) {
+        val sizePx = with(LocalDensity.current) { HANDLE_DP.dp.toPx() }
+        val area = Rect(0f, 0f, constraints.maxWidth.toFloat(), constraints.maxHeight.toFloat())
+        resizeHandleBounds(frames.toMap(), area, sizePx).forEach { (part, box) ->
+            key(part) {
                 Box(
                     Modifier
-                        .size(28.dp)
-                        .clip(CircleShape)
-                        .background(colors.primary),
+                        .offset { IntOffset(box.left.roundToInt(), box.top.roundToInt()) }
+                        .size(HANDLE_DP.dp)
+                        .systemGestureExclusion()
+                        .semantics { contentDescription = "Resize ${part.description}" }
+                        .pointerInput(part) {
+                            // About one step of scale per 56dp dragged.
+                            val perScale = 56.dp.toPx()
+                            detectDragGestures(
+                                onDragEnd = { currentOnResizeEnd() },
+                                onDragCancel = { currentOnResizeEnd() },
+                                onDrag = { change, dragAmount ->
+                                    change.consume()
+                                    currentOnResize(part, (dragAmount.x + dragAmount.y) / perScale)
+                                },
+                            )
+                        }
+                        .testTag("gamepad_resize_${part.key}"),
                     contentAlignment = Alignment.Center,
                 ) {
-                    Icon(Icons.Default.OpenInFull, contentDescription = null, tint = colors.onPrimary, modifier = Modifier.size(16.dp))
+                    Box(
+                        Modifier
+                            .size(28.dp)
+                            .clip(CircleShape)
+                            .background(colors.primary),
+                        contentAlignment = Alignment.Center,
+                    ) {
+                        Icon(Icons.Default.OpenInFull, contentDescription = null, tint = colors.onPrimary, modifier = Modifier.size(16.dp))
+                    }
                 }
             }
         }
@@ -991,7 +1159,7 @@ private fun ShoulderButton(button: ButtonDef, shape: Shape, onPress: (Int) -> Un
     val currentOnRelease by rememberUpdatedState(onRelease)
     Box(
         modifier = Modifier
-            .size(width = SHOULDER_WIDTH_DP.dp, height = 48.dp)
+            .size(width = SHOULDER_WIDTH_DP.dp, height = LocalGamepadTarget.current.dp)
             .clip(shape)
             .background(fill)
             .border(1.dp, MaterialTheme.colorScheme.outlineVariant, shape)
@@ -1011,7 +1179,7 @@ private fun CenterButton(button: ButtonDef, icon: ImageVector, onPress: (Int) ->
     val currentOnRelease by rememberUpdatedState(onRelease)
     Box(
         modifier = Modifier
-            .size(48.dp)
+            .size(LocalGamepadTarget.current.dp)
             .gamepadButton(button, { currentOnPress(it) }, { currentOnRelease(it) }) { pressed = it }
             .testTag("gamepad_button_${button.mappingId}"),
         contentAlignment = Alignment.Center,
@@ -1038,19 +1206,23 @@ private fun GuideButton(button: ButtonDef, onPress: (Int) -> Unit, onRelease: (I
     val currentOnRelease by rememberUpdatedState(onRelease)
     Box(
         modifier = Modifier
-            .size(56.dp)
-            .clip(CircleShape)
-            .background(if (pressed) colors.primary else colors.surfaceContainerHighest)
-            .border(2.dp, colors.primary, CircleShape)
+            .size(maxOf(56f, LocalGamepadTarget.current).dp)
             .gamepadButton(button, { currentOnPress(it) }, { currentOnRelease(it) }) { pressed = it }
             .testTag("gamepad_guide"),
         contentAlignment = Alignment.Center,
     ) {
-        Icon(Icons.Default.Home, contentDescription = null, tint = if (pressed) colors.onPrimary else colors.onSurface, modifier = Modifier.size(28.dp))
+        Box(
+            Modifier
+                .size(56.dp)
+                .clip(CircleShape)
+                .background(if (pressed) colors.primary else colors.surfaceContainerHighest)
+                .border(2.dp, colors.primary, CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Icon(Icons.Default.Home, contentDescription = null, tint = if (pressed) colors.onPrimary else colors.onSurface, modifier = Modifier.size(28.dp))
+        }
     }
 }
-
-private const val FACE_SPACING_DP = 46f
 
 /**
  * The four face buttons. One touch handler covers the cluster so a thumb resting between two buttons
@@ -1136,7 +1308,7 @@ private fun FaceButton(button: ButtonDef, pressed: Boolean, onAccessibilityClick
     val symbol = if (pressed) colors.surface else button.faceColor
     Box(
         modifier = modifier
-            .size(52.dp)
+            .size(FACE_BUTTON_DP.dp)
             .clip(CircleShape)
             .background(fill)
             .border(1.dp, if (pressed) button.faceColor else colors.outlineVariant, CircleShape)
@@ -1195,7 +1367,6 @@ private fun DrawScope.drawFaceShape(glyph: FaceGlyph, color: Color) {
     }
 }
 
-private const val STICK_WELL_DP = 104f
 private const val STICK_CAP_DP = 72f
 /** How far the thumb must travel from the centre for full deflection. */
 private const val STICK_INPUT_RADIUS_DP = 32f
@@ -1205,6 +1376,7 @@ private const val STICK_VISUAL_RADIUS_DP = 20f
 /**
  * An analog stick with its L3/R3 hold badge beside it on the outer side, clear of the well so the cap
  * never covers it. A quick tap clicks the stick; the badge holds the click down until tapped again.
+ * The cap takes the pressed colours while its click is down, [pressed], whether clicked or [held].
  */
 @Composable
 private fun AnalogStick(
@@ -1212,6 +1384,7 @@ private fun AnalogStick(
     holdLabel: String,
     badgeOnStart: Boolean,
     held: Boolean,
+    pressed: Boolean,
     onMove: (Float, Float) -> Unit,
     onStickClick: () -> Unit,
     onToggleHold: (Boolean) -> Unit,
@@ -1223,7 +1396,8 @@ private fun AnalogStick(
     val currentOnStickClick by rememberUpdatedState(onStickClick)
     val currentOnMove by rememberUpdatedState(onMove)
 
-    Box(Modifier.size(width = (STICK_WELL_DP + 2 * STICK_BADGE_SHIFT_DP + 8f).dp, height = STICK_PART_HEIGHT_DP.dp)) {
+    val target = LocalGamepadTarget.current
+    Box(Modifier.size(width = (STICK_WELL_DP + 8f + target).dp, height = STICK_PART_HEIGHT_DP.dp)) {
         Box(
             modifier = Modifier
                 .align(if (badgeOnStart) Alignment.CenterEnd else Alignment.CenterStart)
@@ -1299,13 +1473,14 @@ private fun AnalogStick(
                     .offset { IntOffset(stickOffsetX.roundToInt(), stickOffsetY.roundToInt()) }
                     .size(STICK_CAP_DP.dp)
             ) {
-                val (cap, _) = capColors(held)
+                val (cap, _) = capColors(pressed)
                 Canvas(Modifier.fillMaxSize()) {
                     val r = size.minDimension / 2f
                     drawCircle(cap, radius = r)
                     drawCircle(colors.outlineVariant, radius = r - 0.5.dp.toPx(), style = Stroke(1.dp.toPx()))
-                    // The thumb dish.
-                    drawCircle(if (held) colors.onSecondaryContainer.copy(alpha = 0.24f) else colors.surfaceContainerHigh, radius = r * 0.6f)
+                    // The thumb dish: recessed at rest; pressed, the whole cap is one pressed fill and the
+                    // dish keeps only its outline.
+                    drawCircle(if (pressed) cap else colors.surfaceContainerHigh, radius = r * 0.6f)
                     drawCircle(colors.outlineVariant, radius = r * 0.6f, style = Stroke(1.dp.toPx()))
                 }
             }
@@ -1327,7 +1502,7 @@ private fun StickHoldBadge(label: String, held: Boolean, onToggle: (Boolean) -> 
     val currentOnToggle by rememberUpdatedState(onToggle)
     Box(
         modifier = modifier
-            .size(48.dp)
+            .size(LocalGamepadTarget.current.dp)
             .semantics {
                 contentDescription = "Hold $label"
                 role = Role.Switch
@@ -1386,7 +1561,7 @@ private fun Dpad(onDpadChange: (Int) -> Unit) {
 
     Box(
         modifier = Modifier
-            .size(120.dp)
+            .size(DPAD_DP.dp)
             .semantics {
                 contentDescription = "D-pad"
                 customActions = directions.map { (bit, name) ->
