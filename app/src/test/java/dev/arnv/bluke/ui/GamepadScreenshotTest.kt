@@ -40,7 +40,8 @@ class GamepadScreenshotTest {
         fontScales: List<Float> = listOf(1.0f, 1.3f),
         editMode: Boolean = false,
         tuneOpen: Boolean = false,
-    ) = captureMatrix(name = name, landscape = true, fontScales = fontScales) {
+        landscape: Boolean = true,
+    ) = captureMatrix(name = name, landscape = landscape, fontScales = fontScales) {
         SurfaceTheme {
             GamepadView(
                 btManager = manager,
@@ -78,4 +79,8 @@ class GamepadScreenshotTest {
         capture("gamepad-xbox-small", prefs("xbox_series"), fontScales = listOf(1.3f))
         capture("gamepad-playstation-small", prefs("playstation_5"), fontScales = listOf(1.3f))
     }
+
+    @Test
+    @Config(qualifiers = "w411dp-h914dp-port-420dpi", sdk = [36])
+    fun portraitAsksToTurnThePhone() = capture("gamepad-portrait", prefs("xbox_series"), landscape = false)
 }
