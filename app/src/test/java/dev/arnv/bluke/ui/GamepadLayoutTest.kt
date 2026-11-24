@@ -1,5 +1,9 @@
 package dev.arnv.bluke.ui
 
+import androidx.compose.ui.test.hasTestTag
+
+import androidx.compose.ui.test.filterToOne
+
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.activity.ComponentActivity
@@ -305,7 +309,8 @@ class GamepadLayoutTest {
         setSurface(tuneOpen = true)
         compose.onAllNodesWithContentDescription("Left bumper").assertCountEquals(0)
         compose.onAllNodesWithContentDescription("Left stick").assertCountEquals(0)
-        compose.onNodeWithContentDescription("Close Gamepad").performClick()
+        // The sheet's Close button; the scrim behind the sheet carries the same action.
+        compose.onAllNodesWithContentDescription("Close Gamepad").filterToOne(!hasTestTag("surface_tune_scrim")).performClick()
         compose.waitForIdle()
         compose.onAllNodesWithContentDescription("Left bumper").assertCountEquals(1)
         compose.onAllNodesWithContentDescription("Left stick").assertCountEquals(1)
