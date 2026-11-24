@@ -204,6 +204,10 @@ class BluetoothKeyboardManager(private val context: Context) {
     @Volatile private var incompatibleVerdictLatched = false
     @Volatile private var incompatibleVerdictMessage: String? = null
     @Volatile private var registrationCommandAccepted = false
+    // Counts the times the adapter has been seen not on, so a failure can tell whether an off/on transition overlapped it.
+    private val adapterCycle = AtomicLong()
+    // Set when the latest binding or registration failure was the transition's, not the phone's: it reruns on STATE_ON.
+    @Volatile private var rerunOnStateOn = false
     private val retryPolicy = RetryPolicy()
     private var isReceiverRegistered = false
     private var isBondReceiverRegistered = false
@@ -503,7 +507,9 @@ class BluetoothKeyboardManager(private val context: Context) {
             publishServiceState(BluetoothState.PermissionRequired)
             return
         }
-        if (!bluetoothAdapter.isEnabled) {
+        if (adapterPower() != AdapterPower.ON) {
+            // Off, or turning on or off: nothing registers until STATE_ON, whose broadcast runs this again.
+            adapterCycle.incrementAndGet()
             sessionOperationJob?.cancel()
             synchronized(capabilityCheckLock) {
                 capabilityCheckGeneration.incrementAndGet()
@@ -520,9 +526,13 @@ class BluetoothKeyboardManager(private val context: Context) {
             clearIncompatibleVerdict()
             publishServiceState(BluetoothState.BluetoothOff)
             _statusMessage.value = "Bluetooth is currently turned off. Please enable Bluetooth."
-            hidDeviceProfile = null
+            releaseHidProxy()
             activeRegistrationAttempt = null
             appRegistrationState.value = false
+            lastRegistrationFailure = null
+            _lifecycleState.value = HidLifecycleState.Idle
+            // Coming back on reconnects the last host, as a launch does; an explicit disconnect still forgot it.
+            automaticReconnectAttempted = false
             return
         }
 
@@ -556,6 +566,8 @@ class BluetoothKeyboardManager(private val context: Context) {
                 ?: "This device appears incompatible with the Bluetooth HID Device role."
             return
         }
+
+        if (_serviceState.value is BluetoothState.BluetoothOff) publishServiceState(BluetoothState.ReadyDisconnected)
 
         if (sessionOperationJob?.isActive == true) return
 
@@ -781,6 +793,7 @@ class BluetoothKeyboardManager(private val context: Context) {
                 connectRequestProcessor.clear()
             }
             }
+            rerunAfterTransition()
         }
     }
 
@@ -853,7 +866,7 @@ class BluetoothKeyboardManager(private val context: Context) {
             appRegistrationState.value = false
             incompatibleVerdictMessage = message
             incompatibleVerdictLatched = true
-            _serviceState.value = BluetoothState.ProfileNotSupported
+            _serviceState.value = publishableServiceState(adapterPower(), BluetoothState.ProfileNotSupported)
             _statusMessage.value = message
         }
         connectRequestProcessor.clear()
@@ -872,7 +885,12 @@ class BluetoothKeyboardManager(private val context: Context) {
         }
     }
 
-    private fun publishServiceState(state: BluetoothState): Boolean = synchronized(serviceStateLock) {
+    private fun adapterPower(): AdapterPower =
+        AdapterPower.of(bluetoothAdapter?.state ?: BluetoothAdapter.STATE_OFF)
+
+    /** Publishes [requested], or what [publishableServiceState] allows instead; true only when [requested] itself went out. */
+    private fun publishServiceState(requested: BluetoothState): Boolean = synchronized(serviceStateLock) {
+        val state = publishableServiceState(adapterPower(), requested)
         val blocked = shouldBlockServiceStatePublication(
             incompatibleVerdictLatched = incompatibleVerdictLatched,
             publishingIncompatibleVerdict = state is BluetoothState.ProfileNotSupported,
@@ -893,7 +911,43 @@ class BluetoothKeyboardManager(private val context: Context) {
             false
         } else {
             _serviceState.value = state
-            true
+            state == requested
+        }
+    }
+
+    /**
+     * Applies [hidFailureResponse] to a failure from an attempt begun in [attemptAdapterCycle]. A transition's
+     * failure leaves the lifecycle idle and marks registration to rerun on STATE_ON; true when it did.
+     */
+    private fun deferToStateOn(attemptAdapterCycle: Long): Boolean {
+        if (hidFailureResponse(attemptAdapterCycle, adapterCycle.get(), adapterPower()) != HidFailureResponse.RETRY_ON_STATE_ON) {
+            return false
+        }
+        logHidEvent("failure overlapped an adapter off/on transition; registration reruns on STATE_ON")
+        lastRegistrationFailure = null
+        _lifecycleState.value = HidLifecycleState.Idle
+        rerunOnStateOn = true
+        return true
+    }
+
+    /** Called as a binding or registration job ends: reruns a deferred registration now if the adapter is already on. */
+    private fun rerunAfterTransition() {
+        if (closed || !rerunOnStateOn || adapterPower() != AdapterPower.ON) return
+        executor.execute { checkBluetoothCapabilities() }
+    }
+
+    /** Closes the HID proxy, so the adapter coming back on binds exactly one fresh proxy rather than reviving a stale one beside it. */
+    private fun releaseHidProxy() {
+        val hid = hidDeviceProfile
+        hidDeviceProfile = null
+        pendingProxyBinding?.complete(null)
+        pendingProxyBinding = null
+        if (hid != null) {
+            try {
+                bluetoothAdapter?.closeProfileProxy(BluetoothProfile.HID_DEVICE, hid)
+            } catch (e: Exception) {
+                Log.w("BluetoothKeyboard", "Closing the HID proxy failed", e)
+            }
         }
     }
 
@@ -915,6 +969,7 @@ class BluetoothKeyboardManager(private val context: Context) {
     private fun launchCapabilityCheck(replaceRunning: Boolean = false) {
         logHidEvent("capability check requested replaceRunning=$replaceRunning previouslyRegistered=$previouslyRegistered")
         if (closed || incompatibleVerdictLatched || !appInForeground || sessionOperationJob?.isActive == true) return
+        if (adapterPower() != AdapterPower.ON) return
         val jobToStart = synchronized(capabilityCheckLock) {
             val running = capabilityCheckJob
             if (running?.isActive == true && !replaceRunning) return
@@ -936,7 +991,7 @@ class BluetoothKeyboardManager(private val context: Context) {
                         }
                         if (hid != null && appRegistrationState.value && !incompatibleVerdictLatched) {
                             publishRegisteredUiState(scheduleReconnect = true)
-                        } else if (!incompatibleVerdictLatched) {
+                        } else if (!incompatibleVerdictLatched && !rerunOnStateOn) {
                             publishServiceState(BluetoothState.ReadyDisconnected)
                         }
                     }
@@ -946,6 +1001,7 @@ class BluetoothKeyboardManager(private val context: Context) {
                             capabilityCheckJob = null
                         }
                     }
+                    rerunAfterTransition()
                 }
             }
             capabilityCheckJob = newJob
@@ -965,7 +1021,10 @@ class BluetoothKeyboardManager(private val context: Context) {
 
     @SuppressLint("MissingPermission")
     private suspend fun bindHidProxy(): BluetoothHidDevice? {
+        rerunOnStateOn = false
         hidDeviceProfile?.let { return it }
+        if (adapterPower() != AdapterPower.ON) return null
+        val cycle = adapterCycle.get()
         var lastFailure = HidFailure.BINDING_REJECTED
 
         for (attempt in 1..retryPolicy.maxAttempts) {
@@ -1003,6 +1062,7 @@ class BluetoothKeyboardManager(private val context: Context) {
             }
         }
 
+        if (deferToStateOn(cycle)) return null
         _lifecycleState.value = HidLifecycleState.Error(lastFailure)
         val failureMessage = when (lastFailure) {
             HidFailure.BINDING_TIMEOUT -> "Bluetooth HID service did not respond. Try toggling Bluetooth."
@@ -1026,6 +1086,12 @@ class BluetoothKeyboardManager(private val context: Context) {
                     return
                 }
                 val hid = proxy as BluetoothHidDevice
+                val current = hidDeviceProfile
+                if (current != null && current !== hid) {
+                    // A bind left over from before an off/on transition: registration already runs on the live proxy.
+                    bluetoothAdapter?.closeProfileProxy(profile, proxy)
+                    return
+                }
                 hidDeviceProfile = hid
                 pendingProxyBinding?.complete(hid)
                 pendingProxyBinding = null
@@ -1058,6 +1124,8 @@ class BluetoothKeyboardManager(private val context: Context) {
                 appRegistrationState.value = false
                 connectionEpoch.incrementAndGet()
                 _connectedDevice.value = null
+                // Bluetooth turning off unbinds the proxy too; STATE_ON binds again, so there is nothing to rebind now.
+                if (adapterPower() != AdapterPower.ON) return
                 _lifecycleState.value = HidLifecycleState.Error(HidFailure.BINDING_TIMEOUT)
                 publishServiceState(BluetoothState.ReadyDisconnected)
                 _statusMessage.value = "HID Service Proxy disconnected. Rebinding..."
@@ -1346,6 +1414,8 @@ class BluetoothKeyboardManager(private val context: Context) {
         registrationMutex.withLock {
             if (closed || incompatibleVerdictLatched || (!appInForeground && !_hasPendingConnection.value)) return@withLock false
             if (appRegistrationState.value && !forceReset) return@withLock true
+            val cycle = adapterCycle.get()
+            rerunOnStateOn = false
             lastRegistrationFailure = null
             _lifecycleState.value = HidLifecycleState.Registering(1)
             val registrationMode = gamepadDpadOutputMode
@@ -1427,6 +1497,7 @@ class BluetoothKeyboardManager(private val context: Context) {
 
             when (result) {
                 RegistrationResult.TeardownFailed -> {
+                    if (deferToStateOn(cycle)) return@withLock false
                     lastRegistrationFailure = HidFailure.REGISTRATION_TIMEOUT
                     _lifecycleState.value = HidLifecycleState.Error(HidFailure.REGISTRATION_TIMEOUT)
                     _statusMessage.value = "HID cleanup did not finish. Retry Restart HID Service or toggle Bluetooth."
@@ -1451,6 +1522,7 @@ class BluetoothKeyboardManager(private val context: Context) {
                 }
             }
 
+            if (deferToStateOn(cycle)) return@withLock false
             val lastFailure = lastRegistrationFailure ?: HidFailure.REGISTRATION_REJECTED
             _lifecycleState.value = HidLifecycleState.Error(lastFailure)
             publishServiceState(BluetoothState.ReadyDisconnected)
@@ -1505,7 +1577,9 @@ class BluetoothKeyboardManager(private val context: Context) {
                     suppressIncomingConnection = false
                     _hasPendingConnection.value = false
                     if (sessionOperationJob === coroutineContext[Job]) sessionOperationJob = null
-                    if (!closed && bluetoothAdapter?.isEnabled == true) {
+                    if (rerunOnStateOn) {
+                        rerunAfterTransition()
+                    } else if (!closed && bluetoothAdapter?.isEnabled == true) {
                         if (_lifecycleState.value is HidLifecycleState.Error) {
                             _connectedDevice.value = null
                             publishServiceState(BluetoothState.ReadyDisconnected)

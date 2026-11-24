@@ -4,7 +4,7 @@ title: Turning the phone's Bluetooth off and on leaves Bluke saying "Bluetooth i
 kind: refinement
 size: S
 judge: opus
-status: proposed
+status: done
 lens: eng
 proposed_by: coordinator on ricks-macbook, from the operator's real-phone checklist run
 proposed_on: 2026-11-23
@@ -45,6 +45,13 @@ Turn Bluetooth off and the card says "Bluetooth is off" for as long as it is off
 - **No hill-climb.** This is a behaviour fix with no UI change.
 
 ## Shown
+- Card says "Bluetooth is off" while it is off: `tools/hid-rig/run.sh` -> `PASS Bluetooth off and on` (the check reads `state` every half second for 8 s after `cmd bluetooth_manager disable` and fails on anything but `BluetoothOff`).
+- Back on, ready and reconnected without a tap: `tools/hid-rig/run.sh` -> `back on: lifecycle went Idle -> Registering(attempt=1) -> Registered -> Connecting(deviceAddress=03:00:00:00:00:00) -> Connected(deviceAddress=03:00:00:00:00:00)`.
+- Unit test, the publish gate: `HidLifecycleTest.adapterThatIsNotOnPublishesOnlyBluetoothOff` (every `publishServiceState` call goes through `publishableServiceState`).
+- Unit test, the retry decision: `HidLifecycleTest.failureDuringTheOffOnTransitionRetriesOnStateOn`, which also pins that a rejection with the adapter on throughout is still reported.
+- Easy to miss: the first wrong decision, not the symptom: going off now closes the HID proxy and drops any pending bind, and a proxy unbinding while off no longer rebinds, so `STATE_ON` binds one fresh proxy instead of racing a revived stale one (`releaseHidProxy` and `onServiceDisconnected` in `BluetoothKeyboardManager.kt`).
+- Not shown: the rig check failing on today's `main`: the operator allowed one mid-build emulator run, spent on this build.
+- Not shown: the Pixel 10a against the MacBook: needs the phone (below).
 
 ## Risks and the alternative considered
 - **Retrying a real rejection forever.** A rejection that persists after `STATE_ON` is still the signal for a phone without a usable HID role (`indicatesLikelyDeviceIncompatibility`). So the retry is bounded to the transition, and the terminal `ProfileNotSupported` path keeps working. The rig and unit tests cover both.
