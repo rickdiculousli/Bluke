@@ -2,87 +2,64 @@ package dev.arnv.bluke.ui
 
 import android.content.Context
 import android.content.ContextWrapper
-import android.content.Intent
 import android.content.SharedPreferences
 import android.hardware.SensorManager
 import android.os.SystemClock
-import android.os.VibrationEffect
-import android.os.Vibrator
 import android.view.KeyEvent
 import android.view.OrientationEventListener
-import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
-import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ColumnScope
 import androidx.compose.foundation.layout.Row
-import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
-import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
 import androidx.compose.material.icons.automirrored.filled.VolumeDown
 import androidx.compose.material.icons.automirrored.filled.VolumeOff
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowLeft
-import androidx.compose.material.icons.automirrored.filled.KeyboardArrowRight
-import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.filled.KeyboardArrowUp
-import androidx.compose.material.icons.filled.Mouse
+import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material.icons.filled.SkipPrevious
-import androidx.compose.material.icons.filled.Speed
-import androidx.compose.material.icons.filled.Vibration
-import androidx.compose.material3.Icon
-import androidx.compose.material3.Surface
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.layout.layout
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
-import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
-import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.core.content.edit
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
-import dev.arnv.bluke.QuickCycleActivity
 import dev.arnv.bluke.RemoteVolumeKeyHost
 import dev.arnv.bluke.bluetooth.BluetoothKeyboardManager
 import dev.arnv.bluke.bluetooth.ConsumerControl
 import kotlin.math.abs
 import kotlin.math.min
-
-private val RemoteCanvasColor = Color(0xFF1D1D1D)
-private val RemoteButtonColor = Color(0xFF333333)
-private val RemoteTouchpadColor = Color(0xFF333333)
-private val RemoteContentColor = Color(0xFFF4F4F6)
 
 internal enum class MultimediaPosture {
     LANDSCAPE,
@@ -142,6 +119,46 @@ internal fun consumerControlForHardwareVolumeKey(keyCode: Int): ConsumerControl?
     else -> null
 }
 
+/** The multimedia remote's settings: the shared pointer speeds and whether the phone's volume buttons drive the host. */
+data class MultimediaTuneState(
+    val pointer: PointerTuneState = PointerTuneState(),
+    val hardwareVolumeButtons: Boolean = false,
+) {
+    fun write(prefs: SharedPreferences) {
+        pointer.write(prefs)
+        prefs.edit { putBoolean(HARDWARE_VOLUME_REMOTE_PREFERENCE, hardwareVolumeButtons) }
+    }
+
+    companion object {
+        val KEYS = PointerTuneState.KEYS + HARDWARE_VOLUME_REMOTE_PREFERENCE
+
+        fun read(prefs: SharedPreferences) = MultimediaTuneState(
+            pointer = PointerTuneState.read(prefs),
+            hardwareVolumeButtons = prefs.getBoolean(HARDWARE_VOLUME_REMOTE_PREFERENCE, false),
+        )
+    }
+}
+
+/** The multimedia remote's settings, for its Tune sheet and the Settings screen. */
+@Composable
+fun MultimediaTuneContent(
+    state: MultimediaTuneState,
+    onChange: (MultimediaTuneState) -> Unit,
+    haptics: SurfaceHaptics? = null,
+) {
+    TuneSection("Pointer") {
+        PointerSpeedTune(state.pointer, { onChange(state.copy(pointer = it)) }, haptics)
+    }
+    TuneSection("Volume") {
+        TuneSwitch(
+            label = "Phone volume buttons",
+            supporting = "Change the host's volume while the remote is open",
+            checked = state.hardwareVolumeButtons,
+            onCheckedChange = { onChange(state.copy(hardwareVolumeButtons = it)) },
+        )
+    }
+}
+
 @Composable
 internal fun MediaPresentationView(
     btManager: BluetoothKeyboardManager,
@@ -149,39 +166,16 @@ internal fun MediaPresentationView(
     sharedPrefs: SharedPreferences,
     postureOverride: MultimediaPosture? = null,
 ) {
-    // Shim until this surface adopts SurfaceToolbar: the old toolbar's inputs, from the chrome.
-    val onClose = chrome.onClose
-    val launchMode = chrome.mode.id
-    val onModeChange: (Int) -> Unit = { chrome.onNextMode() }
-    val isConnected = chrome.host.status == SurfaceHostStatus.Connected
     val context = LocalContext.current
     val lifecycleOwner = LocalLifecycleOwner.current
     val volumeKeyHost = remember(context) { context.findRemoteVolumeKeyHost() }
-    val useHardwareVolumeButtons = sharedPrefs.getBoolean(HARDWARE_VOLUME_REMOTE_PREFERENCE, false)
+    val haptics = rememberSurfaceHaptics(sharedPrefs)
+    val tune by rememberPreference(sharedPrefs, *MultimediaTuneState.KEYS) { MultimediaTuneState.read(it) }
+    var tuneOpen by rememberSaveable { mutableStateOf(false) }
     var isForeground by remember {
         mutableStateOf(lifecycleOwner.lifecycle.currentState.isAtLeast(Lifecycle.State.STARTED))
     }
     var posture by rememberSaveable { mutableStateOf(MultimediaPosture.LANDSCAPE) }
-    var sensitivity by remember {
-        mutableFloatStateOf(sharedPrefs.getFloat("touchpad_sensitivity", 1.5f))
-    }
-    var scrollSensitivity by remember {
-        mutableFloatStateOf(sharedPrefs.getFloat("touchpad_scroll_sensitivity", 1f))
-    }
-    var isVibrationEnabled by remember {
-        mutableStateOf(sharedPrefs.getBoolean("touchpad_vibration_enabled", true))
-    }
-
-    @Suppress("DEPRECATION")
-    fun triggerVibration(milliseconds: Long) {
-        if (!isVibrationEnabled) return
-        runCatching {
-            val vibrator = context.getSystemService(Context.VIBRATOR_SERVICE) as? Vibrator
-            vibrator?.vibrate(
-                VibrationEffect.createOneShot(milliseconds, VibrationEffect.DEFAULT_AMPLITUDE),
-            )
-        }
-    }
 
     DisposableEffect(context, postureOverride) {
         if (postureOverride != null) {
@@ -211,6 +205,7 @@ internal fun MediaPresentationView(
         onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
+    val useHardwareVolumeButtons = tune.hardwareVolumeButtons
     DisposableEffect(volumeKeyHost, useHardwareVolumeButtons, isForeground, btManager) {
         if (useHardwareVolumeButtons && isForeground) {
             volumeKeyHost?.setRemoteVolumeKeyHandler { keyCode, isPressed ->
@@ -225,726 +220,299 @@ internal fun MediaPresentationView(
         }
     }
 
-    val resolvedPosture = postureOverride ?: posture
-    val cycleSensitivity = {
-        sensitivity = nextTouchpadSpeed(sensitivity)
-        sharedPrefs.edit { putFloat("touchpad_sensitivity", sensitivity) }
-        triggerVibration(15)
-    }
-    val cycleScrollSensitivity = {
-        scrollSensitivity = nextTouchpadSpeed(scrollSensitivity)
-        sharedPrefs.edit { putFloat("touchpad_scroll_sensitivity", scrollSensitivity) }
-        triggerVibration(15)
-    }
-    val cycleMode = {
-        val enabled = sharedPrefs.enabledInputModes()
-        val index = enabled.indexOfFirst { it.id == launchMode }.coerceAtLeast(0)
-        onModeChange(enabled[(index + 1) % enabled.size].id)
-    }
-    val toggleVibration = {
-        isVibrationEnabled = !isVibrationEnabled
-        sharedPrefs.edit { putBoolean("touchpad_vibration_enabled", isVibrationEnabled) }
-        triggerVibration(35)
-    }
-    val rootModifier = Modifier
-        .fillMaxSize()
-        .background(RemoteCanvasColor)
-        .testTag("media_presentation_view_root")
+    val remote = remember(btManager, haptics) { RemoteSender(btManager, haptics) }
+    val upright = (postureOverride ?: posture) == MultimediaPosture.PORTRAIT_HELD
 
-    if (resolvedPosture == MultimediaPosture.LANDSCAPE) {
-        Column(modifier = rootModifier) {
-            MultimediaTopBar(
-                btManager = btManager,
-                onClose = onClose,
-                launchMode = launchMode,
-                onModeChange = onModeChange,
-                sharedPrefs = sharedPrefs,
-                isConnected = isConnected,
-                sensitivity = sensitivity,
-                onSensitivityChange = cycleSensitivity,
-                scrollSensitivity = scrollSensitivity,
-                onScrollSensitivityChange = cycleScrollSensitivity,
-                isVibrationEnabled = isVibrationEnabled,
-                onToggleVibration = toggleVibration,
-            )
-            MultimediaControlCanvas(
-                btManager = btManager,
-                posture = resolvedPosture,
-                sensitivity = sensitivity,
-                scrollSensitivity = scrollSensitivity,
-                triggerVibration = ::triggerVibration,
-                modifier = Modifier.fillMaxSize(),
-            )
-        }
-    } else {
-        Row(modifier = rootModifier) {
-            MultimediaUprightBar(
-                btManager = btManager,
-                onClose = onClose,
-                onModeChange = cycleMode,
-                isConnected = isConnected,
-                sensitivity = sensitivity,
-                onSensitivityChange = cycleSensitivity,
-                scrollSensitivity = scrollSensitivity,
-                onScrollSensitivityChange = cycleScrollSensitivity,
-                isVibrationEnabled = isVibrationEnabled,
-                onToggleVibration = toggleVibration,
-            )
-            MultimediaControlCanvas(
-                btManager = btManager,
-                posture = resolvedPosture,
-                sensitivity = sensitivity,
-                scrollSensitivity = scrollSensitivity,
-                triggerVibration = ::triggerVibration,
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-            )
+    Box(
+        Modifier
+            .fillMaxSize()
+            .background(MaterialTheme.colorScheme.surface)
+            .testTag("media_presentation_view_root"),
+    ) {
+        // Upright, the phone is held portrait while the activity stays landscape: the whole remote is
+        // laid out portrait and turned to match, so the toolbar sits at the top and every label reads level.
+        Box(Modifier.fillMaxSize().then(if (upright) Modifier.uprightFrame() else Modifier)) {
+            Column(Modifier.fillMaxSize()) {
+                SurfaceToolbar(chrome = chrome, haptics = haptics, onTune = { tuneOpen = true })
+                val deck = Modifier.fillMaxSize().padding(16.dp)
+                if (upright) {
+                    UprightRemote(remote, tune, deck)
+                } else {
+                    LandscapeRemote(remote, tune, deck)
+                }
+            }
+            SurfaceTuneSheet(visible = tuneOpen, title = "Tune multimedia", onDismiss = { tuneOpen = false }) {
+                MultimediaTuneContent(tune, { it.write(sharedPrefs) }, haptics)
+            }
         }
     }
 }
 
-@Composable
-private fun MultimediaControlCanvas(
-    btManager: BluetoothKeyboardManager,
-    posture: MultimediaPosture,
-    sensitivity: Float,
-    scrollSensitivity: Float,
-    triggerVibration: (Long) -> Unit,
-    modifier: Modifier,
-) {
-    BoxWithConstraints(
-        modifier = modifier.padding(
-            start = if (posture == MultimediaPosture.LANDSCAPE) 32.dp else 24.dp,
-            top = if (posture == MultimediaPosture.LANDSCAPE) 4.dp else 28.dp,
-            end = if (posture == MultimediaPosture.LANDSCAPE) 13.dp else 23.dp,
-            bottom = if (posture == MultimediaPosture.LANDSCAPE) 22.dp else 28.dp,
+/** Lays its content out with width and height swapped and turns it a quarter left, so it reads level held upright. */
+private fun Modifier.uprightFrame(): Modifier = layout { measurable, constraints ->
+    val placeable = measurable.measure(
+        Constraints(
+            minWidth = constraints.minHeight,
+            maxWidth = constraints.maxHeight,
+            minHeight = constraints.minWidth,
+            maxHeight = constraints.maxWidth,
         ),
-    ) {
-        val compact = maxHeight < 280.dp
-        val controlWidth = when {
-            posture == MultimediaPosture.PORTRAIT_HELD -> 48.5f.dp
-            compact -> 46.dp
-            else -> 52.dp
+    )
+    layout(placeable.height, placeable.width) {
+        placeable.placeWithLayer(
+            x = (placeable.height - placeable.width) / 2,
+            y = (placeable.width - placeable.height) / 2,
+        ) { rotationZ = -90f }
+    }
+}
+
+@Composable
+private fun LandscapeRemote(remote: RemoteSender, tune: MultimediaTuneState, modifier: Modifier) {
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(GROUP_GAP)) {
+        Column(Modifier.width(240.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+            PlaybackGroup(remote)
+            VolumeGroup(remote, tune.hardwareVolumeButtons)
+            RemoteGroup("Presentation") {
+                Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
+                    presentationActions.forEach { RemoteActionButton(it, remote, neutralColors(), Modifier.weight(1f).fillMaxHeight()) }
+                }
+            }
         }
-        val controlHeight = when {
-            posture == MultimediaPosture.PORTRAIT_HELD -> 70.dp
-            compact -> 46.dp
-            else -> 52.dp
+        NavigationGroup(remote, Modifier.width(DPAD_WIDTH).fillMaxHeight())
+        PointerArea(remote, tune, Modifier.weight(1f).fillMaxHeight())
+    }
+}
+
+@Composable
+private fun UprightRemote(remote: RemoteSender, tune: MultimediaTuneState, modifier: Modifier) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(GROUP_GAP)) {
+        PlaybackGroup(remote)
+        VolumeGroup(remote, tune.hardwareVolumeButtons)
+        Row(Modifier.fillMaxWidth().height(232.dp), horizontalArrangement = Arrangement.spacedBy(GROUP_GAP)) {
+            NavigationGroup(remote, Modifier.width(UPRIGHT_DPAD_WIDTH).fillMaxHeight())
+            RemoteGroup("Presentation", Modifier.weight(1f).fillMaxHeight()) {
+                presentationActions.forEach {
+                    RemoteActionButton(it, remote, neutralColors(), Modifier.fillMaxWidth().weight(1f))
+                }
+            }
         }
-        val horizontalGap = when {
-            posture == MultimediaPosture.PORTRAIT_HELD -> 7.5f.dp
-            compact -> 7.dp
-            else -> 8.dp
-        }
-        val verticalGap = if (compact) 7.dp else 8.dp
-        Row(
-            modifier = Modifier.fillMaxSize(),
-            horizontalArrangement = Arrangement.spacedBy(if (compact) 18.dp else 24.dp),
-        ) {
-            MultimediaButtonDeck(
-                btManager = btManager,
-                posture = posture,
-                buttonWidth = controlWidth,
-                buttonHeight = controlHeight,
-                horizontalGap = horizontalGap,
-                verticalGap = verticalGap,
-                triggerVibration = triggerVibration,
-                modifier = Modifier
-                    .weight(if (posture == MultimediaPosture.LANDSCAPE) 1.025f else 1f)
-                    .fillMaxHeight(),
+        PointerArea(remote, tune, Modifier.fillMaxWidth().weight(1f))
+    }
+}
+
+/** Transport first: play/pause is the largest key on the remote, previous and next beside it. */
+@Composable
+private fun PlaybackGroup(remote: RemoteSender) {
+    RemoteGroup("Playback") {
+        Row(Modifier.fillMaxWidth().height(72.dp), horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
+            RemoteActionButton(previousAction, remote, secondaryColors(), Modifier.width(64.dp).fillMaxHeight())
+            RemoteActionButton(
+                playPauseAction,
+                remote,
+                RemoteButtonColors(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.onPrimary),
+                Modifier.weight(1f).fillMaxHeight().testTag("multimedia_play_pause"),
+                shape = MaterialTheme.shapes.large,
+                iconSize = 32.dp,
             )
-            MultimediaPointerDeck(
-                btManager = btManager,
-                posture = posture,
-                sensitivity = sensitivity,
-                scrollSensitivity = scrollSensitivity,
-                triggerVibration = triggerVibration,
-                compact = compact,
-                modifier = Modifier
-                    .weight(if (posture == MultimediaPosture.LANDSCAPE) 0.975f else 1.08f)
-                    .fillMaxHeight(),
-            )
+            RemoteActionButton(nextAction, remote, secondaryColors(), Modifier.width(64.dp).fillMaxHeight())
         }
     }
 }
 
 @Composable
-private fun MultimediaButtonDeck(
-    btManager: BluetoothKeyboardManager,
-    posture: MultimediaPosture,
-    buttonWidth: Dp,
-    buttonHeight: Dp,
-    horizontalGap: Dp,
-    verticalGap: Dp,
-    triggerVibration: (Long) -> Unit,
-    modifier: Modifier,
-) {
-    val contentRotation = if (posture == MultimediaPosture.PORTRAIT_HELD) -90f else 0f
-    Row(
-        modifier = modifier,
-        horizontalArrangement = Arrangement.spacedBy(horizontalGap * 3),
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        val mediaRows = if (posture == MultimediaPosture.LANDSCAPE) {
-            landscapeMediaRows
-        } else {
-            portraitHeldMediaRows
+private fun VolumeGroup(remote: RemoteSender, hardwareVolumeButtons: Boolean) {
+    RemoteGroup(if (hardwareVolumeButtons) "Volume · phone buttons on" else "Volume") {
+        Row(Modifier.fillMaxWidth().height(56.dp), horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
+            volumeActions.forEach { RemoteActionButton(it, remote, secondaryColors(), Modifier.weight(1f).fillMaxHeight()) }
         }
-        Column(verticalArrangement = Arrangement.spacedBy(verticalGap)) {
-            mediaRows.forEach { row ->
-                Row(horizontalArrangement = Arrangement.spacedBy(horizontalGap)) {
+    }
+}
+
+/** Arrows around OK, with Esc, Menu, Home and End in the corners. */
+@Composable
+private fun NavigationGroup(remote: RemoteSender, modifier: Modifier) {
+    RemoteGroup("Navigation", modifier) {
+        Column(Modifier.fillMaxWidth().weight(1f), verticalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
+            navigationGrid.forEach { row ->
+                Row(Modifier.fillMaxWidth().weight(1f), horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
                     row.forEach { action ->
-                        MultimediaActionButton(
-                            action = action,
-                            btManager = btManager,
-                            width = buttonWidth,
-                            height = buttonHeight,
-                            contentRotation = contentRotation,
-                            triggerVibration = triggerVibration,
-                        )
+                        val colors = if (action.icons.isNotEmpty() || action == okAction) secondaryColors() else neutralColors()
+                        RemoteActionButton(action, remote, colors, Modifier.weight(1f).fillMaxHeight())
                     }
                 }
             }
         }
-
-        Column(verticalArrangement = Arrangement.spacedBy(verticalGap)) {
-            Row(
-                modifier = Modifier.width(buttonWidth * 3 + horizontalGap * 2),
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                MultimediaActionButton(
-                    RemoteAction.Key("Up", Icons.Default.KeyboardArrowUp, KeyboardLayouts.KEY_UP),
-                    btManager,
-                    buttonWidth,
-                    buttonHeight,
-                    triggerVibration = triggerVibration,
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(horizontalGap)) {
-                MultimediaActionButton(
-                    RemoteAction.Key("Left", Icons.AutoMirrored.Filled.KeyboardArrowLeft, KeyboardLayouts.KEY_LEFT),
-                    btManager,
-                    buttonWidth,
-                    buttonHeight,
-                    triggerVibration = triggerVibration,
-                )
-                MultimediaActionButton(
-                    RemoteAction.Key("OK", null, KeyboardLayouts.KEY_ENTER),
-                    btManager,
-                    buttonWidth,
-                    buttonHeight,
-                    contentRotation,
-                    triggerVibration,
-                )
-                MultimediaActionButton(
-                    RemoteAction.Key("Right", Icons.AutoMirrored.Filled.KeyboardArrowRight, KeyboardLayouts.KEY_RIGHT),
-                    btManager,
-                    buttonWidth,
-                    buttonHeight,
-                    triggerVibration = triggerVibration,
-                )
-            }
-            Row(
-                modifier = Modifier.width(buttonWidth * 3 + horizontalGap * 2),
-                horizontalArrangement = Arrangement.Center,
-            ) {
-                MultimediaActionButton(
-                    RemoteAction.Key("Down", Icons.Default.KeyboardArrowDown, KeyboardLayouts.KEY_DOWN),
-                    btManager,
-                    buttonWidth,
-                    buttonHeight,
-                    triggerVibration = triggerVibration,
-                )
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(horizontalGap)) {
-                MultimediaActionButton(
-                    RemoteAction.Key("Back", null, KeyboardLayouts.KEY_BACKSPACE),
-                    btManager,
-                    buttonWidth,
-                    buttonHeight,
-                    contentRotation,
-                    triggerVibration,
-                )
-                MultimediaActionButton(
-                    RemoteAction.Key("Start", null, KeyboardLayouts.KEY_F5),
-                    btManager,
-                    buttonWidth,
-                    buttonHeight,
-                    contentRotation,
-                    triggerVibration,
-                )
-                MultimediaActionButton(
-                    RemoteAction.Key("Menu", null, KEY_APPLICATION),
-                    btManager,
-                    buttonWidth,
-                    buttonHeight,
-                    contentRotation,
-                    triggerVibration,
-                )
-            }
-        }
     }
 }
 
+/** The pointer pad, its three labelled mouse buttons below, and the page up/down strip beside it. */
 @Composable
-private fun MultimediaPointerDeck(
-    btManager: BluetoothKeyboardManager,
-    posture: MultimediaPosture,
-    sensitivity: Float,
-    scrollSensitivity: Float,
-    triggerVibration: (Long) -> Unit,
-    compact: Boolean,
-    modifier: Modifier,
-) {
-    val gap = if (compact) 7.dp else 8.dp
-    val navigationWidth = if (compact) 52.dp else 60.dp
-    val mouseThickness = if (compact) 38.dp else 42.dp
-    if (posture == MultimediaPosture.LANDSCAPE) {
-        Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(gap)) {
-            Column(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-                verticalArrangement = Arrangement.spacedBy(gap),
-            ) {
-                MultimediaTouchpad(
-                    btManager,
-                    sensitivity,
-                    scrollSensitivity,
-                    triggerVibration,
-                    Modifier.weight(1f).fillMaxWidth(),
-                )
-                MouseButtonRow(btManager, Modifier.fillMaxWidth().height(mouseThickness), gap, triggerVibration)
-            }
-            SlideNavigationColumn(btManager, Modifier.width(navigationWidth).fillMaxHeight(), gap, triggerVibration)
-        }
-    } else {
-        Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(gap)) {
-            Column(
-                modifier = Modifier.weight(1f).fillMaxHeight(),
-                verticalArrangement = Arrangement.spacedBy(gap),
-            ) {
-                SlideNavigationRow(btManager, Modifier.fillMaxWidth().height(mouseThickness), gap, triggerVibration)
-                MultimediaTouchpad(
-                    btManager,
-                    sensitivity,
-                    scrollSensitivity,
-                    triggerVibration,
-                    Modifier.weight(1f).fillMaxWidth(),
-                )
-            }
-            MouseButtonColumn(btManager, Modifier.width(mouseThickness).fillMaxHeight(), gap, triggerVibration)
-        }
-    }
-}
-
-@Composable
-private fun MultimediaTouchpad(
-    btManager: BluetoothKeyboardManager,
-    sensitivity: Float,
-    scrollSensitivity: Float,
-    triggerVibration: (Long) -> Unit,
-    modifier: Modifier,
-) {
-    Box(
-        modifier = modifier
-            .clip(RoundedCornerShape(8.dp))
-            .background(RemoteTouchpadColor)
-            .testTag("multimedia_touchpad"),
-    ) {
-        TouchGestureLayer(
-            btManager = btManager,
-            sensitivity = sensitivity,
-            scrollSensitivity = scrollSensitivity,
-            buttonMode = TrackpadButtonMode.CLICKPAD,
-            triggerVibration = triggerVibration,
-            showNumpadLed = false,
-        )
-    }
-}
-
-@Composable
-private fun SlideNavigationColumn(
-    btManager: BluetoothKeyboardManager,
-    modifier: Modifier,
-    gap: Dp,
-    triggerVibration: (Long) -> Unit,
-) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(gap)) {
-        MultimediaActionButton(
-            RemoteAction.Key("Previous slide", Icons.Default.KeyboardArrowUp, KeyboardLayouts.KEY_PAGEUP),
-            btManager,
-            Modifier.weight(1f).fillMaxWidth(),
-            triggerVibration = triggerVibration,
-        )
-        MultimediaActionButton(
-            RemoteAction.Key("Next slide", Icons.Default.KeyboardArrowDown, KeyboardLayouts.KEY_PAGEDOWN),
-            btManager,
-            Modifier.weight(1f).fillMaxWidth(),
-            triggerVibration = triggerVibration,
-        )
-    }
-}
-
-@Composable
-private fun SlideNavigationRow(
-    btManager: BluetoothKeyboardManager,
-    modifier: Modifier,
-    gap: Dp,
-    triggerVibration: (Long) -> Unit,
-) {
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(gap)) {
-        MultimediaActionButton(
-            RemoteAction.Key("Previous slide", Icons.AutoMirrored.Filled.KeyboardArrowLeft, KeyboardLayouts.KEY_PAGEUP),
-            btManager,
-            Modifier.weight(1f).fillMaxHeight(),
-            triggerVibration = triggerVibration,
-        )
-        MultimediaActionButton(
-            RemoteAction.Key("Next slide", Icons.AutoMirrored.Filled.KeyboardArrowRight, KeyboardLayouts.KEY_PAGEDOWN),
-            btManager,
-            Modifier.weight(1f).fillMaxHeight(),
-            triggerVibration = triggerVibration,
-        )
-    }
-}
-
-@Composable
-private fun MouseButtonRow(
-    btManager: BluetoothKeyboardManager,
-    modifier: Modifier,
-    gap: Dp,
-    triggerVibration: (Long) -> Unit,
-) {
-    Row(modifier = modifier, horizontalArrangement = Arrangement.spacedBy(gap)) {
-        MouseHoldButton("Left mouse button", 0x01, btManager, Modifier.weight(1f).fillMaxHeight(), triggerVibration)
-        MouseHoldButton("Middle mouse button", 0x04, btManager, Modifier.weight(1f).fillMaxHeight(), triggerVibration)
-        MouseHoldButton("Right mouse button", 0x02, btManager, Modifier.weight(1f).fillMaxHeight(), triggerVibration)
-    }
-}
-
-@Composable
-private fun MouseButtonColumn(
-    btManager: BluetoothKeyboardManager,
-    modifier: Modifier,
-    gap: Dp,
-    triggerVibration: (Long) -> Unit,
-) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(gap)) {
-        MouseHoldButton("Left mouse button", 0x01, btManager, Modifier.weight(1f).fillMaxWidth(), triggerVibration)
-        MouseHoldButton("Middle mouse button", 0x04, btManager, Modifier.weight(1f).fillMaxWidth(), triggerVibration)
-        MouseHoldButton("Right mouse button", 0x02, btManager, Modifier.weight(1f).fillMaxWidth(), triggerVibration)
-    }
-}
-
-@Composable
-private fun MouseHoldButton(
-    label: String,
-    mask: Int,
-    btManager: BluetoothKeyboardManager,
-    modifier: Modifier,
-    triggerVibration: (Long) -> Unit,
-) {
-    RemoteHoldButton(
-        label = label,
-        icon = null,
-        modifier = modifier,
-        fillHeight = true,
-        showLabel = false,
-        cornerRadius = 8.dp,
-        showBorder = false,
-        containerColor = RemoteButtonColor,
-        contentColor = RemoteContentColor,
-        onPressFeedback = { triggerVibration(15) },
-        onPressedChange = { pressed ->
-            btManager.sendMouseReport(if (pressed) mask.toByte() else 0, 0, 0, 0)
-        },
-    )
-}
-
-@Composable
-private fun MultimediaActionButton(
-    action: RemoteAction,
-    btManager: BluetoothKeyboardManager,
-    width: Dp,
-    height: Dp,
-    contentRotation: Float = 0f,
-    triggerVibration: (Long) -> Unit,
-) {
-    Box(Modifier.width(width).height(height)) {
-        MultimediaActionButton(action, btManager, Modifier.fillMaxSize(), contentRotation, triggerVibration)
-    }
-}
-
-@Composable
-private fun MultimediaActionButton(
-    action: RemoteAction,
-    btManager: BluetoothKeyboardManager,
-    modifier: Modifier,
-    contentRotation: Float = 0f,
-    triggerVibration: (Long) -> Unit,
-) {
-    RemoteHoldButton(
-        label = action.label,
-        icon = action.icon,
-        modifier = modifier,
-        fillHeight = true,
-        showLabel = action.icon == null,
-        contentRotation = contentRotation,
-        cornerRadius = 8.dp,
-        showBorder = false,
-        containerColor = RemoteButtonColor,
-        contentColor = RemoteContentColor,
-        onPressFeedback = { triggerVibration(15) },
-        onPressedChange = { pressed ->
-            when (action) {
-                is RemoteAction.Consumer -> {
-                    btManager.sendConsumerControl(if (pressed) action.control else null)
-                }
-                is RemoteAction.Key -> btManager.sendKey(action.keyCode, pressed)
-            }
-        },
-    )
-}
-
-private sealed interface RemoteAction {
-    val label: String
-    val icon: ImageVector?
-
-    data class Consumer(
-        override val label: String,
-        override val icon: ImageVector,
-        val control: ConsumerControl,
-    ) : RemoteAction
-
-    data class Key(
-        override val label: String,
-        override val icon: ImageVector?,
-        val keyCode: Int,
-    ) : RemoteAction
-}
-
-private val muteAction = RemoteAction.Consumer("Mute", Icons.AutoMirrored.Filled.VolumeOff, ConsumerControl.MUTE)
-private val volumeUpAction = RemoteAction.Consumer("Volume up", Icons.AutoMirrored.Filled.VolumeUp, ConsumerControl.VOLUME_UP)
-private val volumeDownAction = RemoteAction.Consumer("Volume down", Icons.AutoMirrored.Filled.VolumeDown, ConsumerControl.VOLUME_DOWN)
-private val previousAction = RemoteAction.Consumer("Previous track", Icons.Default.SkipPrevious, ConsumerControl.PREVIOUS_TRACK)
-private val playAction = RemoteAction.Consumer("Play or pause", Icons.Default.PlayArrow, ConsumerControl.PLAY_PAUSE)
-private val nextAction = RemoteAction.Consumer("Next track", Icons.Default.SkipNext, ConsumerControl.NEXT_TRACK)
-// Upright content is rotated -90 degrees. Use the opposite source glyphs so the rendered
-// Previous/Next symbols retain their intended visual direction without swapping HID commands.
-private val uprightPreviousAction = RemoteAction.Consumer("Previous track", Icons.Default.SkipNext, ConsumerControl.PREVIOUS_TRACK)
-private val uprightNextAction = RemoteAction.Consumer("Next track", Icons.Default.SkipPrevious, ConsumerControl.NEXT_TRACK)
-private val escapeAction = RemoteAction.Key("Esc", null, KeyboardLayouts.KEY_ESC)
-private val homeAction = RemoteAction.Key("Home", null, KeyboardLayouts.KEY_HOME)
-private val endAction = RemoteAction.Key("End", null, KeyboardLayouts.KEY_END)
-private val pageUpAction = RemoteAction.Key("PgUp", null, KeyboardLayouts.KEY_PAGEUP)
-private val pageDownAction = RemoteAction.Key("PgDn", null, KeyboardLayouts.KEY_PAGEDOWN)
-private val blackAction = RemoteAction.Key("Black", null, KeyboardLayouts.KEY_B)
-
-private val landscapeMediaRows = listOf(
-    listOf(muteAction, volumeUpAction, volumeDownAction),
-    listOf(previousAction, playAction, nextAction),
-    listOf(escapeAction, homeAction, endAction),
-    listOf(pageUpAction, pageDownAction, blackAction),
-)
-
-private val portraitHeldMediaRows = listOf(
-    listOf(muteAction, volumeUpAction, volumeDownAction),
-    listOf(uprightPreviousAction, escapeAction, blackAction),
-    listOf(playAction, pageDownAction, endAction),
-    listOf(uprightNextAction, pageUpAction, homeAction),
-)
-
-@Composable
-private fun MultimediaUprightBar(
-    btManager: BluetoothKeyboardManager,
-    onClose: () -> Unit,
-    onModeChange: () -> Unit,
-    isConnected: Boolean,
-    sensitivity: Float,
-    onSensitivityChange: () -> Unit,
-    scrollSensitivity: Float,
-    onScrollSensitivityChange: () -> Unit,
-    isVibrationEnabled: Boolean,
-    onToggleVibration: () -> Unit,
-) {
-    Column(
-        modifier = Modifier
-            .width(42.dp)
-            .fillMaxHeight()
-            .background(Color.Black.copy(alpha = 0.45f))
-            .padding(horizontal = 4.dp, vertical = 6.dp),
-        horizontalAlignment = Alignment.CenterHorizontally,
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
-        UprightToolbarButton("Close Multimedia", onClose) {
-            Icon(Icons.Default.Close, null, tint = Color.White, modifier = Modifier.size(13.dp))
-        }
-        UprightToolbarButton("Switch input mode", onModeChange) {
-            Icon(Icons.Default.Mouse, null, tint = Color.White, modifier = Modifier.size(13.dp))
-        }
-        Box(
-            Modifier
-                .size(8.dp)
-                .clip(CircleShape)
-                .background(if (isConnected) Color(0xFF39FF14) else Color(0xFFFF9800))
-                .semantics {
-                    contentDescription = if (isConnected) "Host connected" else "Host offline"
-                },
-        )
-        ReconnectHostButton(btManager, iconOnly = true)
-        Spacer(Modifier.weight(1f))
-        UprightToolbarButton("Pointer sensitivity ${sensitivity}x", onSensitivityChange) {
-            // Too small for an icon as well: the word says which speed this is.
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Pointer", color = Color.White, fontSize = 7.sp, lineHeight = 8.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
-                Text("${sensitivity}x", color = Color.White, fontSize = 7.sp, lineHeight = 8.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-        UprightToolbarButton("Scroll sensitivity ${scrollSensitivity}x", onScrollSensitivityChange) {
-            // Too small for an icon as well: the word says which speed this is.
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("Scroll", color = Color.White, fontSize = 7.sp, lineHeight = 8.sp, fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
-                Text("${scrollSensitivity}x", color = Color.White, fontSize = 7.sp, lineHeight = 8.sp, fontWeight = FontWeight.Bold)
-            }
-        }
-        UprightToolbarButton(
-            if (isVibrationEnabled) "Disable vibration" else "Enable vibration",
-            onToggleVibration,
-        ) {
-            Icon(
-                Icons.Default.Vibration,
-                null,
-                tint = if (isVibrationEnabled) Color.White else Color.White.copy(alpha = 0.4f),
-                modifier = Modifier.size(13.dp),
-            )
-        }
-    }
-}
-
-@Composable
-private fun UprightToolbarButton(
-    description: String,
-    onClick: () -> Unit,
-    content: @Composable () -> Unit,
-) {
-    Surface(
-        onClick = onClick,
-        modifier = Modifier
-            .size(34.dp)
-            .semantics { contentDescription = description },
-        color = Color.White.copy(alpha = 0.15f),
-        shape = RoundedCornerShape(7.dp),
-    ) {
-        Box(
-            modifier = Modifier.fillMaxSize().graphicsLayer { rotationZ = -90f },
-            contentAlignment = Alignment.Center,
-        ) {
-            content()
-        }
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun MultimediaTopBar(
-    btManager: BluetoothKeyboardManager,
-    onClose: () -> Unit,
-    launchMode: Int,
-    onModeChange: (Int) -> Unit,
-    sharedPrefs: SharedPreferences,
-    isConnected: Boolean,
-    sensitivity: Float,
-    onSensitivityChange: () -> Unit,
-    scrollSensitivity: Float,
-    onScrollSensitivityChange: () -> Unit,
-    isVibrationEnabled: Boolean,
-    onToggleVibration: () -> Unit,
-) {
-    val context = LocalContext.current
-    val connectedDevice by btManager.connectedDevice.collectAsState()
-    val hostLabel = try {
-        (connectedDevice ?: btManager.getReconnectTarget())?.name ?: "No Host"
-    } catch (_: SecurityException) {
-        if (isConnected) "Host" else "No Host"
-    }
-    Row(
-        modifier = Modifier
-            .fillMaxWidth()
-            .height(42.dp)
-            .background(Color.Black.copy(alpha = 0.45f))
-            .padding(horizontal = 8.dp, vertical = 4.dp),
-        horizontalArrangement = Arrangement.SpaceBetween,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            ToolbarPill(onClick = onClose) {
-                Icon(Icons.Default.Close, "Close", tint = Color.White, modifier = Modifier.size(12.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Close", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            }
-            ToolbarPill(
-                onClick = {
-                    val enabled = sharedPrefs.enabledInputModes()
-                    val index = enabled.indexOfFirst { it.id == launchMode }.coerceAtLeast(0)
-                    onModeChange(enabled[(index + 1) % enabled.size].id)
-                },
-                onLongClick = {
-                    context.startActivity(Intent(context, QuickCycleActivity::class.java))
-                },
-            ) {
-                Icon(Icons.Default.Mouse, "Switch mode", tint = Color.White, modifier = Modifier.size(12.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Multimedia", color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            }
+private fun PointerArea(remote: RemoteSender, tune: MultimediaTuneState, modifier: Modifier) {
+    val colors = MaterialTheme.colorScheme
+    Row(modifier, horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
+        Column(Modifier.weight(1f).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
             Box(
                 Modifier
-                    .size(7.dp)
-                    .clip(CircleShape)
-                    .background(if (isConnected) Color(0xFF39FF14) else Color(0xFFFF9800))
-                    .semantics {
-                        contentDescription = if (isConnected) "Host connected" else "Host offline"
-                    },
-            )
-            Text(hostLabel, color = Color.White, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-            ReconnectHostButton(btManager, iconOnly = true)
-            if (!isConnected) {
-                Text("[offline]", color = Color.White.copy(alpha = 0.45f), fontSize = 9.sp)
+                    .weight(1f)
+                    .fillMaxWidth()
+                    .clip(MaterialTheme.shapes.large)
+                    .background(colors.surfaceContainerHigh)
+                    .testTag("multimedia_touchpad"),
+            ) {
+                TouchGestureLayer(
+                    btManager = remote.btManager,
+                    sensitivity = tune.pointer.pointerSpeed,
+                    scrollSensitivity = tune.pointer.scrollSpeed,
+                    buttonMode = TrackpadButtonMode.CLICKPAD,
+                    triggerVibration = { remote.haptics.perform(HapticEvent.CLICK) },
+                    showNumpadLed = false,
+                )
+            }
+            Row(Modifier.fillMaxWidth().height(48.dp), horizontalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
+                mouseActions.forEach { RemoteActionButton(it, remote, neutralColors(), Modifier.weight(1f).fillMaxHeight()) }
             }
         }
-
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            ToolbarPill(onClick = onSensitivityChange) {
-                Icon(Icons.Default.Speed, null, tint = Color.White, modifier = Modifier.size(12.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Pointer ${sensitivity}x", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-            }
-            ToolbarPill(onClick = onScrollSensitivityChange) {
-                Icon(Icons.Default.KeyboardArrowUp, null, tint = Color.White, modifier = Modifier.size(12.dp))
-                Spacer(Modifier.width(4.dp))
-                Text("Scroll ${scrollSensitivity}x", color = Color.White, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-            }
-            Surface(
-                onClick = onToggleVibration,
-                modifier = Modifier.size(28.dp),
-                shape = RoundedCornerShape(8.dp),
-                color = Color.White.copy(alpha = 0.15f),
-            ) {
-                Box(contentAlignment = Alignment.Center) {
-                    Icon(
-                        Icons.Default.Vibration,
-                        if (isVibrationEnabled) "Disable vibration" else "Enable vibration",
-                        tint = if (isVibrationEnabled) Color.White else Color.White.copy(alpha = 0.4f),
-                        modifier = Modifier.size(12.dp),
-                    )
-                }
-            }
+        Column(Modifier.width(72.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(BUTTON_GAP)) {
+            pageActions.forEach { RemoteActionButton(it, remote, neutralColors(), Modifier.fillMaxWidth().weight(1f)) }
         }
     }
 }
+
+/** A quiet group label over its buttons. */
+@Composable
+private fun RemoteGroup(title: String, modifier: Modifier = Modifier, content: @Composable ColumnScope.() -> Unit) {
+    Column(modifier, verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        Text(
+            title,
+            style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            modifier = Modifier.semantics { heading() },
+        )
+        content()
+    }
+}
+
+@Composable
+private fun RemoteActionButton(
+    action: RemoteAction,
+    remote: RemoteSender,
+    colors: RemoteButtonColors,
+    modifier: Modifier,
+    shape: androidx.compose.ui.graphics.Shape = MaterialTheme.shapes.medium,
+    iconSize: Dp = 24.dp,
+) {
+    RemoteHoldButton(
+        description = action.description,
+        colors = colors,
+        shape = shape,
+        modifier = modifier,
+        icons = action.icons,
+        iconSize = iconSize,
+        text = action.text,
+        caption = action.caption,
+        onPress = remote::press,
+        onPressedChange = { pressed -> remote.send(action, pressed) },
+    )
+}
+
+@Composable
+private fun secondaryColors() =
+    RemoteButtonColors(MaterialTheme.colorScheme.secondaryContainer, MaterialTheme.colorScheme.onSecondaryContainer)
+
+@Composable
+private fun neutralColors() =
+    RemoteButtonColors(MaterialTheme.colorScheme.surfaceContainerHighest, MaterialTheme.colorScheme.onSurface)
+
+/** Sends what a remote button means and plays its touch-down haptic. */
+private class RemoteSender(val btManager: BluetoothKeyboardManager, val haptics: SurfaceHaptics) {
+    fun press() = haptics.perform(HapticEvent.PRESS)
+
+    fun send(action: RemoteAction, pressed: Boolean) {
+        when (val output = action.output) {
+            is RemoteOutput.Consumer -> btManager.sendConsumerControl(if (pressed) output.control else null)
+            is RemoteOutput.Key -> btManager.sendKey(output.keyCode, pressed)
+            is RemoteOutput.Mouse -> btManager.sendMouseReport(if (pressed) output.mask.toByte() else 0, 0, 0, 0)
+        }
+    }
+}
+
+private sealed interface RemoteOutput {
+    data class Consumer(val control: ConsumerControl) : RemoteOutput
+    data class Key(val keyCode: Int) : RemoteOutput
+    data class Mouse(val mask: Int) : RemoteOutput
+}
+
+/** One remote button: what TalkBack calls it, what it shows, and what it sends. */
+private data class RemoteAction(
+    val description: String,
+    val output: RemoteOutput,
+    val icons: List<ImageVector> = emptyList(),
+    val text: String? = null,
+    val caption: String? = null,
+)
+
+private fun consumer(description: String, icon: ImageVector, control: ConsumerControl) =
+    RemoteAction(description, RemoteOutput.Consumer(control), icons = listOf(icon))
+
+private val previousAction = consumer("Previous track", Icons.Default.SkipPrevious, ConsumerControl.PREVIOUS_TRACK)
+private val playPauseAction = RemoteAction(
+    "Play or pause",
+    RemoteOutput.Consumer(ConsumerControl.PLAY_PAUSE),
+    icons = listOf(Icons.Default.PlayArrow, Icons.Default.Pause),
+)
+private val nextAction = consumer("Next track", Icons.Default.SkipNext, ConsumerControl.NEXT_TRACK)
+
+private val volumeActions = listOf(
+    consumer("Volume down", Icons.AutoMirrored.Filled.VolumeDown, ConsumerControl.VOLUME_DOWN),
+    consumer("Mute", Icons.AutoMirrored.Filled.VolumeOff, ConsumerControl.MUTE),
+    consumer("Volume up", Icons.AutoMirrored.Filled.VolumeUp, ConsumerControl.VOLUME_UP),
+)
+
+private fun key(description: String, keyCode: Int, text: String? = null, icon: ImageVector? = null, caption: String? = null) =
+    RemoteAction(description, RemoteOutput.Key(keyCode), icons = listOfNotNull(icon), text = text, caption = caption)
+
+private val okAction = key("OK (Enter)", KeyboardLayouts.KEY_ENTER, text = "OK")
+
+private val navigationGrid = listOf(
+    listOf(
+        key("Escape", KeyboardLayouts.KEY_ESC, text = "Esc"),
+        key("Up", KeyboardLayouts.KEY_UP, icon = Icons.Default.KeyboardArrowUp),
+        key("Menu (application key)", KEY_APPLICATION, text = "Menu"),
+    ),
+    listOf(
+        key("Left", KeyboardLayouts.KEY_LEFT, icon = Icons.AutoMirrored.Filled.KeyboardArrowLeft),
+        okAction,
+        key("Right", KeyboardLayouts.KEY_RIGHT, icon = Icons.AutoMirrored.Filled.KeyboardArrowRight),
+    ),
+    listOf(
+        key("Home", KeyboardLayouts.KEY_HOME, text = "Home"),
+        key("Down", KeyboardLayouts.KEY_DOWN, icon = Icons.Default.KeyboardArrowDown),
+        key("End", KeyboardLayouts.KEY_END, text = "End"),
+    ),
+)
+
+private val presentationActions = listOf(
+    key("Start slideshow (F5)", KeyboardLayouts.KEY_F5, text = "Start show", caption = "F5"),
+    key("Blank the presentation screen (B)", KeyboardLayouts.KEY_B, text = "Blank screen", caption = "B"),
+    key("Back (Backspace)", KeyboardLayouts.KEY_BACKSPACE, text = "Back"),
+)
+
+private val pageActions = listOf(
+    key("Page up, previous slide", KeyboardLayouts.KEY_PAGEUP, icon = Icons.Default.KeyboardArrowUp, caption = "Page up"),
+    key("Page down, next slide", KeyboardLayouts.KEY_PAGEDOWN, icon = Icons.Default.KeyboardArrowDown, caption = "Page down"),
+)
+
+private val mouseActions = listOf(
+    RemoteAction("Left click", RemoteOutput.Mouse(0x01), text = "Left"),
+    RemoteAction("Middle click", RemoteOutput.Mouse(0x04), text = "Middle"),
+    RemoteAction("Right click", RemoteOutput.Mouse(0x02), text = "Right"),
+)
+
+private val GROUP_GAP = 16.dp
+private val BUTTON_GAP = 8.dp
+private val DPAD_WIDTH = 216.dp
+private val UPRIGHT_DPAD_WIDTH = 224.dp
 
 private const val KEY_APPLICATION = 0x65
 private const val POSTURE_ENTRY_DEGREES = 20
