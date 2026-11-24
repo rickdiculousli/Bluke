@@ -55,7 +55,8 @@ Severity is Impeccable's scale:
 
 ## Reviewer protocol (so the hill-climb doesn't game itself)
 
-- **Use a fresh Opus session every round.** It gets the evidence pack and this rubric, but not the builder's self-score or earlier review text. Score `main` first as the baseline, then the branch.
+- **Use three fresh Opus reviewers every round.** Each gets the evidence pack and this rubric, but not the builder's self-score, the target, or earlier review text. Each scores `main` first as the baseline, then the branch.
+- **The round's score is the median of the three.** One reviewer's draw can't make or break a round. The builder fixes every P0 and P1, and every P2 that two or more reviewers raise. A P2 raised by only one reviewer is fixed only when it's cheap.
 - **Every finding carries location, before, after and why.** The location is `file:line` or the screenshot name. Findings are grouped by dimension. Each dimension's score cites the findings that set it. A 4 needs a named positive, not just an absence of findings.
 - **Run material-3's `audit` and Impeccable's `critique` as the two raw inputs.** Map their totals onto dimensions A, B, C and F. The 1–10 score is the reviewer's judgment through the caps above, not an average of the two tools.
 - **State what wasn't seen** (motion on device, haptics) instead of assuming a pass.

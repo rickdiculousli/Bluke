@@ -17,6 +17,9 @@ adb logcat -s BlukeHID BlukeLifecycle   # live HID and lifecycle logs from a dev
 
 - `fastTest` excludes any test class annotated `@RunWith(RobolectricTestRunner::class)`, found by scanning `app/src/test` sources. A new test that needs Android framework classes must carry that annotation, or `fastTest` runs it and fails.
 - Screenshot baselines are committed under `app/src/test/screenshots/`; each test passes its own `filePath` to `captureRoboImage`. For light, dark and font-scale captures of one screen, call `captureMatrix` (`app/src/test/java/dev/arnv/bluke/testing/ScreenshotMatrix.kt`) rather than writing the loop again.
+- Compose UI tests with `mainClock.autoAdvance = false`:
+  - State written from a touch handler doesn't recompose until `Snapshot.sendApplyNotifications()` runs, so call it before asserting.
+  - A failed node lookup in a large tree, such as `performScrollTo`, prints the whole semantics tree and can run for minutes. That is a failed lookup, not a hang.
 - There is no lint or formatter task beyond the Android Gradle Plugin defaults. Code style is Kotlin `official`.
 - Release builds sign from `KEYSTORE_PATH`, `STORE_PASSWORD`, `KEY_ALIAS`, `KEY_PASSWORD` (or `local.properties`).
 

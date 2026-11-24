@@ -64,6 +64,22 @@ for _ in $(seq 1 150); do
   [[ "$("$adb" -e shell getprop sys.boot_completed 2>/dev/null | tr -d '\r')" == 1 ]] && break
   sleep 2
 done
+# On a loaded box system_server has died and restarted after boot_completed read 1, failing the rig's
+# first broadcast. Wait until one system_server has stayed up across two checks and answers pm and am.
+prev=""
+ready=""
+for _ in $(seq 1 60); do
+  pid=$("$adb" -e shell pidof system_server 2>/dev/null | tr -d '\r') || pid=""
+  if [[ -n "$pid" && "$pid" == "$prev" ]] \
+    && "$adb" -e shell pm path android 2>/dev/null | grep -q '^package:' \
+    && "$adb" -e shell am broadcast -a dev.arnv.bluke.rig.READY 2>/dev/null | grep -q 'Broadcast completed'; then
+    ready=1
+    break
+  fi
+  prev=$pid
+  sleep 5
+done
+[[ -n "$ready" ]] || echo "emulator.sh: system_server not steady after 5 min; going on" >&2
 serial=$("$adb" devices | awk '/^emulator-.*device$/ {print $1; exit}')
 export ANDROID_SERIAL=$serial
 
