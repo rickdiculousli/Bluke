@@ -59,7 +59,12 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.clearAndSetSemantics
+import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
+import androidx.compose.ui.semantics.isTraversalGroup
+import androidx.compose.ui.semantics.paneTitle
+import androidx.compose.foundation.systemGestureExclusion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.unit.dp
@@ -88,6 +93,8 @@ fun SurfaceTuneSheet(
             Box(
                 Modifier
                     .fillMaxSize()
+                    // The Close button carries this action for TalkBack.
+                    .clearAndSetSemantics { }
                     .background(colors.scrim.copy(alpha = 0.32f))
                     .clickable(
                         interactionSource = remember { MutableInteractionSource() },
@@ -112,6 +119,7 @@ fun SurfaceTuneSheet(
                         .fillMaxHeight()
                         .background(colors.surfaceContainerLow, RoundedCornerShape(topStart = 28.dp, bottomStart = 28.dp))
                         .windowInsetsPadding(WindowInsets.displayCutout.only(WindowInsetsSides.End))
+                        .semantics { paneTitle = title; isTraversalGroup = true }
                         .testTag("surface_tune_sheet"),
                 ) {
                     Row(
@@ -180,7 +188,10 @@ fun TuneSlider(
             valueRange = valueRange,
             steps = steps,
             enabled = enabled,
-            modifier = Modifier.semantics { stateDescription = valueLabel },
+            // Sliders reach the screen's end edge; keep the system Back swipe from stealing the drag.
+            modifier = Modifier
+                .systemGestureExclusion()
+                .semantics { contentDescription = label; stateDescription = valueLabel },
         )
     }
 }
@@ -228,7 +239,8 @@ fun <T> TuneChoice(
 ) {
     Column(modifier, verticalArrangement = Arrangement.spacedBy(8.dp)) {
         Text(label, style = MaterialTheme.typography.bodyLarge, color = MaterialTheme.colorScheme.onSurface)
-        if (options.size <= 3) {
+        // Segments only when every label is a word or two; longer ones would clip at large font scales.
+        if (options.size <= 3 && options.all { optionLabel(it).length <= 10 }) {
             SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth()) {
                 options.forEachIndexed { index, option ->
                     SegmentedButton(

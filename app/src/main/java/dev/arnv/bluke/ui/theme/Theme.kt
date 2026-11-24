@@ -131,6 +131,7 @@ fun rememberAppearanceSettings(): AppearanceSettings {
             if (key == null || key in AppearanceSettings.KEYS) settings = AppearanceSettings.read(changed)
         }
         prefs.registerOnSharedPreferenceChangeListener(listener)
+        settings = AppearanceSettings.read(prefs)
         onDispose { prefs.unregisterOnSharedPreferenceChangeListener(listener) }
     }
     return settings
@@ -138,7 +139,8 @@ fun rememberAppearanceSettings(): AppearanceSettings {
 
 /**
  * Bluke's theme. [forceDark] draws the dark scheme whatever the theme mode says: the input surfaces
- * are hardware you hold, so they are always dark, in the user's accent.
+ * are hardware you hold, so they are always dark, in the user's accent. Pure black is an app
+ * appearance for dark mode; the surfaces keep their own tonal chrome over the keyboard case.
  */
 @Composable
 fun MyApplicationTheme(
@@ -147,7 +149,8 @@ fun MyApplicationTheme(
     content: @Composable () -> Unit,
 ) {
     val context = LocalContext.current
-    val settings = rememberAppearanceSettings()
+    val stored = rememberAppearanceSettings()
+    val settings = if (forceDark) stored.copy(blackBackground = false) else stored
     val dark = forceDark || settings.themeMode.isDark(darkTheme)
     val colorScheme = remember(settings, dark) { blukeColorScheme(context, settings, dark) }
     MaterialTheme(colorScheme = colorScheme, typography = Typography, content = content)
